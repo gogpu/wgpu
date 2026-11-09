@@ -27,7 +27,7 @@ import (
 
 // overrideBackend selects one backend for a public API test.
 type overrideBackend struct {
-	name     string
+	name     backendName
 	backends gputypes.Backends
 	backend  gputypes.Backend // the adapter's backend; ignored for software
 	software bool             // request the CPU fallback adapter
@@ -35,16 +35,16 @@ type overrideBackend struct {
 }
 
 var overrideBackends = []overrideBackend{
-	{name: "vulkan", backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan},
-	{name: "dx12-fxc", backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12},
-	{name: "dx12-dxil", backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12, dxil: true},
-	{name: "gles", backends: gputypes.BackendsGL, backend: gputypes.BackendGL},
-	{name: "metal", backends: gputypes.BackendsMetal, backend: gputypes.BackendMetal},
+	{name: backendVulkan, backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan},
+	{name: backendDX12FXC, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12},
+	{name: backendDX12DXIL, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12, dxil: true},
+	{name: backendGLES, backends: gputypes.BackendsGL, backend: gputypes.BackendGL},
+	{name: backendMetal, backends: gputypes.BackendsMetal, backend: gputypes.BackendMetal},
 	// Primary, not All: with GL in the mask every software subtest would also
 	// create and destroy a GLES instance, and destroying another GLES
 	// instance in one process can crash in wglDeleteContext (an existing GLES
 	// bug, not one of these tests).
-	{name: "software", backends: gputypes.BackendsPrimary, software: true},
+	{name: backendSoftware, backends: gputypes.BackendsPrimary, software: true},
 }
 
 // forEachOverrideBackend runs fn with a device of every backend that has an
@@ -63,7 +63,7 @@ func forEachOverrideBackendFeatures(t *testing.T, required gputypes.DownlevelFla
 	fn func(t *testing.T, device *wgpu.Device)) {
 	t.Helper()
 	for _, b := range overrideBackends {
-		t.Run(b.name, func(t *testing.T) {
+		t.Run(string(b.name), func(t *testing.T) {
 			// DX12 reads the variable when the device is created.
 			if b.dxil {
 				t.Setenv("GOGPU_DX12_DXIL", "1")
@@ -147,29 +147,29 @@ func TestOverrideTargetAdapter(t *testing.T) {
 	soft := gputypes.AdapterInfo{Name: "Software Renderer", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendEmpty}
 	lavapipe := gputypes.AdapterInfo{Name: "llvmpipe", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendVulkan}
 	llvmpipeGL := gputypes.AdapterInfo{Name: "llvmpipe (LLVM 17.0.6, 256 bits)", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendGL}
-	byName := map[string]overrideBackend{}
+	byName := map[backendName]overrideBackend{}
 	for _, b := range overrideBackends {
 		byName[b.name] = b
 	}
 	for _, tc := range []struct {
-		entry string
+		entry backendName
 		info  gputypes.AdapterInfo
 		want  bool
 	}{
-		{"dx12-fxc", warp, true},
-		{"dx12-dxil", warp, true},
-		{"dx12-fxc", iris, true},
-		{"dx12-fxc", soft, false},
-		{"software", soft, true},
-		{"software", warp, false},
-		{"software", lavapipe, false},
-		{"software", llvmpipeGL, false},
-		{"vulkan", lavapipe, true},
-		{"vulkan", warp, false},
-		{"vulkan", soft, false},
-		{"gles", llvmpipeGL, true},
-		{"gles", lavapipe, false},
-		{"gles", soft, false},
+		{backendDX12FXC, warp, true},
+		{backendDX12DXIL, warp, true},
+		{backendDX12FXC, iris, true},
+		{backendDX12FXC, soft, false},
+		{backendSoftware, soft, true},
+		{backendSoftware, warp, false},
+		{backendSoftware, lavapipe, false},
+		{backendSoftware, llvmpipeGL, false},
+		{backendVulkan, lavapipe, true},
+		{backendVulkan, warp, false},
+		{backendVulkan, soft, false},
+		{backendGLES, llvmpipeGL, true},
+		{backendGLES, lavapipe, false},
+		{backendGLES, soft, false},
 	} {
 		if got := isOverrideTarget(byName[tc.entry], tc.info); got != tc.want {
 			t.Errorf("isOverrideTarget(%s, %q %v %v) = %v, want %v",

@@ -49,16 +49,15 @@ func TestSPIRVCapabilitiesPerDevice(t *testing.T) {
 	on := vk.Bool32(vk.True)
 	dot := &vk.PhysicalDeviceShaderIntegerDotProductFeatures{ShaderIntegerDotProduct: on}
 	demote := &vk.PhysicalDeviceShaderDemoteToHelperInvocationFeatures{ShaderDemoteToHelperInvocation: on}
-	feature := func(fs ...gputypes.Feature) gputypes.Features {
-		var r gputypes.Features
-		for _, f := range fs {
-			r.Insert(f)
-		}
-		return r
-	}
+	subgroupCapabilities := []spirv.Capability{spirv.CapabilityGroupNonUniform, spirv.CapabilityGroupNonUniformVote,
+		spirv.CapabilityGroupNonUniformArithmetic, spirv.CapabilityGroupNonUniformBallot,
+		spirv.CapabilityGroupNonUniformShuffle, spirv.CapabilityGroupNonUniformShuffleRel,
+		spirv.CapabilityGroupNonUniformQuad}
 	for _, c := range []struct {
+		// name labels a row that no single requested feature names; a row
+		// with requested features is named after them (Feature.String).
 		name      string
-		requested gputypes.Features
+		requested []gputypes.Feature
 		downlevel gputypes.DownlevelFlags
 		ext       extendedFeatureSupport
 		want      []spirv.Capability // beyond alwaysAvailableCapabilities
@@ -67,37 +66,29 @@ func TestSPIRVCapabilitiesPerDevice(t *testing.T) {
 		{name: "cube arrays and sample shading",
 			downlevel: gputypes.DownlevelFlagsCubeArrayTextures | gputypes.DownlevelFlagsMultisampledShading,
 			want:      []spirv.Capability{spirv.CapabilitySampledCubeArray, spirv.CapabilitySampleRateShading}},
-		{name: "primitive index", requested: feature(gputypes.FeaturePrimitiveIndex),
+		{requested: []gputypes.Feature{gputypes.FeaturePrimitiveIndex},
 			want: []spirv.Capability{spirv.CapabilityGeometry}},
-		{name: "subgroups", requested: feature(gputypes.FeatureSubgroupOperations),
-			want: []spirv.Capability{spirv.CapabilityGroupNonUniform, spirv.CapabilityGroupNonUniformVote,
-				spirv.CapabilityGroupNonUniformArithmetic, spirv.CapabilityGroupNonUniformBallot,
-				spirv.CapabilityGroupNonUniformShuffle, spirv.CapabilityGroupNonUniformShuffleRel,
-				spirv.CapabilityGroupNonUniformQuad}},
-		{name: "vertex subgroups", requested: feature(gputypes.FeatureSubgroupVertex),
-			want: []spirv.Capability{spirv.CapabilityGroupNonUniform, spirv.CapabilityGroupNonUniformVote,
-				spirv.CapabilityGroupNonUniformArithmetic, spirv.CapabilityGroupNonUniformBallot,
-				spirv.CapabilityGroupNonUniformShuffle, spirv.CapabilityGroupNonUniformShuffleRel,
-				spirv.CapabilityGroupNonUniformQuad}},
-		{name: "number types", requested: feature(gputypes.FeatureShaderInt64, gputypes.FeatureShaderF16, gputypes.FeatureShaderI16),
+		{requested: []gputypes.Feature{gputypes.FeatureSubgroupOperations}, want: subgroupCapabilities},
+		{requested: []gputypes.Feature{gputypes.FeatureSubgroupVertex}, want: subgroupCapabilities},
+		{requested: []gputypes.Feature{gputypes.FeatureShaderInt64, gputypes.FeatureShaderF16, gputypes.FeatureShaderI16},
 			want: []spirv.Capability{spirv.CapabilityInt64, spirv.CapabilityFloat16, spirv.CapabilityInt16}},
-		{name: "64-bit atomics min/max", requested: feature(gputypes.FeatureShaderInt64AtomicMinMax),
+		{requested: []gputypes.Feature{gputypes.FeatureShaderInt64AtomicMinMax},
 			want: []spirv.Capability{spirv.CapabilityInt64Atomics}},
-		{name: "64-bit atomics all ops", requested: feature(gputypes.FeatureShaderInt64AtomicAllOps),
+		{requested: []gputypes.Feature{gputypes.FeatureShaderInt64AtomicAllOps},
 			want: []spirv.Capability{spirv.CapabilityInt64Atomics}},
-		{name: "f32 atomics", requested: feature(gputypes.FeatureShaderFloat32Atomic),
+		{requested: []gputypes.Feature{gputypes.FeatureShaderFloat32Atomic},
 			want: []spirv.Capability{spirv.CapabilityAtomicFloat32AddEXT}},
-		{name: "clip distances", requested: feature(gputypes.FeatureClipDistances),
+		{requested: []gputypes.Feature{gputypes.FeatureClipDistances},
 			want: []spirv.Capability{spirv.CapabilityClipDistance}},
-		{name: "barycentrics", requested: feature(gputypes.FeatureShaderBarycentrics),
+		{requested: []gputypes.Feature{gputypes.FeatureShaderBarycentrics},
 			want: []spirv.Capability{spirv.CapabilityFragmentBarycentricKHR}},
-		{name: "per-vertex", requested: feature(gputypes.FeatureShaderPerVertex),
+		{requested: []gputypes.Feature{gputypes.FeatureShaderPerVertex},
 			want: []spirv.Capability{spirv.CapabilityFragmentBarycentricKHR}},
-		{name: "draw index", requested: feature(gputypes.FeatureShaderDrawIndex),
+		{requested: []gputypes.Feature{gputypes.FeatureShaderDrawIndex},
 			want: []spirv.Capability{spirv.CapabilityDrawParameters}},
-		{name: "bgra8unorm storage", requested: feature(gputypes.FeatureBGRA8UnormStorage),
+		{requested: []gputypes.Feature{gputypes.FeatureBGRA8UnormStorage},
 			want: []spirv.Capability{spirv.CapabilityStorageImageWriteWithoutFormat}},
-		{name: "ray query", requested: feature(gputypes.FeatureRayQuery),
+		{requested: []gputypes.Feature{gputypes.FeatureRayQuery},
 			want: []spirv.Capability{spirv.CapabilityRayQueryKHR}},
 		{name: "integer dot product", ext: extendedFeatureSupport{integerDot: dot}, want: dotProductCapabilities},
 		{name: "integer dot product struct, feature off",
@@ -105,13 +96,24 @@ func TestSPIRVCapabilitiesPerDevice(t *testing.T) {
 		{name: "demote to helper", ext: extendedFeatureSupport{demote: demote},
 			want: []spirv.Capability{spirv.CapabilityDemoteToHelperInvocation}},
 	} {
-		got := capabilityList(spirvCapabilities(c.requested, c.downlevel, &c.ext))
-		want := slices.Concat(alwaysAvailableCapabilities, c.want)
-		slices.Sort(want)
-		want = slices.Compact(want)
-		if !slices.Equal(got, want) {
-			t.Errorf("%s: capabilities %v, want %v", c.name, got, want)
+		var requested gputypes.Features
+		name := c.name
+		for i, f := range c.requested {
+			requested.Insert(f)
+			if i > 0 {
+				name += "+"
+			}
+			name += f.String()
 		}
+		t.Run(name, func(t *testing.T) {
+			got := capabilityList(spirvCapabilities(requested, c.downlevel, &c.ext))
+			want := slices.Concat(alwaysAvailableCapabilities, c.want)
+			slices.Sort(want)
+			want = slices.Compact(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("capabilities %v, want %v", got, want)
+			}
+		})
 	}
 }
 

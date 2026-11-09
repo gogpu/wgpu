@@ -55,7 +55,7 @@ const discardHi = 48.0
 // naga P0-DXIL-068, so every column turned green under GOGPU_DX12_DXIL=1.
 func TestFragmentDiscard(t *testing.T) {
 	for _, b := range overrideBackends {
-		t.Run(b.name, func(t *testing.T) {
+		t.Run(string(b.name), func(t *testing.T) {
 			if b.dxil {
 				t.Setenv("GOGPU_DX12_DXIL", "1")
 			} else {

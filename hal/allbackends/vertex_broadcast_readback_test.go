@@ -68,7 +68,7 @@ func TestVertexBufferBeforePipeline(t *testing.T) {
 func forEachBackendAdapter(t *testing.T, required gputypes.DownlevelFlags, fn func(t *testing.T, b overrideBackend, device *wgpu.Device)) {
 	t.Helper()
 	for _, b := range overrideBackends {
-		t.Run(b.name, func(t *testing.T) {
+		t.Run(string(b.name), func(t *testing.T) {
 			if b.dxil {
 				t.Setenv("GOGPU_DX12_DXIL", "1")
 			} else {

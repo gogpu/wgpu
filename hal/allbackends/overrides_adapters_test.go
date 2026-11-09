@@ -28,26 +28,26 @@ import (
 // Subtests are named backend/adapter/case, so one adapter can be selected
 // with -run (for example to give each Vulkan adapter its own validation log).
 func TestOverridesAllAdapters(t *testing.T) {
-	forEachHALAdapter(t, func(t *testing.T, _ string, a *hal.ExposedAdapter, _ *vvlCapture) {
+	forEachHALAdapter(t, func(t *testing.T, _ backendName, a *hal.ExposedAdapter, _ *vvlCapture) {
 		runOverrideCasesOnAdapter(t, a)
 	})
 }
 
 // halBackendConfig is one HAL backend variant that the all-adapter tests run.
 type halBackendConfig struct {
-	name    string // the corpus backend name: vulkan, dx12-fxc, dx12-dxil, gles, metal, software
+	name    backendName
 	variant gputypes.Backend
 	mask    gputypes.Backends
 	dxil    bool // DX12 with naga's DXIL backend instead of HLSL+FXC
 }
 
 var halBackendConfigs = []halBackendConfig{
-	{name: "vulkan", variant: gputypes.BackendVulkan, mask: gputypes.BackendsVulkan},
-	{name: "dx12-fxc", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12},
-	{name: "dx12-dxil", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12, dxil: true},
-	{name: "gles", variant: gputypes.BackendGL, mask: gputypes.BackendsGL},
-	{name: "metal", variant: gputypes.BackendMetal, mask: gputypes.BackendsMetal},
-	{name: "software", variant: gputypes.BackendEmpty, mask: gputypes.BackendsAll},
+	{name: backendVulkan, variant: gputypes.BackendVulkan, mask: gputypes.BackendsVulkan},
+	{name: backendDX12FXC, variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12},
+	{name: backendDX12DXIL, variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12, dxil: true},
+	{name: backendGLES, variant: gputypes.BackendGL, mask: gputypes.BackendsGL},
+	{name: backendMetal, variant: gputypes.BackendMetal, mask: gputypes.BackendsMetal},
+	{name: backendSoftware, variant: gputypes.BackendEmpty, mask: gputypes.BackendsAll},
 }
 
 // forEachHALAdapter runs fn in a subtest backend/adapter for every adapter of
@@ -57,10 +57,10 @@ var halBackendConfigs = []halBackendConfig{
 // (startVulkanValidation): fn gets the capture to drain per step, and any
 // message left at the end fails the backend's subtest. vvl is nil for the
 // other backends.
-func forEachHALAdapter(t *testing.T, fn func(t *testing.T, backend string, a *hal.ExposedAdapter, vvl *vvlCapture)) {
+func forEachHALAdapter(t *testing.T, fn func(t *testing.T, backend backendName, a *hal.ExposedAdapter, vvl *vvlCapture)) {
 	t.Helper()
 	for _, cfg := range halBackendConfigs {
-		t.Run(cfg.name, func(t *testing.T) {
+		t.Run(string(cfg.name), func(t *testing.T) {
 			// DX12 reads the variable when a device is opened.
 			if cfg.dxil {
 				t.Setenv("GOGPU_DX12_DXIL", "1")
