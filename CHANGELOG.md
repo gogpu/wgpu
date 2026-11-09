@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Vulkan: WGSL `dot4I8Packed` and `dot4U8Packed` no longer emit instructions the device never enabled** (P2-VK-014). naga got no capability set, treated every capability as available and wrote the native packed dot product, which needs `shaderIntegerDotProduct`; the validation layer reported `VUID-VkShaderModuleCreateInfo-pCode-08740` on Intel and NVIDIA. The device now gives naga its SPIR-V capabilities as Rust wgpu-hal does, so naga polyfills the dot product where the feature is missing, and `VK_KHR_shader_integer_dot_product` is enabled wherever it is supported.
+
+### Changed
+
+- **Vulkan: `discard` now demotes the fragment to a helper invocation instead of terminating it** (P2-VK-018). On Vulkan devices with `VK_EXT_shader_demote_to_helper_invocation` (promoted to Vulkan 1.3), `discard` follows WGSL's semantics: **a discarded fragment keeps running until the end of the shader**, writing nothing to storage or to its color targets, so derivatives in the rest of its quad stay defined. A shader that does heavy work after a `discard` now pays for it on the discarded fragments too. It used to be lowered to `OpKill`, which ends the invocation and leaves the quad's later derivatives undefined. Devices without the extension keep `OpKill`; the choice matches Dawn on Vulkan. New readback tests pin, on every backend, that a store before `discard` lands while one after it does not, and that the quad's fine derivatives stay exact after a lane discards.
+
 ## [0.34.11] - 2026-11-08
 
 A lifetime and validation patch: resources released after recording stay alive through the work that uses them,

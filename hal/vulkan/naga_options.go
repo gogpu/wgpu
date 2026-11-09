@@ -6,6 +6,7 @@
 package vulkan
 
 import (
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/backend"
 	"github.com/gogpu/naga/spirv"
 )
@@ -33,8 +34,14 @@ var instanceAPIVersion = vkMakeVersion(1, 2, 0)
 //     the device enabled shaderZeroInitializeWorkgroupMemory, Polyfill (zero
 //     stores in the shader) otherwise. A compute stage that turns zeroing
 //     off gets None (stageSPIRVOptions).
+//   - Discard: OpDemoteToHelperInvocation (WGSL's helper-invocation
+//     semantics) where the device enabled shaderDemoteToHelperInvocation, as
+//     Dawn lowers it; OpKill otherwise, which is Rust naga's only lowering.
 //   - Loop bounding and ray-query init tracking keep naga's defaults, which
 //     are what wgpu-hal passes.
+//
+// AllowedCapabilities depends on the features the device is opened with and
+// is set by Open (spirvCapabilities).
 func spirvOptions(deviceAPIVersion uint32, ext *extendedFeatureSupport) spirv.Options {
 	zeroInit := backend.ZeroInitWorkgroupPolyfill
 	if ext.zeroInitializeWorkgroupMemory() {
@@ -50,7 +57,74 @@ func spirvOptions(deviceAPIVersion uint32, ext *extendedFeatureSupport) spirv.Op
 			BindingArray: backend.BoundsCheckUnchecked,
 		},
 		ZeroInitializeWorkgroupMemory: zeroInit,
+		DemoteToHelperInvocation:      ext.demoteToHelperInvocation(),
 	}
+}
+
+// SPIR-V capabilities that naga's spirv package does not name (values from
+// the SPIR-V specification, Capability table; checked against the Vulkan
+// SDK's spirv-headers/spirv.h).
+const (
+	capabilityStorageImageWriteWithoutFormat spirv.Capability = 56
+	capabilityDrawParameters                 spirv.Capability = 4427
+	capabilityRayQueryKHR                    spirv.Capability = 4472
+	capabilityDotProductInputAll             spirv.Capability = 6016
+	capabilityDotProductInput4x8Bit          spirv.Capability = 6017
+)
+
+// spirvCapabilities returns the SPIR-V capabilities a module may use on a
+// device opened with requested, as Rust wgpu-hal lists them for naga
+// (vulkan/adapter.rs, Adapter::open): the capabilities every Vulkan device
+// accepts, then each one only where the device has what grants it. naga
+// checks the set where it has a fallback — today the packed dot product,
+// which it polyfills without the DotProduct capabilities — so a nil set
+// (every capability) let it emit instructions a device without
+// shaderIntegerDotProduct rejects (P2-VK-014).
+//
+// Rust entries for features our Vulkan backend has no counterpart for
+// (multiview, non-uniform binding-array indexing, 64-bit texture atomics,
+// ray-tracing pipelines, mesh shaders, cooperative matrices, Int8) are left
+// out; they join the list with the feature. Demote-to-helper has no Rust
+// entry (Rust naga never emits it) and is listed where the device enabled it.
+func spirvCapabilities(requested gputypes.Features, downlevel gputypes.DownlevelFlags, ext *extendedFeatureSupport) map[spirv.Capability]struct{} {
+	set := map[spirv.Capability]struct{}{}
+	add := func(on bool, caps ...spirv.Capability) {
+		if !on {
+			return
+		}
+		for _, c := range caps {
+			set[c] = struct{}{}
+		}
+	}
+	// Vulkan spec, "SPIR-V Environment": always available.
+	add(true, spirv.CapabilityShader, spirv.CapabilityMatrix, spirv.CapabilitySampled1D, spirv.CapabilityImage1D,
+		spirv.CapabilityImageQuery, spirv.CapabilityDerivativeControl, spirv.CapabilityStorageImageExtendedFormats)
+	add(downlevel.Contains(gputypes.DownlevelFlagsCubeArrayTextures), spirv.CapabilitySampledCubeArray)
+	add(downlevel.Contains(gputypes.DownlevelFlagsMultisampledShading), spirv.CapabilitySampleRateShading)
+	add(requested.Contains(gputypes.FeaturePrimitiveIndex), spirv.CapabilityGeometry)
+	add(requested.Contains(gputypes.FeatureSubgroupOperations) || requested.Contains(gputypes.FeatureSubgroupVertex),
+		spirv.CapabilityGroupNonUniform, spirv.CapabilityGroupNonUniformVote, spirv.CapabilityGroupNonUniformArithmetic,
+		spirv.CapabilityGroupNonUniformBallot, spirv.CapabilityGroupNonUniformShuffle,
+		spirv.CapabilityGroupNonUniformShuffleRel, spirv.CapabilityGroupNonUniformQuad)
+	add(requested.Contains(gputypes.FeatureBGRA8UnormStorage), capabilityStorageImageWriteWithoutFormat)
+	add(requested.Contains(gputypes.FeatureRayQuery), capabilityRayQueryKHR)
+	add(requested.Contains(gputypes.FeatureShaderInt64), spirv.CapabilityInt64)
+	add(requested.Contains(gputypes.FeatureShaderF16), spirv.CapabilityFloat16)
+	add(requested.Contains(gputypes.FeatureShaderI16), spirv.CapabilityInt16)
+	add(requested.Contains(gputypes.FeatureShaderInt64AtomicMinMax) || requested.Contains(gputypes.FeatureShaderInt64AtomicAllOps),
+		spirv.CapabilityInt64Atomics)
+	add(requested.Contains(gputypes.FeatureShaderFloat32Atomic), spirv.CapabilityAtomicFloat32AddEXT)
+	add(requested.Contains(gputypes.FeatureClipDistances), spirv.CapabilityClipDistance)
+	// Vulkan bundles barycentrics and per-vertex inputs under one feature.
+	add(requested.Contains(gputypes.FeatureShaderBarycentrics) || requested.Contains(gputypes.FeatureShaderPerVertex),
+		spirv.CapabilityFragmentBarycentricKHR)
+	add(requested.Contains(gputypes.FeatureShaderDrawIndex), capabilityDrawParameters)
+	// VK_KHR_shader_integer_dot_product's SPIR-V capabilities, enabled with
+	// the feature wherever supported (extendedFeatureSupport.enable).
+	add(ext.shaderIntegerDotProduct(), capabilityDotProductInputAll, capabilityDotProductInput4x8Bit,
+		spirv.CapabilityDotProductInput4x8BitPacked, spirv.CapabilityDotProduct)
+	add(ext.demoteToHelperInvocation(), spirv.CapabilityDemoteToHelperInvocation)
+	return set
 }
 
 // stageSPIRVOptions returns device's SPIR-V options for one pipeline stage:
