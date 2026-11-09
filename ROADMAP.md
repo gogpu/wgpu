@@ -19,8 +19,10 @@
 
 ---
 
-## Current State: v0.34.11
+## Current State: v0.34.12
 
+✅ **Vulkan shaders use only what the device enabled, and `discard` follows WGSL (v0.34.12)** — naga gets the device's SPIR-V capabilities (packed dot products native or polyfilled), `discard` demotes to a helper invocation where `VK_EXT_shader_demote_to_helper_invocation` is supported
+✅ **naga's readback corpus runs on every adapter in the test suite (v0.34.12)** — `TestReadbackCorpus` compares the words every backend writes with the corpus's expected values
 ✅ **Resources released after recording stay alive through the work that uses them (v0.34.11)** — a `QuerySet` and a `PipelineLayout` are reference counted as samplers are; a released layout is refused at creation instead of reaching `vkAllocateDescriptorSets`; a pipeline keeps its layout until its own destruction
 ✅ **Pass input is validated as the spec requires (v0.34.11)** — `SetViewport` per spec section and Rust, vertex formats gputypes does not define refused at pipeline creation
 ✅ **GLES works on real OpenGL ES contexts (v0.34.11)** — MSAA as renderbuffers, `glMapBufferRange` for mapping, immutable storage textures for compute, BC from core GL versions and ARB names
@@ -138,12 +140,18 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.12:**
+**Next patch release, v0.34.13:**
 - [ ] GLES: compute blit for non-renderable copy sources; snorm readback without EXT_render_snorm; vertex-storage flag tightened against Mesa d3d12 (P2-GLES-023, P1-GLES-025 items 2 and 4)
 - [ ] Metal: compressed small mips and HDR formats (P2-MTL-001)
 - [ ] Software: ASTC sampling (P1-SW-029 step 2)
 - [ ] Release only: `BindGroupLayout` reference counted as Rust and Dawn do; the Release-vs-create race contract (P2-CORE-027, P2-CORE-026)
 - [ ] A tracked WARP + GPU-based-validation test package (P2-INFRA-009, P1-CORE-028 for the selection API)
+
+**Patch release v0.34.12** (2026-11-09, naga v0.21.8):
+- [x] Vulkan: the device's SPIR-V capability set for naga, integer dot products enabled where supported (P2-VK-014)
+- [x] Vulkan: `discard` as `OpDemoteToHelperInvocation` where supported (P2-VK-018); software: the same semantics in the interpreter (P3-SW-035)
+- [x] `TestReadbackCorpus`: naga's GPU readback corpus on every adapter of every backend (P1-INFRA-001)
+- [x] naga v0.21.8, gpucontext v0.32.0
 
 **Patch release v0.34.11** (2026-11-08, naga v0.21.7):
 - [x] `QuerySet` reference counted; pipelines keep their `PipelineLayout` alive; released layouts refused at creation (P1-CORE-021, P2-CORE-022, P2-CORE-023)
