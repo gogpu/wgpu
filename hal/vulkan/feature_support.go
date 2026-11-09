@@ -43,6 +43,16 @@ const (
 	// null initializer (naga's Native mode). Vulkan 1.3 promoted it.
 	extZeroInitWorkgroupMemory = "VK_KHR_zero_initialize_workgroup_memory"
 
+	// extShaderIntegerDotProduct lets a shader use the SPIR-V DotProduct
+	// capabilities (WGSL dot4I8Packed, dot4U8Packed) instead of naga's
+	// polyfill. Vulkan 1.3 promoted it.
+	extShaderIntegerDotProduct = "VK_KHR_shader_integer_dot_product"
+
+	// extShaderDemoteToHelperInvocation lets a shader lower WGSL discard to
+	// OpDemoteToHelperInvocation, the helper-invocation semantics WGSL
+	// specifies, instead of OpKill. Vulkan 1.3 promoted it.
+	extShaderDemoteToHelperInvocation = "VK_EXT_shader_demote_to_helper_invocation"
+
 	// extSubgroupSizeControl lets a pipeline stage run with any subgroup size
 	// the device picks (ALLOW_VARYING_SUBGROUP_SIZE), which a device with the
 	// subgroup feature sets on every stage. Vulkan 1.3 promoted it.
@@ -100,6 +110,8 @@ type extendedFeatureSupport struct {
 	robustness2 *vk.PhysicalDeviceRobustness2FeaturesKHR
 	zeroInitWG  *vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
 	sizeControl *vk.PhysicalDeviceSubgroupSizeControlFeatures
+	integerDot  *vk.PhysicalDeviceShaderIntegerDotProductFeatures
+	demote      *vk.PhysicalDeviceShaderDemoteToHelperInvocationFeatures
 	// subgroup is VkPhysicalDeviceSubgroupProperties, read through
 	// vkGetPhysicalDeviceProperties2 on Vulkan 1.1 and later.
 	subgroup *vk.PhysicalDeviceSubgroupProperties
@@ -175,6 +187,19 @@ func (s *extendedFeatureSupport) allowVaryingSubgroupSize(requested gputypes.Fea
 // PrivateCapabilities::zero_initialize_workgroup_memory).
 func (s *extendedFeatureSupport) zeroInitializeWorkgroupMemory() bool {
 	return s.zeroInitWG != nil && s.zeroInitWG.ShaderZeroInitializeWorkgroupMemory != 0
+}
+
+// shaderIntegerDotProduct reports shaderIntegerDotProduct, behind the SPIR-V
+// DotProduct capabilities (Rust PrivateCapabilities::shader_integer_dot_product).
+func (s *extendedFeatureSupport) shaderIntegerDotProduct() bool {
+	return s.integerDot != nil && s.integerDot.ShaderIntegerDotProduct != 0
+}
+
+// demoteToHelperInvocation reports shaderDemoteToHelperInvocation, behind
+// OpDemoteToHelperInvocation (Dawn: DeviceExt::DemoteToHelperInvocation and
+// the toggle vulkan_use_demote_to_helper_invocation_extension).
+func (s *extendedFeatureSupport) demoteToHelperInvocation() bool {
+	return s.demote != nil && s.demote.ShaderDemoteToHelperInvocation != 0
 }
 
 // robustBufferAccess2 reports whether the device bounds-checks shader buffer
@@ -393,6 +418,20 @@ func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, props *vk.Phy
 		next = &zeroInitWG.PNext
 		s.zeroInitWG = &zeroInitWG
 	}
+	var integerDot vk.PhysicalDeviceShaderIntegerDotProductFeatures
+	if s.apiVersion >= vkMakeVersion(1, 3, 0) || s.extensions[extShaderIntegerDotProduct] {
+		integerDot.SType = vk.StructureTypePhysicalDeviceShaderIntegerDotProductFeatures
+		*next = (*uintptr)(unsafe.Pointer(&integerDot))
+		next = &integerDot.PNext
+		s.integerDot = &integerDot
+	}
+	var demote vk.PhysicalDeviceShaderDemoteToHelperInvocationFeatures
+	if s.apiVersion >= vkMakeVersion(1, 3, 0) || s.extensions[extShaderDemoteToHelperInvocation] {
+		demote.SType = vk.StructureTypePhysicalDeviceShaderDemoteToHelperInvocationFeatures
+		*next = (*uintptr)(unsafe.Pointer(&demote))
+		next = &demote.PNext
+		s.demote = &demote
+	}
 	var sizeControl vk.PhysicalDeviceSubgroupSizeControlFeatures
 	if s.hasSubgroupSizeControl() {
 		sizeControl.SType = vk.StructureTypePhysicalDeviceSubgroupSizeControlFeatures
@@ -509,6 +548,8 @@ type deviceFeatureChain struct {
 	robustness2 vk.PhysicalDeviceRobustness2FeaturesKHR
 	zeroInitWG  vk.PhysicalDeviceZeroInitializeWorkgroupMemoryFeatures
 	sizeControl vk.PhysicalDeviceSubgroupSizeControlFeatures
+	integerDot  vk.PhysicalDeviceShaderIntegerDotProductFeatures
+	demote      vk.PhysicalDeviceShaderDemoteToHelperInvocationFeatures
 }
 
 // enable fills c with the features to create the device with and returns
@@ -627,6 +668,27 @@ func (s *extendedFeatureSupport) enable(c *deviceFeatureChain, requested gputype
 		}
 		c.sizeControl.SubgroupSizeControl = vk.Bool32(vk.True)
 		link(vk.StructureTypePhysicalDeviceSubgroupSizeControlFeatures, &c.sizeControl.SType, &c.sizeControl.PNext, unsafe.Pointer(&c.sizeControl))
+	}
+	// Integer dot products, wherever supported, as Rust enables them
+	// (from_extensions_and_requested_features; get_required_extensions):
+	// spirvCapabilities then lets naga emit the native DotProduct
+	// instructions, which need the feature (VUID-VkShaderModuleCreateInfo-pCode-08740).
+	if s.shaderIntegerDotProduct() {
+		if s.apiVersion < vkMakeVersion(1, 3, 0) {
+			extensions = append(extensions, extShaderIntegerDotProduct+"\x00")
+		}
+		c.integerDot.ShaderIntegerDotProduct = vk.Bool32(vk.True)
+		link(vk.StructureTypePhysicalDeviceShaderIntegerDotProductFeatures, &c.integerDot.SType, &c.integerDot.PNext, unsafe.Pointer(&c.integerDot))
+	}
+	// Demote-to-helper, wherever supported, as Dawn enables it by default
+	// (PhysicalDeviceVk.cpp; Rust wgpu-hal has no demote path): spirvOptions
+	// then lowers WGSL discard to OpDemoteToHelperInvocation.
+	if s.demoteToHelperInvocation() {
+		if s.apiVersion < vkMakeVersion(1, 3, 0) {
+			extensions = append(extensions, extShaderDemoteToHelperInvocation+"\x00")
+		}
+		c.demote.ShaderDemoteToHelperInvocation = vk.Bool32(vk.True)
+		link(vk.StructureTypePhysicalDeviceShaderDemoteToHelperInvocationFeatures, &c.demote.SType, &c.demote.PNext, unsafe.Pointer(&c.demote))
 	}
 	return pNext, extensions
 }
