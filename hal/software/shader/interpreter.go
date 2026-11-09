@@ -28,8 +28,11 @@ import (
 )
 
 // ErrDiscarded is returned by Execute, ExecuteWithContext and ExecuteWithDebug
-// when a fragment invocation executed OpKill or OpTerminateInvocation (WGSL
-// discard). The caller must write no color, depth or stencil for the fragment.
+// when a fragment invocation was discarded: it executed OpKill or
+// OpTerminateInvocation, which end it, or OpDemoteToHelperInvocation (WGSL
+// discard as the software device compiles it), after which it ran to its end
+// as a helper. The caller must write no color, depth or stencil for the
+// fragment.
 var ErrDiscarded = errors.New("spirv: fragment invocation discarded")
 
 // Execute runs the named entry point with the given input variable values.
@@ -99,6 +102,11 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 		m.putInterpreter(interp)
 		return nil, err
 	}
+	if interp.demoted {
+		// Ran to its end as a helper: the fragment writes nothing.
+		m.putInterpreter(interp)
+		return nil, ErrDiscarded
+	}
 
 	outputs := make(map[uint32]Value)
 	interp.collectOutputs(outputs)
@@ -166,6 +174,16 @@ type interpreter struct {
 	helper bool
 	quadPC int
 
+	// demoted is set by OpDemoteToHelperInvocation (WGSL discard, P3-SW-035):
+	// the invocation turned into a helper and runs to its end, so the rest of
+	// its quad keeps the values its derivatives need, writing nothing. When
+	// it ends, the entry point reports ErrDiscarded, as for OpKill.
+	demoted bool
+	// parent is the caller's frame for a called function, nil for the entry
+	// point. A demotion inside a callee marks every frame of the invocation
+	// up to the entry point, which go on as helpers after the call returns.
+	parent *interpreter
+
 	// debug holds the debug context for breakpoints, tracing, and watch variables.
 	// When nil, all debug logic is skipped (zero overhead on the hot path).
 	debug *DebugContext
@@ -228,6 +246,8 @@ func (m *Module) putInterpreter(interp *interpreter) {
 	interp.quad = false
 	interp.helper = false
 	interp.quadPC = 0
+	interp.demoted = false
+	interp.parent = nil
 	m.interpPool.Put(interp)
 }
 
@@ -1041,6 +1061,15 @@ func (interp *interpreter) run() error {
 			// function, and the fragment must write nothing (P1-SW-016).
 			return ErrDiscarded
 
+		case OpDemoteToHelperInvocation:
+			// WGSL discard: the invocation becomes a helper and continues
+			// (P3-SW-035). Every frame of the invocation is marked, so stores
+			// after the demotion are dropped in the callee and in its callers.
+			for f := interp; f != nil; f = f.parent {
+				f.helper = true
+				f.demoted = true
+			}
+
 		case OpUnreachable:
 			// Should never be reached in valid SPIR-V.
 			return fmt.Errorf("spirv: executed OpUnreachable")
@@ -1472,6 +1501,8 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (result 
 	child.syncBarriers = interp.syncBarriers
 	child.quad = interp.quad
 	child.helper = interp.helper
+	child.demoted = interp.demoted
+	child.parent = interp
 
 	child.seedConstants()
 

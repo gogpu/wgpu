@@ -361,8 +361,7 @@ import _ "github.com/gogpu/wgpu/hal/software"
 - Encoded commands run at `Queue.Submit`
 - **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, much slower than JIT software renderers such as SwiftShader).
 
-**Known gaps:** no ASTC; no `depth-clip-control` or `frag_depth`; a discarded fragment stops instead of staying a
-helper, so a non-linear derivative taken after a non-uniform `discard` can differ from the GPU backends.
+**Known gaps:** no ASTC; no `depth-clip-control` or `frag_depth`.
 
 **Shader memory limits:** a shader's Private variables may total 64 KiB, the Function variables of one function
 64 KiB, its Workgroup variables 1 MiB, its composite and null constants 1 MiB, and any type at most `maxBufferSize`

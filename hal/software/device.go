@@ -369,10 +369,13 @@ func stageModule(sm *ShaderModule, stage ir.ShaderStage, entryPoint string, cons
 // (ADR-078 rule 8). An unsigned min sends a negative coordinate to the last
 // texel, which the WebGPU spec allows. fetchTexelLevel's own clamp stays as
 // a second line of defense. Binding arrays are Unchecked, as in every Rust
-// wgpu-hal backend.
+// wgpu-hal backend. WGSL discard is OpDemoteToHelperInvocation, which the
+// interpreter runs as WGSL specifies: the invocation becomes a helper and
+// keeps feeding its quad's derivatives (P3-SW-035).
 func spirvOptions() spirv.Options {
 	return spirv.Options{
-		Version: spirv.Version1_3,
+		Version:                  spirv.Version1_3,
+		DemoteToHelperInvocation: true,
 		BoundsCheckPolicies: backend.BoundsCheckPolicies{
 			Index:        backend.BoundsCheckRestrict,
 			Buffer:       backend.BoundsCheckRestrict,

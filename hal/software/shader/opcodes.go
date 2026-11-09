@@ -106,6 +106,10 @@ const (
 	OpKill                = 252
 	OpUnreachable         = 255
 	OpTerminateInvocation = 4416 // SPV_KHR_terminate_invocation, core in SPIR-V 1.6
+	// OpDemoteToHelperInvocation is WGSL discard as naga writes it with
+	// spirv.Options.DemoteToHelperInvocation (SPV_EXT_demote_to_helper_invocation,
+	// core in SPIR-V 1.6): the invocation becomes a helper and keeps running.
+	OpDemoteToHelperInvocation = 5380
 
 	// Comparison ops (integer, unsigned).
 	OpULessThan         = 176
@@ -360,21 +364,22 @@ type opInfo struct {
 // checks the table against run()'s case labels.
 var supportedOps = map[uint16]opInfo{
 	// Blocks, variables, control flow.
-	OpLabel:               {"OpLabel", false},
-	OpVariable:            {"OpVariable", true},
-	OpFunctionParameter:   {"OpFunctionParameter", true},
-	OpFunctionCall:        {"OpFunctionCall", true},
-	OpBranch:              {"OpBranch", false},
-	OpBranchConditional:   {"OpBranchConditional", false},
-	OpSelectionMerge:      {"OpSelectionMerge", false},
-	OpLoopMerge:           {"OpLoopMerge", false},
-	OpSwitch:              {"OpSwitch", false},
-	OpPhi:                 {"OpPhi", true},
-	OpReturn:              {"OpReturn", false},
-	OpReturnValue:         {"OpReturnValue", false},
-	OpKill:                {"OpKill", false},
-	OpTerminateInvocation: {"OpTerminateInvocation", false},
-	OpUnreachable:         {"OpUnreachable", false},
+	OpLabel:                    {"OpLabel", false},
+	OpVariable:                 {"OpVariable", true},
+	OpFunctionParameter:        {"OpFunctionParameter", true},
+	OpFunctionCall:             {"OpFunctionCall", true},
+	OpBranch:                   {"OpBranch", false},
+	OpBranchConditional:        {"OpBranchConditional", false},
+	OpSelectionMerge:           {"OpSelectionMerge", false},
+	OpLoopMerge:                {"OpLoopMerge", false},
+	OpSwitch:                   {"OpSwitch", false},
+	OpPhi:                      {"OpPhi", true},
+	OpReturn:                   {"OpReturn", false},
+	OpReturnValue:              {"OpReturnValue", false},
+	OpKill:                     {"OpKill", false},
+	OpTerminateInvocation:      {"OpTerminateInvocation", false},
+	OpDemoteToHelperInvocation: {"OpDemoteToHelperInvocation", false},
+	OpUnreachable:              {"OpUnreachable", false},
 
 	// Memory and composites.
 	OpLoad:                 {opNameLoad, true},

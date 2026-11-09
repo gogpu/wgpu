@@ -26,8 +26,25 @@ import (
 
 // discardStorageWGSL draws colorRigSize² pixels; every fragment marks its
 // pixel in the "before" half of marks, fragments in odd columns then discard,
-// and the rest mark the "after" half.
-const discardStorageWGSL = `
+// and the rest mark the "after" half. With inFunction the discard sits in a
+// called function, as in the WGSL spec's own discard example: the caller's
+// store after the call must be dropped too.
+func discardStorageWGSL(inFunction bool) string {
+	discard := `if (x & 1u) == 1u {
+        discard;
+    }`
+	helper := ""
+	if inFunction {
+		discard = "discard_if_odd(x);"
+		helper = `
+fn discard_if_odd(x: u32) {
+    if (x & 1u) == 1u {
+        discard;
+    }
+}
+`
+	}
+	return `
 @group(0) @binding(0) var<storage, read_write> marks: array<u32, 32>;
 
 struct VOut {
@@ -41,27 +58,37 @@ fn vs(@builtin(vertex_index) i: u32) -> VOut {
         vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0));
     return VOut(vec4<f32>(p[i], 0.0, 1.0));
 }
-
+` + helper + `
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
     let x = u32(in.pos.x);
     let y = u32(in.pos.y);
     let pixel = y * 4u + x;
     marks[pixel] = pixel + 1u;
-    if (x & 1u) == 1u {
-        discard;
-    }
+    ` + discard + `
     marks[16u + pixel] = pixel + 1u;
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 }
 `
+}
 
 const discardStorageFill = 0xDEADBEEF
 
 // TestDiscardStorageWrites checks that a store before discard lands and a
 // store after it does not: marks[p] = p+1 for every pixel, marks[16+p] = p+1
-// only for even columns, the sentinel elsewhere.
+// only for even columns, the sentinel elsewhere. The second case discards in
+// a called function.
 func TestDiscardStorageWrites(t *testing.T) {
+	for _, inFunction := range []bool{false, true} {
+		name := "inline"
+		if inFunction {
+			name = "in-called-function"
+		}
+		t.Run(name, func(t *testing.T) { checkDiscardStorageWrites(t, discardStorageWGSL(inFunction)) })
+	}
+}
+
+func checkDiscardStorageWrites(t *testing.T, wgsl string) {
 	forEachOverrideBackend(t, gputypes.DownlevelFlagsFragmentStorage, func(t *testing.T, device *wgpu.Device) {
 		const words = 32
 		marks := newPublicBuffer(t, device, words*4, wgpu.BufferUsageStorage|wgpu.BufferUsageCopySrc|wgpu.BufferUsageCopyDst)
@@ -83,7 +110,7 @@ func TestDiscardStorageWrites(t *testing.T) {
 		_, view := newColorTexture(t, device, gputypes.TextureFormatRGBA8Unorm, nil, wgpu.TextureUsageRenderAttachment)
 		colorPass{
 			view:   view,
-			wgsl:   discardStorageWGSL,
+			wgsl:   wgsl,
 			state:  gputypes.ColorTargetState{Format: gputypes.TextureFormatRGBA8Unorm, WriteMask: gputypes.ColorWriteMaskAll},
 			layout: bgl,
 			group:  group,
@@ -107,13 +134,18 @@ func TestDiscardStorageWrites(t *testing.T) {
 }
 
 // TestDerivativesAfterDiscard discards the bottom-right lane of every 2x2
-// quad and takes fine derivatives of x*x and y*y in the other three after
-// it. The discarded lane still runs as a helper invocation, so each
-// derivative is the exact difference between the quad's two columns or rows:
-// 2*xq+2 and 2*yq+2 for the quad's even corner (xq, yq), as in
-// TestQuadDerivatives. Discarded pixels keep the clear color.
+// quad and takes fine derivatives in the other three after it. The discarded
+// lane still runs as a helper invocation, so each derivative is the exact
+// difference within the pixel's own quad row or column:
+//   - x*x and y*y: 2*xq+2 and 2*yq+2 for the quad's even corner (xq, yq), as
+//     in TestQuadDerivatives;
+//   - x*y: dpdxFine is the pixel's own center y and dpdyFine its own center x.
+//
+// x*y is the case that tells "the helper fed its row" from "the difference was
+// taken in the other row": the two rows differ by 1. Discarded pixels keep
+// the clear color.
 func TestDerivativesAfterDiscard(t *testing.T) {
-	body := "vec4<f32>(dpdxFine(x * x), dpdyFine(y * y), 1.0, 1.0)"
+	body := "vec4<f32>(dpdxFine(x * x), dpdyFine(y * y), dpdxFine(x * y), dpdyFine(x * y))"
 	wgsl := derivativeShaderAfterDiscard(body)
 	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
 		tex, view := newColorTexture(t, device, gputypes.TextureFormatRGBA32Float, nil,
@@ -128,7 +160,7 @@ func TestDerivativesAfterDiscard(t *testing.T) {
 		for y := range colorRigSize {
 			for x := range colorRigSize {
 				got := decodeRGBA32F(texels[y*colorRigSize+x])
-				want := [4]float64{float64(2*(x&^1) + 2), float64(2*(y&^1) + 2), 1, 1}
+				want := [4]float64{float64(2*(x&^1) + 2), float64(2*(y&^1) + 2), float64(y) + 0.5, float64(x) + 0.5}
 				if x%2 == 1 && y%2 == 1 {
 					want = [4]float64{-1, -1, -1, -1}
 				}
