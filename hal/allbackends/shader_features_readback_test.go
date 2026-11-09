@@ -27,10 +27,10 @@ type featureBackend struct {
 }
 
 var featureBackends = []featureBackend{
-	{overrideBackend: overrideBackend{name: "vulkan", backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan}},
-	{overrideBackend: overrideBackend{name: "dx12-fxc", backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12}},
-	{overrideBackend: overrideBackend{name: "dx12-dxil", backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12, dxil: true}, dxilValidate: true},
-	{overrideBackend: overrideBackend{name: "gles", backends: gputypes.BackendsGL, backend: gputypes.BackendGL}},
+	{overrideBackend: overrideBackend{name: backendVulkan, backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan}},
+	{overrideBackend: overrideBackend{name: backendDX12FXC, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12}},
+	{overrideBackend: overrideBackend{name: backendDX12DXIL, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12, dxil: true}, dxilValidate: true},
+	{overrideBackend: overrideBackend{name: backendGLES, backends: gputypes.BackendsGL, backend: gputypes.BackendGL}},
 }
 
 var featurePowerPreferences = []struct {
@@ -54,7 +54,7 @@ func forEachFeatureDeviceWith(t *testing.T, features, optional gputypes.Features
 	t.Helper()
 	for _, b := range featureBackends {
 		for _, pref := range featurePowerPreferences {
-			t.Run(b.name+"/"+pref.name, func(t *testing.T) {
+			t.Run(string(b.name)+"/"+pref.name, func(t *testing.T) {
 				if b.dxil {
 					t.Setenv("GOGPU_DX12_DXIL", "1")
 				} else {

@@ -79,7 +79,7 @@ func TestSampleArrayLayer(t *testing.T) {
 		for _, k := range []uint32{0, 2, layers - 1} {
 			t.Run(fmt.Sprintf("layer%d", k), func(t *testing.T) {
 				view := newViewOf(t, device, tex, gputypes.TextureViewDimension2D, k, 1)
-				if b.name == "gles" {
+				if b.name == backendGLES {
 					checkNotSampleable(t, device, view, gputypes.TextureViewDimension2D)
 					return
 				}
@@ -128,7 +128,7 @@ func TestSampleCubeLayer(t *testing.T) {
 			for _, base := range []uint32{0, 6} {
 				t.Run(fmt.Sprintf("%s/base%d", tc.dim, base), func(t *testing.T) {
 					view := newViewOf(t, device, tex, tc.dim, base, tc.count)
-					if b.name == "gles" {
+					if b.name == backendGLES {
 						checkNotSampleable(t, device, view, tc.dim)
 						return
 					}

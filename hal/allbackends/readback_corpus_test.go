@@ -59,7 +59,7 @@ func TestReadbackCorpus(t *testing.T) {
 	}
 	t.Logf("%d cases from %s", len(cases), dir)
 
-	forEachHALAdapter(t, func(t *testing.T, backend string, a *hal.ExposedAdapter, vvl *vvlCapture) {
+	forEachHALAdapter(t, func(t *testing.T, backend backendName, a *hal.ExposedAdapter, vvl *vvlCapture) {
 		if a.Capabilities.DownlevelCapabilities.Flags&gputypes.DownlevelFlagsComputeShaders == 0 {
 			t.Skipf("%s has no compute shaders (DownlevelFlagsComputeShaders unset)", a.Info.Name)
 		}
@@ -91,7 +91,7 @@ func TestReadbackCorpus(t *testing.T) {
 }
 
 // runCorpusCase runs one case on one device and reports its RESULT line.
-func runCorpusCase(t *testing.T, r *halRunner, backend string, a *hal.ExposedAdapter, vvl *vvlCapture, c *corpusCase) {
+func runCorpusCase(t *testing.T, r *halRunner, backend backendName, a *hal.ExposedAdapter, vvl *vvlCapture, c *corpusCase) {
 	t.Helper()
 	result := func(tag, detail string) {
 		t.Logf("RESULT %-40s %-9s %-36s %s %s", c.name, backend, a.Info.Name, tag, detail)

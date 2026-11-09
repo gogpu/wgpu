@@ -88,7 +88,7 @@ func TestErroredEncoderReleasesCommandBuffers(t *testing.T) {
 			continue
 		}
 		for _, c := range cases {
-			t.Run(b.name+"/"+c.name, func(t *testing.T) {
+			t.Run(string(b.name)+"/"+c.name, func(t *testing.T) {
 				device, _ := openBackendDevice(t, b, 0, gputypes.PowerPreferenceLowPower)
 				c.run(t, device)
 			})

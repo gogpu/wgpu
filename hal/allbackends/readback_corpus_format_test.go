@@ -38,8 +38,8 @@ const corpusFill = "fill"
 
 // corpusBackendNames are the backend names a known failure may name; they are
 // the names of halBackendConfigs.
-var corpusBackendNames = map[string]bool{
-	"vulkan": true, "dx12-fxc": true, "dx12-dxil": true, "gles": true, "metal": true, "software": true,
+var corpusBackendNames = map[backendName]bool{
+	backendVulkan: true, backendDX12FXC: true, backendDX12DXIL: true, backendGLES: true, backendMetal: true, backendSoftware: true,
 }
 
 // corpusFeatures maps the corpus `requires` names (WebGPU feature names) to
@@ -83,12 +83,12 @@ type corpusBinding struct {
 
 // corpusKnownFailure is an expected failure (README "Known failures").
 type corpusKnownFailure struct {
-	Backend string `json:"backend"`
-	Adapter string `json:"adapter"`
-	Driver  string `json:"driver"`
-	Card    string `json:"card"`
-	Reason  string `json:"reason"`
-	Skip    bool   `json:"skip"`
+	Backend backendName `json:"backend"`
+	Adapter string      `json:"adapter"`
+	Driver  string      `json:"driver"`
+	Card    string      `json:"card"`
+	Reason  string      `json:"reason"`
+	Skip    bool        `json:"skip"`
 }
 
 // The JSON shapes: pointers tell a missing required field from a zero value.
@@ -454,7 +454,7 @@ func (b *corpusBinding) format(words []uint32) string {
 // nil. The adapter substring is matched against the adapter name and the
 // driver substring against the driver version and description, all
 // case-insensitive; an empty substring matches everything.
-func (c *corpusCase) knownFailure(backend string, info *gputypes.AdapterInfo) *corpusKnownFailure {
+func (c *corpusCase) knownFailure(backend backendName, info *gputypes.AdapterInfo) *corpusKnownFailure {
 	contains := func(s, sub string) bool { return strings.Contains(strings.ToLower(s), strings.ToLower(sub)) }
 	for i := range c.knownFailures {
 		k := &c.knownFailures[i]

@@ -175,24 +175,24 @@ func TestReadbackCorpusVerdict(t *testing.T) {
 
 func TestReadbackCorpusKnownFailureMatch(t *testing.T) {
 	c := corpusCase{knownFailures: []corpusKnownFailure{
-		{Backend: "dx12-dxil", Adapter: "geforce", Card: "NV-1", Reason: "x"},
-		{Backend: "gles", Driver: "mesa", Card: "MESA-1", Reason: "x"},
-		{Backend: "vulkan", Card: "ALL-1", Reason: "x"},
+		{Backend: backendDX12DXIL, Adapter: "geforce", Card: "NV-1", Reason: "x"},
+		{Backend: backendGLES, Driver: "mesa", Card: "MESA-1", Reason: "x"},
+		{Backend: backendVulkan, Card: "ALL-1", Reason: "x"},
 	}}
 	nvidia := gputypes.AdapterInfo{Name: "NVIDIA GeForce GTX 1660 SUPER", Driver: "581.57"}
 	intel := gputypes.AdapterInfo{Name: "Intel(R) Iris(R) Xe Graphics", Driver: "32.0.101"}
 	llvmpipe := gputypes.AdapterInfo{Name: "llvmpipe", Driver: "4.5", DriverInfo: "Mesa 24.0.5"}
 	for _, tc := range []struct {
-		backend string
+		backend backendName
 		info    gputypes.AdapterInfo
 		want    string
 	}{
-		{"dx12-dxil", nvidia, "NV-1"},
-		{"dx12-dxil", intel, ""},
-		{"dx12-fxc", nvidia, ""},
-		{"gles", llvmpipe, "MESA-1"},
-		{"gles", intel, ""},
-		{"vulkan", intel, "ALL-1"},
+		{backendDX12DXIL, nvidia, "NV-1"},
+		{backendDX12DXIL, intel, ""},
+		{backendDX12FXC, nvidia, ""},
+		{backendGLES, llvmpipe, "MESA-1"},
+		{backendGLES, intel, ""},
+		{backendVulkan, intel, "ALL-1"},
 	} {
 		got := ""
 		if k := c.knownFailure(tc.backend, &tc.info); k != nil {

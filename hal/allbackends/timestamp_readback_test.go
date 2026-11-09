@@ -47,8 +47,8 @@ const (
 // synchronization validation.
 func TestPassTimestampWrites(t *testing.T) {
 	for _, b := range []overrideBackend{
-		{name: "vulkan", backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan},
-		{name: "dx12", backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12},
+		{name: backendVulkan, backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan},
+		{name: backendDX12, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12},
 	} {
 		for _, pref := range []struct {
 			name string
@@ -57,7 +57,7 @@ func TestPassTimestampWrites(t *testing.T) {
 			{"low-power", gputypes.PowerPreferenceLowPower},
 			{"high-performance", gputypes.PowerPreferenceHighPerformance},
 		} {
-			t.Run(b.name+"/"+pref.name, func(t *testing.T) {
+			t.Run(string(b.name)+"/"+pref.name, func(t *testing.T) {
 				device := openTimestampDevice(t, b, pref.pref)
 				ts := recordPassTimestamps(t, device)
 				t.Logf("ticks: compute %d..%d, render %d..%d; period %v ns",

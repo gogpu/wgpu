@@ -51,12 +51,12 @@ const dispatchIndirectArgsSize = 512
 // GPU backends run on both power preferences, so on a hybrid machine both
 // adapters.
 var dispatchIndirectBackends = []overrideBackend{
-	{name: "vulkan", backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan},
-	{name: "dx12-fxc", backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12},
-	{name: "dx12-dxil", backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12, dxil: true},
-	{name: "gles", backends: gputypes.BackendsGL, backend: gputypes.BackendGL},
-	{name: "metal", backends: gputypes.BackendsMetal, backend: gputypes.BackendMetal},
-	{name: "software", backends: gputypes.BackendsPrimary, software: true},
+	{name: backendVulkan, backends: gputypes.BackendsVulkan, backend: gputypes.BackendVulkan},
+	{name: backendDX12FXC, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12},
+	{name: backendDX12DXIL, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12, dxil: true},
+	{name: backendGLES, backends: gputypes.BackendsGL, backend: gputypes.BackendGL},
+	{name: backendMetal, backends: gputypes.BackendsMetal, backend: gputypes.BackendMetal},
+	{name: backendSoftware, backends: gputypes.BackendsPrimary, software: true},
 }
 
 // TestDispatchIndirectReadsItsOwnArguments checks the invocation count of
@@ -200,7 +200,7 @@ func forEachIndirectDevice(t *testing.T, fn func(t *testing.T, device *wgpu.Devi
 			if b.software && pref.pref != gputypes.PowerPreferenceLowPower {
 				continue // one CPU adapter
 			}
-			t.Run(b.name+"/"+pref.name, func(t *testing.T) {
+			t.Run(string(b.name)+"/"+pref.name, func(t *testing.T) {
 				if b.dxil {
 					t.Setenv("GOGPU_DX12_DXIL", "1")
 				} else {

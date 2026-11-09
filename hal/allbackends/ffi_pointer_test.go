@@ -49,10 +49,10 @@ func withStackDepth(depth int, f func()) {
 // would only allocate 1024 large buffers (on the software backend in the Go heap).
 func TestMappableBufferCreationAtEveryStackDepth(t *testing.T) {
 	vulkan := overrideBackends[0]
-	if vulkan.name != "vulkan" {
+	if vulkan.name != backendVulkan {
 		t.Fatalf("overrideBackends[0] = %q, want vulkan", vulkan.name)
 	}
-	t.Run(vulkan.name, func(t *testing.T) {
+	t.Run(string(vulkan.name), func(t *testing.T) {
 		device, _ := openBackendDevice(t, vulkan, 0, gputypes.PowerPreferenceLowPower)
 		const size = 33 << 20
 		for depth := 0; depth < ffiPointerDepths; depth++ {

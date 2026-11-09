@@ -45,10 +45,10 @@ func TestCompressedTextureDecode(t *testing.T) {
 	update := os.Getenv("WGPU_UPDATE_TEXCOMPRESS") != ""
 	optional := gputypes.Features(gputypes.FeatureTextureCompressionBC) |
 		gputypes.Features(gputypes.FeatureTextureCompressionETC2)
-	results := map[string]map[int][]float32{}
-	adapters := map[string]string{}
+	results := map[backendName]map[int][]float32{}
+	adapters := map[backendName]string{}
 	for _, b := range overrideBackends {
-		t.Run(b.name, func(t *testing.T) {
+		t.Run(string(b.name), func(t *testing.T) {
 			if b.dxil {
 				t.Setenv("GOGPU_DX12_DXIL", "1")
 			} else {
@@ -72,16 +72,16 @@ func TestCompressedTextureDecode(t *testing.T) {
 	}
 
 	if update {
-		writeTexcompressGolden(t, results["vulkan"], adapters["vulkan"])
+		writeTexcompressGolden(t, results[backendVulkan], adapters[backendVulkan])
 	}
 	golden := readTexcompressGolden(t)
-	software := results["software"]
+	software := results[backendSoftware]
 	t.Run("software-vs-golden", func(t *testing.T) {
 		if len(software) != len(decodeCases) {
 			t.Fatalf("software decoded %d of %d formats", len(software), len(decodeCases))
 		}
 		for i, c := range decodeCases {
-			compareDecode(t, c, "software", software[i], "golden", golden[i])
+			compareDecode(t, c, string(backendSoftware), software[i], "golden", golden[i])
 		}
 	})
 	for _, b := range overrideBackends {
@@ -89,7 +89,7 @@ func TestCompressedTextureDecode(t *testing.T) {
 		if b.software || len(got) == 0 {
 			continue
 		}
-		t.Run(b.name+"-vs-software", func(t *testing.T) {
+		t.Run(string(b.name)+"-vs-"+string(backendSoftware), func(t *testing.T) {
 			if len(software) != len(decodeCases) {
 				t.Fatal("no software readback to compare with")
 			}
@@ -98,8 +98,8 @@ func TestCompressedTextureDecode(t *testing.T) {
 				if !ok {
 					continue
 				}
-				if !compareBC(t, c, b.name+" ("+adapters[b.name]+")", texels, software[i]) {
-					compareDecode(t, c, b.name, texels, "software", software[i])
+				if !compareBC(t, c, string(b.name)+" ("+adapters[b.name]+")", texels, software[i]) {
+					compareDecode(t, c, string(b.name), texels, string(backendSoftware), software[i])
 				}
 			}
 			t.Logf("%s (%s) compared %d of %d formats", b.name, adapters[b.name], len(got), len(decodeCases))
