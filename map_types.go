@@ -13,8 +13,7 @@ import (
 
 // FEAT-WGPU-MAPPING-001 — public WebGPU-compliant Buffer mapping API.
 //
-// See docs/dev/research/ADR-BUFFER-MAPPING-API.md for the full design
-// rationale. This file contains the public types (enums + typed errors)
+// The buffer mapping API ADR holds the full design rationale. This file contains the public types (enums + typed errors)
 // used by Buffer.Map / Buffer.MapAsync / Device.Poll.
 
 // MapMode selects the type of access requested for a buffer mapping.
