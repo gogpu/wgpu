@@ -33,10 +33,13 @@ func TestDefaultRegistrationKeepsAdapterPick(t *testing.T) {
 	// The pick must not change when only the picked backend is visible.
 	assertSamePick(t, "picked backend only", baseInfo, backendMask(baseInfo.Backend))
 
-	// A program that registered only Vulkan saw Vulkan alone. Where a Vulkan
-	// adapter exists, the full registration must pick the same one.
-	if hasAdapter(t, gputypes.BackendsVulkan) {
-		assertSamePick(t, "vulkan only", baseInfo, gputypes.BackendsVulkan)
+	// A program that registered only Vulkan saw Vulkan alone. Where a real
+	// Vulkan adapter exists, the full registration must pick the same one.
+	// The mask still admits the software backend in this release (ADR-083
+	// removes the bypass in v0.35.0), so the adapter must be checked for
+	// Backend == Vulkan, not merely for existing.
+	if hasAdapterFor(t, gputypes.BackendVulkan) {
+		assertSamePick(t, "vulkan only", baseInfo, backendMask(gputypes.BackendVulkan))
 	}
 }
 
@@ -50,9 +53,12 @@ func backendMask(b gputypes.Backend) gputypes.Backends {
 	return 1 << b
 }
 
-func hasAdapter(t *testing.T, mask gputypes.Backends) bool {
+// hasAdapterFor reports whether the pick for a single-backend mask really is
+// that backend. The software backend is still admitted by every mask in this
+// release, so existence alone does not prove the backend is present.
+func hasAdapterFor(t *testing.T, backend gputypes.Backend) bool {
 	t.Helper()
-	inst, err := CreateInstance(&InstanceDescriptor{Backends: mask})
+	inst, err := CreateInstance(&InstanceDescriptor{Backends: backendMask(backend)})
 	if err != nil {
 		return false
 	}
@@ -61,8 +67,8 @@ func hasAdapter(t *testing.T, mask gputypes.Backends) bool {
 	if err != nil {
 		return false
 	}
-	adapter.Release()
-	return true
+	defer adapter.Release()
+	return adapter.Info().Backend == backend
 }
 
 func assertSamePick(t *testing.T, name string, want gputypes.AdapterInfo, mask gputypes.Backends) {
