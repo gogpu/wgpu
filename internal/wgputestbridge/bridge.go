@@ -18,16 +18,6 @@ import (
 	"github.com/gogpu/gputypes"
 )
 
-// Backend selects the backend a constructor asks for.
-type Backend int
-
-const (
-	// BackendSoftware is the Pure Go software backend.
-	BackendSoftware Backend = iota
-	// BackendNoop is the noop backend.
-	BackendNoop
-)
-
 // Faults injects errors into the device. Every call of the named method
 // returns the configured error; the fields are independent.
 type Faults struct {
@@ -37,10 +27,17 @@ type Faults struct {
 
 // Observer receives the recorded calls. A nil field is not called.
 //
+// A call is recorded only when the public method accepted it: argument
+// validation passed and its effect on the encoder or pass state was applied.
+// A call rejected with a validation error is not recorded; a bind group whose
+// usage merge fails is still bound (the failure is recorded on the encoder),
+// so it is recorded like any accepted bind.
+//
 // Seq is one global counter per device, assigned when the call is recorded, so
 // cross-kind order is preserved. Encoder is the dense index of the creating
-// command encoder; Pass is the dense index of the enclosing BeginRenderPass or
-// BeginComputePass, and -1 outside a pass.
+// command encoder. Pass is the dense index of the enclosing BeginRenderPass or
+// BeginComputePass; every record that carries Pass happens inside a pass, so
+// it is never negative.
 type Observer struct {
 	EncoderCreated     func(seq uint64, encoder int, label string)
 	BufferCreated      func(seq uint64, label string, size uint64, usage gputypes.BufferUsage)
@@ -55,9 +52,16 @@ type Observer struct {
 	Submitted          func(seq uint64, submissionIndex uint64, commandBuffers int)
 }
 
-// Options is what a wgputest constructor passes to the factory.
+// Options is what a wgputest constructor passes to the factory. Device and
+// Queue are the hal.Device and hal.Queue of a private backend instance opened
+// by wgputest; typing them as any keeps the bridge free of the hal import and
+// lets the root factory assert them.
 type Options struct {
-	Backend  Backend
+	Device   any
+	Queue    any
+	Features gputypes.Features
+	Limits   gputypes.Limits
+	Label    string
 	Faults   Faults
 	Observer Observer
 }
@@ -66,15 +70,12 @@ type Options struct {
 // instance. The values are returned as any to break the import cycle: the
 // root package registers the factory, wgputest type-asserts the result. The
 // cleanup releases the device, adapter and instance.
-type Factory func(Options) (device, queue any, cleanup func(), err error)
+type Factory func(opts *Options) (device, queue any, cleanup func(), err error)
 
 var (
-	// ErrNoFactory means no factory is registered: the Pure Go implementation
-	// is not in this build (-tags rust).
-	ErrNoFactory = errors.New("wgputestbridge: no factory registered; the Pure Go implementation is not in this build")
-	// ErrBackendUnavailable means the factory is registered but the requested
-	// backend is not in this build (build tag wgpu_nosoftware).
-	ErrBackendUnavailable = errors.New("wgputestbridge: backend is not in this build")
+	// ErrNoFactory means no factory is registered: the native wgpu
+	// implementation is not in this build (-tags rust).
+	ErrNoFactory = errors.New("wgputestbridge: no factory registered; the native implementation is not in this build")
 )
 
 var (
@@ -90,7 +91,7 @@ func Register(f Factory) {
 }
 
 // New calls the registered factory, or returns ErrNoFactory.
-func New(opts Options) (device, queue any, cleanup func(), err error) {
+func New(opts *Options) (device, queue any, cleanup func(), err error) {
 	registryMu.RLock()
 	f := factory
 	registryMu.RUnlock()

@@ -15,7 +15,14 @@ func (d *Device) CheckHealth() error {
 	if d.released.Load() {
 		return ErrReleased
 	}
-	halDevice := d.halDevice()
+	if d.core == nil || !d.core.HasHAL() {
+		return nil
+	}
+	// Call the backend under the snatch read guard: a concurrent Release must
+	// not destroy the HAL device (and its diagnostic state) mid-check.
+	guard := d.core.SnatchLock().Read()
+	defer guard.Release()
+	halDevice := d.core.Raw(guard)
 	if halDevice == nil {
 		return nil
 	}

@@ -1,4 +1,4 @@
-//go:build !rust && !(js && wasm) && !wgpu_nosoftware
+//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware
 
 package wgputest_test
 
@@ -19,9 +19,12 @@ import (
 // importing wgputest must not put the noop backend into the global HAL
 // registry, where it would replace the software backend under BackendEmpty.
 func TestImportDoesNotRegisterNoop(t *testing.T) {
+	// This test only builds where the software backend is in the build
+	// (its build tag mirrors the constructor), so BackendEmpty is always
+	// registered by hal/software: a missing entry is a regression, not a skip.
 	backend, ok := hal.GetBackend(gputypes.BackendEmpty)
 	if !ok {
-		t.Skip("no BackendEmpty backend registered in this build")
+		t.Fatal("no BackendEmpty backend registered: importing wgputest no longer registers the software backend")
 	}
 	if _, isNoop := backend.(noop.Backend); isNoop {
 		t.Fatal("importing wgputest registered the noop backend over software")

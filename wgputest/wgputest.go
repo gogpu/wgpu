@@ -14,6 +14,14 @@
 // caller's label and command-buffer count. Work the core does internally —
 // pooled command encoders, pending-write flushes — never appears. Validation
 // is unchanged.
+//
+// Only accepted calls are recorded: a call the public method rejects with a
+// validation error changes no state and leaves no record, while every action
+// the call actually applied (including a bind whose usage merge reports an
+// error on the encoder) does. The exception is a known limitation: on GLES,
+// Queue.WriteTexture uploads stencil data through the public pass methods, so
+// such a trace would carry those binds; the software and noop devices this
+// package provides never take that path.
 package wgputest
 
 import (
@@ -91,9 +99,10 @@ func (r *Recorder) record(fn func(*Trace)) {
 //
 // Every record carries Seq, one global counter assigned when the call is
 // recorded, so cross-kind order is preserved. Records inside a render or
-// compute pass carry Pass, the dense index of the enclosing PassBegin, and -1
-// outside a pass. A PassBegin carries its encoder's dense index, so passes can
-// be attributed to encoders.
+// compute pass carry Pass, the dense index of the enclosing PassBegin; every
+// record that has the field happens inside a pass, so it is never negative. A
+// PassBegin carries its encoder's dense index, so passes can be attributed to
+// encoders.
 //
 // Encoders holds one record per public Device.CreateCommandEncoder call and
 // Submits one per public Queue.Submit call. The core's pooled encoders and its

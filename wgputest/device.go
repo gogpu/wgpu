@@ -1,4 +1,4 @@
-//go:build !(js && wasm)
+//go:build !rust && !(js && wasm)
 
 package wgputest
 
@@ -20,7 +20,7 @@ import (
 // amd64/arm64, and android arm64. Elsewhere, under -tags rust, or under
 // wgpu_nosoftware, the constructor returns ErrUnavailable.
 func NewSoftwareDevice(opts ...Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
-	return newDevice(wgputestbridge.BackendSoftware, "software", opts)
+	return newDevice("software", openSoftware, opts)
 }
 
 // NewNoopDevice returns a device and queue on the noop backend, headless.
@@ -28,16 +28,24 @@ func NewSoftwareDevice(opts ...Option) (*wgpu.Device, *wgpu.Queue, func(), error
 // The noop backend builds on every native platform; under -tags rust the
 // constructor returns ErrUnavailable.
 func NewNoopDevice(opts ...Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
-	return newDevice(wgputestbridge.BackendNoop, "noop", opts)
+	return newDevice("noop", openNoop, opts)
 }
 
-func newDevice(backend wgputestbridge.Backend, name string, opts []Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
+func newDevice(name string, open opener, opts []Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
 	var cfg config
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	opened, err := open()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("wgputest: %s backend: %w", name, err)
+	}
 	bridgeOpts := wgputestbridge.Options{
-		Backend: backend,
+		Device:   opened.device,
+		Queue:    opened.queue,
+		Features: opened.features,
+		Limits:   opened.limits,
+		Label:    "wgputest-" + name,
 		Faults: wgputestbridge.Faults{
 			CreateCommandEncoder: cfg.faults.CreateCommandEncoder,
 			WriteBuffer:          cfg.faults.WriteBuffer,
@@ -47,22 +55,29 @@ func newDevice(backend wgputestbridge.Backend, name string, opts []Option) (*wgp
 		bridgeOpts.Observer = cfg.recorder.observer()
 	}
 
-	deviceValue, queueValue, cleanup, err := wgputestbridge.New(bridgeOpts)
+	deviceValue, queueValue, wgpuCleanup, err := wgputestbridge.New(&bridgeOpts)
 	if err != nil {
-		if errors.Is(err, wgputestbridge.ErrNoFactory) || errors.Is(err, wgputestbridge.ErrBackendUnavailable) {
+		opened.cleanup()
+		if errors.Is(err, wgputestbridge.ErrNoFactory) {
 			return nil, nil, nil, fmt.Errorf("wgputest: %s backend: %w", name, ErrUnavailable)
 		}
 		return nil, nil, nil, fmt.Errorf("wgputest: %s device: %w", name, err)
 	}
 	device, ok := deviceValue.(*wgpu.Device)
 	if !ok {
-		cleanup()
+		wgpuCleanup()
+		opened.cleanup()
 		return nil, nil, nil, fmt.Errorf("wgputest: %s device: internal error: factory returned %T", name, deviceValue)
 	}
 	queue, ok := queueValue.(*wgpu.Queue)
 	if !ok {
-		cleanup()
+		wgpuCleanup()
+		opened.cleanup()
 		return nil, nil, nil, fmt.Errorf("wgputest: %s queue: internal error: factory returned %T", name, queueValue)
+	}
+	cleanup := func() {
+		wgpuCleanup()
+		opened.cleanup()
 	}
 	return device, queue, cleanup, nil
 }
