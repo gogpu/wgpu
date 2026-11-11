@@ -19,8 +19,9 @@
 
 ---
 
-## Current State: v0.34.12
+## Current State: v0.34.13
 
+✅ **Metal: run-time-indexed stores into workgroup vectors are correct (v0.34.13)** — naga v0.21.10 writes them through a scalar pointer; the readback corpus passes on the Apple Paravirtual device with no known failure left
 ✅ **Vulkan shaders use only what the device enabled, and `discard` follows WGSL (v0.34.12)** — naga gets the device's SPIR-V capabilities (packed dot products native or polyfilled), `discard` demotes to a helper invocation where `VK_EXT_shader_demote_to_helper_invocation` is supported
 ✅ **naga's readback corpus runs on every adapter in the test suite (v0.34.12)** — `TestReadbackCorpus` compares the words every backend writes with the corpus's expected values
 ✅ **Resources released after recording stay alive through the work that uses them (v0.34.11)** — a `QuerySet` and a `PipelineLayout` are reference counted as samplers are; a released layout is refused at creation instead of reaching `vkAllocateDescriptorSets`; a pipeline keeps its layout until its own destruction
@@ -146,6 +147,9 @@ releases.
 - [ ] Software: ASTC sampling (P1-SW-029 step 2)
 - [ ] Release only: `BindGroupLayout` reference counted as Rust and Dawn do; the Release-vs-create race contract (P2-CORE-027, P2-CORE-026)
 - [ ] A tracked WARP + GPU-based-validation test package (P2-INFRA-009, P1-CORE-028 for the selection API)
+
+**Patch release v0.34.13** (2026-11-11, naga v0.21.10):
+- [x] naga v0.21.10: Metal stores into run-time-indexed components of workgroup vectors and matrix columns, MSL parity fixes (atomic `workgroupUniformLoad`, packed `vec3` bitcasts, return temporary names)
 
 **Patch release v0.34.12** (2026-11-09, naga v0.21.9):
 - [x] Vulkan: the device's SPIR-V capability set for naga, integer dot products enabled where supported (P2-VK-014)
