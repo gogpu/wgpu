@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **naga v0.21.10** (from v0.21.9). Only Metal shaders change. A store to a run-time-indexed component of a workgroup vector or matrix column now goes through a scalar pointer: the readback corpus case `vars/workgroup-split-rt` failed on the Apple Paravirtual Metal device and passes with this release. `workgroupUniformLoad` of an atomic emits `atomic_load_explicit`, a packed `vec3` struct member is unpacked before `as_type`, and the entry point's return temporary gets a unique name.
+
 ## [0.34.12] - 2026-11-09
 
 A Vulkan shader-feature patch: shaders use only what the device enabled, `discard` follows WGSL, and naga's GPU
