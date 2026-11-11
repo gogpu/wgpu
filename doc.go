@@ -5,12 +5,9 @@
 //
 // # Quick Start
 //
-// Import this package and a backend registration package:
+// Import this package; the platform backends are registered automatically:
 //
-//	import (
-//	    "github.com/gogpu/wgpu"
-//	    _ "github.com/gogpu/wgpu/hal/allbackends"
-//	)
+//	import "github.com/gogpu/wgpu"
 //
 //	instance, err := wgpu.CreateInstance(nil)
 //	// ...
@@ -23,11 +20,19 @@
 //
 // # Backend Registration
 //
-// Backends are registered via blank imports:
+// The platform backends register by default (ADR-083): Vulkan, DX12 and
+// OpenGL ES on Windows (386, amd64, arm64), Vulkan and OpenGL ES on Linux
+// (amd64, arm64), Metal on macOS (amd64, arm64; MoltenVK only with
+// -tags wgpu_moltenvk), Vulkan and OpenGL ES on Android (arm64), the browser's
+// WebGPU on js/wasm, and the Pure Go software backend on those platforms.
+// Other GOOS/GOARCH combinations are outside the default registration set;
+// some cannot build the Pure Go backends at all (goffi has no syscall files
+// for them). Such a build registers no backend unless one is imported.
 //
-//	_ "github.com/gogpu/wgpu/hal/allbackends"  // all available backends
-//	_ "github.com/gogpu/wgpu/hal/vulkan"        // Vulkan only
-//	_ "github.com/gogpu/wgpu/hal/noop"           // testing
+// Build tags remove a backend for a smaller binary: wgpu_novulkan,
+// wgpu_nodx12, wgpu_nometal, wgpu_nogles, wgpu_nosoftware. The software
+// backend registers but is not part of the default adapter mask; request it
+// with RequestAdapterOptions.ForceFallbackAdapter.
 //
 // # Thread Safety
 //

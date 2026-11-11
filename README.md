@@ -96,8 +96,7 @@ package main
 import (
     "fmt"
 
-    "github.com/gogpu/wgpu"
-    _ "github.com/gogpu/wgpu/hal/allbackends" // Auto-register platform backends
+    "github.com/gogpu/wgpu" // Platform backends register automatically (ADR-083)
 )
 
 func main() {
@@ -253,17 +252,28 @@ Root Package (public API: *Device, *Buffer, *Texture...)
 
 ### Native HAL Backend Integration
 
-For the default (Pure Go) path, backends auto-register via blank imports:
+For the default (Pure Go) path, importing `github.com/gogpu/wgpu` registers the
+platform backends by default (ADR-083). No blank import is needed:
 
 ```go
-import _ "github.com/gogpu/wgpu/hal/allbackends"
+import "github.com/gogpu/wgpu"
 
-// Platform-specific backends auto-registered:
-// - Windows: Vulkan, DX12, GLES, Software
-// - Linux:   Vulkan, GLES, Software
-// - macOS:   Metal, Vulkan, Software
-// - Android/arm64 preview: Vulkan only
+// Registered by default:
+// - Windows: Vulkan, DX12, GLES, Software (386, amd64, arm64)
+// - Linux:   Vulkan, GLES, Software (amd64, arm64)
+// - macOS:   Metal, Software (amd64, arm64; MoltenVK only with -tags wgpu_moltenvk)
+// - Android: Vulkan, GLES, Software (arm64)
 ```
+
+Other GOOS/GOARCH combinations are outside the default registration set; import a backend explicitly (or use
+`hal/allbackends`) until v0.35.0. Some of them, for example linux/386, cannot build the Pure Go backends at all
+because goffi has no syscall files for that architecture.
+
+Opt out per backend with `-tags wgpu_novulkan`, `wgpu_nodx12`, `wgpu_nometal`,
+`wgpu_nogles` or `wgpu_nosoftware`. The software backend is registered but is
+not in the default adapter mask: select it with
+`RequestAdapterOptions.ForceFallbackAdapter`. `hal/allbackends` remains valid
+until `hal` moves under `internal/` in v0.35.0, after which it is removed.
 
 ---
 
@@ -337,10 +347,8 @@ Cross-platform GPU access via OpenGL ES 3.0+:
 CPU rasterizer for headless and windowed rendering. Always compiled — no build tags or GPU hardware required.
 
 ```go
-// Software backend auto-registers via init().
-// No explicit import needed when using hal/allbackends.
-// For standalone usage:
-import _ "github.com/gogpu/wgpu/hal/software"
+// The software backend registers by default (ADR-083); no import is needed.
+// Select it explicitly with RequestAdapterOptions.ForceFallbackAdapter.
 
 // Use cases:
 // - CI/CD testing without GPU
