@@ -483,7 +483,10 @@ func newTestDevice(t *testing.T) (*Instance, *Adapter, *Device) {
 		t.Fatalf("Open(noop): %v", err)
 	}
 	device := newDeviceFromHAL(open.Device, open.Queue, 0, adapters[0].Capabilities.Limits, "test-noop")
+	// The caller defers device.Release(); Release is idempotent, so releasing
+	// here too keeps the instance alive until the device is actually gone.
 	t.Cleanup(func() {
+		device.Release()
 		adapters[0].Adapter.Destroy()
 		instance.Destroy()
 	})

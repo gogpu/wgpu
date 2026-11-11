@@ -21,6 +21,11 @@ import (
 type ComputePassEncoder struct {
 	core    *core.CoreComputePassEncoder
 	encoder *CommandEncoder
+
+	// test, when non-nil, records the public calls for package wgputest;
+	// testPass is this pass's dense index.
+	test     testHooks
+	testPass int
 	// pipelineSet tracks whether SetPipeline has been called.
 	// Dispatch commands require a pipeline to be set first.
 	pipelineSet bool
@@ -83,6 +88,9 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
 	// walked at Submit, so there is nothing to fan out here.
 	p.encoder.trackBindGroup(group)
+	if p.test != nil {
+		p.test.BindGroupBound(p.testPass, index, offsets)
+	}
 }
 
 // flushBindGroups binds the bind groups whose backend binding is stale, right

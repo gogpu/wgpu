@@ -21,6 +21,11 @@ type CommandEncoder struct {
 	core     *core.CoreCommandEncoder
 	device   *Device
 	released bool
+
+	// test, when non-nil, records the public calls for package wgputest;
+	// testEncoder is this user encoder's dense index.
+	test        testHooks
+	testEncoder int
 	// trackedRefs accumulates Clone'd ResourceRefs from render/compute passes.
 	// Transferred to the CommandBuffer on Finish(), then to the DestroyQueue
 	// on Submit(). Phase 2: per-command-buffer resource tracking.
@@ -364,6 +369,24 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 	}
 
 	pass := &RenderPassEncoder{core: corePass, encoder: e}
+	if e.test != nil {
+		pass.test = e.test
+		label := ""
+		var loadOps []gputypes.LoadOp
+		var clears []gputypes.Color
+		if desc != nil {
+			label = desc.Label
+			if n := len(desc.ColorAttachments); n > 0 {
+				loadOps = make([]gputypes.LoadOp, n)
+				clears = make([]gputypes.Color, n)
+				for i := range desc.ColorAttachments {
+					loadOps[i] = desc.ColorAttachments[i].LoadOp
+					clears[i] = desc.ColorAttachments[i].ClearValue
+				}
+			}
+		}
+		pass.testPass = e.test.PassBegan(e.testEncoder, false, label, loadOps, clears)
+	}
 	if desc != nil && desc.DepthStencilAttachment != nil {
 		ds := desc.DepthStencilAttachment
 		pass.depthReadOnly, pass.stencilReadOnly = ds.DepthReadOnly, ds.StencilReadOnly
@@ -402,7 +425,16 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 	if desc != nil && desc.TimestampWrites != nil {
 		e.trackQuerySet(desc.TimestampWrites.QuerySet)
 	}
-	return &ComputePassEncoder{core: corePass, encoder: e}, nil
+	pass := &ComputePassEncoder{core: corePass, encoder: e}
+	if e.test != nil {
+		pass.test = e.test
+		label := ""
+		if desc != nil {
+			label = desc.Label
+		}
+		pass.testPass = e.test.PassBegan(e.testEncoder, true, label, nil, nil)
+	}
+	return pass, nil
 }
 
 // CopyBufferToBuffer copies data between buffers.

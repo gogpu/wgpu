@@ -19,6 +19,11 @@ import (
 type RenderPassEncoder struct {
 	core    *core.CoreRenderPassEncoder
 	encoder *CommandEncoder
+
+	// test, when non-nil, records the public calls for package wgputest;
+	// testPass is this pass's dense index.
+	test     testHooks
+	testPass int
 	// pipelineSet tracks whether SetPipeline has been called.
 	// Draw commands require a pipeline to be set first.
 	pipelineSet bool
@@ -101,6 +106,9 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 	if err := p.core.MergeBindGroup(group.usages); err != nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: index %d: %w", index, err))
 	}
+	if p.test != nil {
+		p.test.BindGroupBound(p.testPass, index, offsets)
+	}
 }
 
 // trackBindGroup keeps a bind group used in the pass and its buffers alive
@@ -143,6 +151,9 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
 	p.core.SetVertexBuffer(slot, buffer.coreBuffer(), offset)
+	if p.test != nil {
+		p.test.VertexBufferBound(p.testPass, slot, buffer.Label(), offset, buffer.Size())
+	}
 }
 
 // SetIndexBuffer sets the index buffer.
@@ -156,6 +167,9 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.Index
 	p.trackRef(buffer.core.Ref)
 	p.encoder.trackBuffer(buffer)
 	p.core.SetIndexBuffer(buffer.coreBuffer(), format, offset)
+	if p.test != nil {
+		p.test.IndexBufferBound(p.testPass, buffer.Label(), format, offset, buffer.Size())
+	}
 }
 
 // SetViewport sets the viewport transformation.
@@ -238,6 +252,9 @@ func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
 	// Rust wgpu-core command/render.rs only runs validate_instance_limit here.
 	p.flushBindGroups()
 	p.core.Draw(args)
+	if p.test != nil {
+		p.test.Drew(p.testPass, args)
+	}
 }
 
 // DrawIndexed draws indexed primitives.
@@ -261,6 +278,9 @@ func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
 	// firstInstance needs no feature gate (see Draw).
 	p.flushBindGroups()
 	p.core.DrawIndexed(args)
+	if p.test != nil {
+		p.test.DrewIndexed(p.testPass, args)
+	}
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.

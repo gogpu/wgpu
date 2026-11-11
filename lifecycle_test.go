@@ -9,8 +9,6 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 	"github.com/gogpu/wgpu/core"
-
-	_ "github.com/gogpu/wgpu/hal/noop"
 )
 
 // =============================================================================

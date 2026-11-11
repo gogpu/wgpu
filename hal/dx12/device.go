@@ -7,6 +7,7 @@ package dx12
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -722,7 +723,7 @@ func (d *Device) checkHealth(operation string) error {
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
 		hal.Logger().Error("dx12: device removed", "step", d.debugStep, "operation", operation, "reason", reason)
 		d.logDREDBreadcrumbs()
-		return fmt.Errorf("dx12: device removed at step %d (%s): %w", d.debugStep, operation, reason)
+		return fmt.Errorf("dx12: device removed at step %d (%s): %w", d.debugStep, operation, errors.Join(reason, hal.ErrDeviceLost))
 	}
 	return nil
 }
