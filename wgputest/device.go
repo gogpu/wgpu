@@ -57,6 +57,8 @@ func newDevice(name string, open opener, opts []Option) (*wgpu.Device, *wgpu.Que
 
 	deviceValue, queueValue, wgpuCleanup, err := wgputestbridge.New(&bridgeOpts)
 	if err != nil {
+		// No wgpu device exists to own the HAL device, so destroy it here.
+		opened.device.Destroy()
 		opened.cleanup()
 		if errors.Is(err, wgputestbridge.ErrNoFactory) {
 			return nil, nil, nil, fmt.Errorf("wgputest: %s backend: %w", name, ErrUnavailable)

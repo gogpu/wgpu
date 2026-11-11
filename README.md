@@ -269,6 +269,10 @@ The Pure Go software backend is **not** registered by default in this release: i
 `hal/allbackends`) until v0.35.0, where it becomes default-registered outside the default adapter mask. Keeping it
 explicit leaves every existing program's adapters and picks unchanged.
 
+A test binary that imports `wgputest` is an exception: the package imports `hal/software`, so software is
+registered there even when only `NewNoopDevice` is used, and until v0.35.0 the `BackendEmpty` rule admits it
+whatever mask a request names.
+
 Other GOOS/GOARCH combinations are outside the default registration set; import a backend explicitly (or use
 `hal/allbackends`) until v0.35.0. Some of them, for example linux/386, cannot build the Pure Go backends at all
 because goffi has no syscall files for that architecture.

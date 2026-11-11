@@ -37,7 +37,7 @@ func openBackend(backend hal.Backend) (openedBackend, error) {
 		return openedBackend{}, errors.New("no adapter")
 	}
 	exposed := &adapters[0]
-	open, err := exposed.Adapter.Open(0, exposed.Capabilities.Limits)
+	open, err := exposed.Adapter.Open(exposed.Features, exposed.Capabilities.Limits)
 	if err != nil {
 		exposed.Adapter.Destroy()
 		instance.Destroy()

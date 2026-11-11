@@ -22,6 +22,16 @@
 // Queue.WriteTexture uploads stencil data through the public pass methods, so
 // such a trace would carry those binds; the software and noop devices this
 // package provides never take that path.
+//
+// # Software backend registration
+//
+// Importing this package registers the Pure Go software backend in the global
+// HAL registry, even for a test that only calls NewNoopDevice: the software
+// file imports hal/software, which registers itself. Until v0.35.0 the
+// BackendEmpty rule admits software whatever Backends mask a request names
+// (ADR-083 2.3), so in a test binary importing wgputest a Vulkan-only request
+// can return the software adapter. Mask-and-skip tests must account for that;
+// the noop device itself is private and does not register anything.
 package wgputest
 
 import (

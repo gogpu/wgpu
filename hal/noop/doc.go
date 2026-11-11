@@ -13,7 +13,8 @@
 // The backend is identified as gputypes.BackendEmpty.
 //
 // The package does not register itself in init: it shares the BackendEmpty
-// variant with the Pure Go software backend, which registers by default, so an
-// automatic registration could replace it depending on package initialization
-// order. Call Register to add the noop backend to the global HAL registry.
+// variant with the Pure Go software backend, which registers when imported
+// (and by default from v0.35.0), so an automatic registration could replace it
+// depending on package initialization order. Call Register to add the noop
+// backend to the global HAL registry.
 package noop
