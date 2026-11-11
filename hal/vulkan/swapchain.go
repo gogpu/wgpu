@@ -1350,7 +1350,56 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		return nil
 	}
 
-	// Need to transition. Create the barrier pool lazily on first use.
+	cmdBuf, err := sc.recordPresentBarrier()
+	if err != nil {
+		return err
+	}
+
+	// ADR-060: Signal a present semaphore from the barrier submit.
+	// This ensures vkQueuePresentKHR explicitly waits for the barrier to
+	// complete via the per-image present semaphore pool. The present() method
+	// calls ensurePresentLayout BEFORE presentWaitSemaphores, so this
+	// semaphore is included in the wait list.
+	//
+	// The command pool reset is deferred to acquireNextImage, where the acquire
+	// fence wait guarantees the previous frame (including this barrier) has
+	// completed. This eliminates the synchronous vkWaitForFences that was
+	// previously required here.
+	barrierSem, err := sc.allocPresentSemaphore()
+	if err != nil {
+		return fmt.Errorf("vulkan: barrier present semaphore alloc: %w", err)
+	}
+	submitInfo := vk.SubmitInfo{
+		SType:                vk.StructureTypeSubmitInfo,
+		CommandBufferCount:   1,
+		PCommandBuffers:      &cmdBuf,
+		SignalSemaphoreCount: 1,
+		PSignalSemaphores:    &barrierSem,
+	}
+	result := sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, vk.Fence(0))
+	if result != vk.Success {
+		return fmt.Errorf("vulkan: vkQueueSubmit (barrier) failed: %d", result)
+	}
+	sc.barrierPending = true
+
+	// Update tracked layout — the barrier transitions to PRESENT_SRC_KHR.
+	sc.imageLayouts[idx] = vk.ImageLayoutPresentSrcKhr
+
+	hal.Logger().Debug("vulkan: inserted PRESENT_SRC_KHR barrier",
+		"imageIndex", idx, "oldLayout", currentLayout)
+
+	return nil
+}
+
+// recordPresentBarrier records a one-shot command buffer from the barrier pool,
+// creating the pool on first use, that transitions the current image from its
+// tracked layout to PRESENT_SRC_KHR. The caller submits it.
+func (sc *Swapchain) recordPresentBarrier() (vk.CommandBuffer, error) {
+	idx := sc.currentImage
+	if int(idx) >= len(sc.imageLayouts) {
+		return 0, fmt.Errorf("vulkan: swapchain image layout index %d is out of range", idx)
+	}
+	currentLayout := sc.imageLayouts[idx]
 	if sc.barrierPool == 0 {
 		createInfo := vk.CommandPoolCreateInfo{
 			SType:            vk.StructureTypeCommandPoolCreateInfo,
@@ -1360,7 +1409,7 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		var pool vk.CommandPool
 		result := sc.device.cmds.CreateCommandPool(sc.device.handle, &createInfo, nil, &pool)
 		if result != vk.Success {
-			return fmt.Errorf("vulkan: vkCreateCommandPool (barrier) failed: %d", result)
+			return 0, fmt.Errorf("vulkan: vkCreateCommandPool (barrier) failed: %d", result)
 		}
 		sc.device.setObjectName(vk.ObjectTypeCommandPool, uint64(pool), "PresentBarrierPool")
 		sc.barrierPool = pool
@@ -1376,7 +1425,7 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 	var cmdBuf vk.CommandBuffer
 	result := sc.device.cmds.AllocateCommandBuffers(sc.device.handle, &allocInfo, &cmdBuf)
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkAllocateCommandBuffers (barrier) failed: %d", result)
+		return 0, fmt.Errorf("vulkan: vkAllocateCommandBuffers (barrier) failed: %d", result)
 	}
 
 	// Begin recording.
@@ -1386,7 +1435,7 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 	}
 	result = sc.device.cmds.BeginCommandBuffer(cmdBuf, &beginInfo)
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkBeginCommandBuffer (barrier) failed: %d", result)
+		return 0, fmt.Errorf("vulkan: vkBeginCommandBuffer (barrier) failed: %d", result)
 	}
 
 	// Determine source access mask and pipeline stage based on the tracked layout.
@@ -1410,8 +1459,13 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		// 2. The image is in an untracked layout (conservative: may discard, but
 		//    this path only fires when no render pass targeted the swapchain,
 		//    meaning nothing meaningful was rendered to it)
+		//
+		// The source stage is COLOR_ATTACHMENT_OUTPUT, the stage a submit
+		// waits on the acquire semaphore at, so the transition runs after
+		// the presentation engine releases the image when this barrier is
+		// the submit that waits on it.
 		srcAccess = 0
-		srcStage = vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit)
+		srcStage = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
 	}
 
 	barrier := vk.ImageMemoryBarrier{
@@ -1442,46 +1496,11 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		1, &barrier,
 	)
 
-	// End recording.
 	result = sc.device.cmds.EndCommandBuffer(cmdBuf)
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkEndCommandBuffer (barrier) failed: %d", result)
+		return 0, fmt.Errorf("vulkan: vkEndCommandBuffer (barrier) failed: %d", result)
 	}
-
-	// ADR-060: Signal a present semaphore from the barrier submit.
-	// This ensures vkQueuePresentKHR explicitly waits for the barrier to
-	// complete via the per-image present semaphore pool. The present() method
-	// calls ensurePresentLayout BEFORE presentWaitSemaphores, so this
-	// semaphore is included in the wait list.
-	//
-	// The command pool reset is deferred to acquireNextImage, where the acquire
-	// fence wait guarantees the previous frame (including this barrier) has
-	// completed. This eliminates the synchronous vkWaitForFences that was
-	// previously required here.
-	barrierSem, err := sc.allocPresentSemaphore()
-	if err != nil {
-		return fmt.Errorf("vulkan: barrier present semaphore alloc: %w", err)
-	}
-	submitInfo := vk.SubmitInfo{
-		SType:                vk.StructureTypeSubmitInfo,
-		CommandBufferCount:   1,
-		PCommandBuffers:      &cmdBuf,
-		SignalSemaphoreCount: 1,
-		PSignalSemaphores:    &barrierSem,
-	}
-	result = sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, vk.Fence(0))
-	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkQueueSubmit (barrier) failed: %d", result)
-	}
-	sc.barrierPending = true
-
-	// Update tracked layout — the barrier transitions to PRESENT_SRC_KHR.
-	sc.imageLayouts[idx] = vk.ImageLayoutPresentSrcKhr
-
-	hal.Logger().Debug("vulkan: inserted PRESENT_SRC_KHR barrier",
-		"imageIndex", idx, "oldLayout", currentLayout)
-
-	return nil
+	return cmdBuf, nil
 }
 
 // presentModeToVk converts HAL PresentMode to Vulkan PresentModeKHR.

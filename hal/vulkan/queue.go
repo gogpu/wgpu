@@ -239,9 +239,6 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	if len(commandBuffers) == 0 {
 		return 0, nil
 	}
-	if err := validateSwapchainSubmission(q.activeSwapchain, q.device); err != nil {
-		return 0, err
-	}
 
 	// Convert command buffers to Vulkan handles.
 	// Use sync.Pool to avoid per-frame heap allocation (VK-PERF-001).
@@ -260,6 +257,16 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 		*pooledSlice = vkCmdBuffers[:0]
 		cmdBufferPool.Put(pooledSlice)
 	}()
+	return q.submitLocked(vkCmdBuffers)
+}
+
+// submitLocked submits vkCmdBuffers, which must not be empty, with the
+// active swapchain's acquire wait, present signal, relay and fence tracking
+// that Submit describes. q.mu is held.
+func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer) (uint64, error) {
+	if err := validateSwapchainSubmission(q.activeSwapchain, q.device); err != nil {
+		return 0, err
+	}
 
 	// Build wait/signal semaphore arrays. Maximum sizes:
 	//   wait:   acquire(1) + relay(1) = 2
@@ -804,12 +811,38 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 	}
 
 	swapchain := vkSurface.swapchain
-	err := swapchain.present(q, damageRects)
+	var err error
+	if q.activeSwapchain == swapchain && !q.acquireUsed {
+		err = q.submitPresentBarrier(swapchain)
+	}
+	if err == nil {
+		err = swapchain.present(q, damageRects)
+	}
 	if q.activeSwapchain == swapchain {
 		q.activeSwapchain = nil
 		q.acquireUsed = false
 	}
 	return err
+}
+
+// submitPresentBarrier submits the transition of swapchain's current image to
+// PRESENT_SRC_KHR as the submit that waits on its acquire semaphore, for an
+// image acquired and presented with no submission between them: WebGPU
+// presents a surface texture nothing was drawn into, and Vulkan presents an
+// image only after a submit has waited on its acquire semaphore. A failure
+// breaks the swapchain. q.mu is held.
+func (q *Queue) submitPresentBarrier(swapchain *Swapchain) error {
+	cmdBuf, err := swapchain.recordPresentBarrier()
+	if err == nil {
+		_, err = q.submitLocked([]vk.CommandBuffer{cmdBuf})
+	}
+	if err != nil {
+		swapchain.markBroken(fmt.Errorf("vulkan: present barrier submit failed: %w", err))
+		return err
+	}
+	swapchain.barrierPending = true
+	swapchain.imageLayouts[swapchain.currentImage] = vk.ImageLayoutPresentSrcKhr
+	return nil
 }
 
 // GetTimestampPeriod returns the timestamp period in nanoseconds per tick.
