@@ -50,7 +50,13 @@ func (s *surfaceDestroyCounter) Destroy() {
 func newSoftwareSurfaceTestInstance(t *testing.T) *Instance {
 	t.Helper()
 	hal.RegisterBackend(software.NewBackend())
-	instance, err := CreateInstance(&InstanceDescriptor{Backends: BackendsAll})
+	// Software-only instance. These tests drive synthetic platform targets (a
+	// fake HWND, Xlib window or CAMetalLayer pointer); handing one to a real
+	// hardware backend is invalid input that crashes instead of erroring on
+	// macOS, where Metal retains the layer pointer. Mask 0 admits only the
+	// explicitly registered BackendEmpty backend until v0.35.0, which replaces
+	// it with the BackendsSoftware bit and removes the bypass (ADR-083 2.3).
+	instance, err := CreateInstance(&InstanceDescriptor{Backends: 0})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
