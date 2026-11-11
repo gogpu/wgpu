@@ -30,7 +30,19 @@ func NewDeviceFromHAL(
 	if halQueue == nil {
 		return nil, fmt.Errorf("wgpu: halQueue is nil")
 	}
+	return newDeviceFromHAL(halDevice, halQueue, features, limits, label), nil
+}
 
+// newDeviceFromHAL is the constructor behind NewDeviceFromHAL and the
+// wgputest factory (ADR-070 rev 2 §2.4). Callers must pass non-nil HAL
+// objects.
+func newDeviceFromHAL(
+	halDevice hal.Device,
+	halQueue hal.Queue,
+	features gputypes.Features,
+	limits gputypes.Limits,
+	label string,
+) *Device {
 	// Create a core.Adapter stub for the core.Device constructor.
 	// The Rust backend doesn't go through the adapter registry, so we
 	// create a minimal adapter that satisfies the core.Device requirements.
@@ -59,7 +71,7 @@ func NewDeviceFromHAL(
 	}
 	queue.device = device
 
-	return device, nil
+	return device
 }
 
 // NewSurfaceFromHAL creates a Surface wrapping an existing HAL surface.
