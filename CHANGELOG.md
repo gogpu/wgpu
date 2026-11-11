@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.13] - 2026-11-11
+
+A Metal shader patch: naga v0.21.10.
+
 ### Changed
 
 - **naga v0.21.10** (from v0.21.9). Only Metal shaders change. A store to a run-time-indexed component of a workgroup vector or matrix column now goes through a scalar pointer: the readback corpus case `vars/workgroup-split-rt` failed on the Apple Paravirtual Metal device and passes with this release. `workgroupUniformLoad` of an atomic emits `atomic_load_explicit`, a packed `vec3` struct member is unpacked before `as_type`, and the entry point's return temporary gets a unique name.
@@ -4580,7 +4584,7 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.34.13...HEAD
 [0.17.0]: https://github.com/gogpu/wgpu/compare/v0.16.17...v0.17.0
 [0.16.14]: https://github.com/gogpu/wgpu/compare/v0.16.13...v0.16.14
 [0.16.13]: https://github.com/gogpu/wgpu/compare/v0.16.12...v0.16.13
