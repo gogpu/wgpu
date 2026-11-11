@@ -9,12 +9,22 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/software"
 
 	// Import noop backend. The noop backend is intentionally ignored during real
 	// adapter enumeration; tests that require HAL integration use an explicitly
 	// registered real backend when one is available.
 	_ "github.com/gogpu/wgpu/hal/noop"
 )
+
+// The software and noop backends both register under BackendEmpty, so the last
+// package init wins. This package init runs after every imported package and
+// re-registers software, making the ForceFallbackAdapter pin below
+// deterministic (ADR-083 §2.1: software registers by default).
+func init() {
+	hal.RegisterBackend(software.NewBackend())
+}
 
 // --- helpers ---
 
@@ -35,7 +45,9 @@ func newInstance(t *testing.T) *wgpu.Instance {
 func newAdapter(t *testing.T) (*wgpu.Instance, *wgpu.Adapter) {
 	t.Helper()
 	inst := newInstance(t)
-	adapter, err := inst.RequestAdapter(nil)
+	// Backends register by default (ADR-083 §2.1); pin the tests to the Pure
+	// Go software backend so the pick does not depend on this machine's GPUs.
+	adapter, err := inst.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
 	if err != nil {
 		t.Fatalf("RequestAdapter: %v", err)
 	}

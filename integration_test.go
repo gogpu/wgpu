@@ -33,7 +33,11 @@ func createTestDevice(t *testing.T) (*wgpu.Instance, *wgpu.Adapter, *wgpu.Device
 		t.Skipf("cannot create instance: %v", err)
 	}
 
-	adapter, err := instance.RequestAdapter(nil)
+	// Backends register by default (ADR-083 §2.1), so a plain request would
+	// pick this machine's GPU. Pin the integration tests to the software
+	// backend: the same adapter on every OS and in CI, which is what these
+	// CPU tests are written against.
+	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
 	if err != nil {
 		instance.Release()
 		t.Skipf("cannot request adapter: %v", err)
