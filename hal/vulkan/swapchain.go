@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"slices"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -43,6 +44,7 @@ type Swapchain struct {
 	currentAcquireIdx int          // Index of acquire semaphore used for current frame
 	currentAcquireSem vk.Semaphore // The acquire semaphore used for current frame
 	imageAcquired     bool
+	acquireUsed       bool // A submit has waited on currentAcquireSem; guarded by the queue's mu
 	surfaceTextures   []*SwapchainTexture
 	acquireFence      vk.Fence // Post-acquire fence for frame pacing (Rust wgpu pattern)
 
@@ -848,10 +850,7 @@ func retireOldSwapchain(device *Device, oldSwapchain *Swapchain, oldHandle vk.Sw
 		return nil
 	}
 	device.queue.mu.Lock()
-	if device.queue.activeSwapchain == oldSwapchain {
-		device.queue.activeSwapchain = nil
-		device.queue.acquireUsed = false
-	}
+	device.queue.deactivateSwapchain(oldSwapchain)
 	device.queue.mu.Unlock()
 	return nil
 }
@@ -1215,7 +1214,7 @@ func (sc *Swapchain) present(queue *Queue, damageRects []image.Rectangle) error 
 	if queue == nil || queue.device != sc.device {
 		return fmt.Errorf("vulkan: present queue does not belong to swapchain device")
 	}
-	if queue.activeSwapchain != sc || !queue.acquireUsed {
+	if !slices.Contains(queue.activeSwapchains, sc) || !sc.acquireUsed {
 		err := fmt.Errorf("vulkan: no successful swapchain submission is ready for presentation")
 		sc.markBroken(err)
 		return err

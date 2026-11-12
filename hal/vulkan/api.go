@@ -367,11 +367,7 @@ func (s *Surface) detachSwapchainFromQueue(swapchain *Swapchain) {
 	queue := s.device.queue
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
-	if queue.activeSwapchain != swapchain {
-		return
-	}
-	queue.activeSwapchain = nil
-	queue.acquireUsed = false
+	queue.deactivateSwapchain(swapchain)
 }
 
 // Unconfigure removes surface configuration.
@@ -418,8 +414,7 @@ func (s *Surface) AcquireTexture(_ hal.Fence) (*hal.AcquiredSurfaceTexture, erro
 	// and signals completion before present.
 	if s.device != nil && s.device.queue != nil {
 		s.device.queue.mu.Lock()
-		s.device.queue.activeSwapchain = s.swapchain
-		s.device.queue.acquireUsed = false // Reset for new frame
+		s.device.queue.activateSwapchain(s.swapchain)
 		s.device.queue.mu.Unlock()
 	}
 

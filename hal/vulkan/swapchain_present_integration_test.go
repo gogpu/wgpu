@@ -29,6 +29,86 @@ import (
 //
 // The test is skipped if no Vulkan GPU is available (headless CI).
 func TestAnImageAcquiredAndPresentedWithNothingSubmittedPresents(t *testing.T) {
+	instance := createTestInstance(t)
+	surface := createTestSurface(t, instance)
+	device, queue := openTestDevice(t, instance, surface)
+	configureTestSurface(t, surface, device)
+
+	swapchain := surface.(*Surface).swapchain
+	fence := device.(*Device).timelineFence
+	var barrierFenceValue uint64
+	for frame := range 3 {
+		acquired, err := surface.AcquireTexture(nil)
+		if err != nil {
+			t.Fatalf("frame %d: AcquireTexture answered %v", frame, err)
+		}
+		if fence.lastCompleted < barrierFenceValue {
+			t.Fatalf("frame %d: AcquireTexture reset the barrier pool before the barrier submit %d completed (completed: %d)", frame, barrierFenceValue, fence.lastCompleted)
+		}
+		if err := queue.Present(surface, acquired.Texture, nil); err != nil {
+			t.Fatalf("frame %d: Present of an image nothing was submitted for answered %v", frame, err)
+		}
+		barrierFenceValue = swapchain.barrierFenceValue
+		if barrierFenceValue == 0 {
+			t.Fatalf("frame %d: Present kept no fence value for its barrier submit", frame)
+		}
+	}
+}
+
+// TestTwoSurfacesAcquiredTogetherBothPresent acquires an image from each of
+// two surfaces, submits once, and presents both, as a frame drawn into two
+// windows does. The queue used to track only the surface acquired last, so
+// presenting the first failed with "no successful swapchain submission is
+// ready for presentation" and broke its swapchain.
+//
+// The test is skipped if no Vulkan GPU is available (headless CI).
+func TestTwoSurfacesAcquiredTogetherBothPresent(t *testing.T) {
+	instance := createTestInstance(t)
+	surfaces := []hal.Surface{createTestSurface(t, instance), createTestSurface(t, instance)}
+	device, queue := openTestDevice(t, instance, surfaces[0])
+	for _, surface := range surfaces {
+		configureTestSurface(t, surface, device)
+	}
+
+	for frame := range 3 {
+		textures := make([]hal.SurfaceTexture, len(surfaces))
+		for index, surface := range surfaces {
+			acquired, err := surface.AcquireTexture(nil)
+			if err != nil {
+				t.Fatalf("frame %d: AcquireTexture of surface %d answered %v", frame, index, err)
+			}
+			textures[index] = acquired.Texture
+		}
+		encoder, err := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "two surfaces"})
+		if err != nil {
+			t.Fatalf("frame %d: CreateCommandEncoder answered %v", frame, err)
+		}
+		if err := encoder.BeginEncoding("two surfaces"); err != nil {
+			t.Fatalf("frame %d: BeginEncoding answered %v", frame, err)
+		}
+		commandBuffer, err := encoder.EndEncoding()
+		if err != nil {
+			t.Fatalf("frame %d: EndEncoding answered %v", frame, err)
+		}
+		if _, err := queue.Submit([]hal.CommandBuffer{commandBuffer}); err != nil {
+			t.Fatalf("frame %d: Submit answered %v", frame, err)
+		}
+		for index, surface := range surfaces {
+			if err := queue.Present(surface, textures[index], nil); err != nil {
+				t.Fatalf("frame %d: Present of surface %d answered %v", frame, index, err)
+			}
+		}
+		if err := device.WaitIdle(); err != nil {
+			t.Fatalf("frame %d: WaitIdle answered %v", frame, err)
+		}
+		device.FreeCommandBuffer(commandBuffer)
+	}
+}
+
+// createTestInstance creates a Vulkan instance and destroys it when the test
+// ends. It skips the test in short mode and when Vulkan is not available.
+func createTestInstance(t *testing.T) hal.Instance {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping GPU integration test in short mode")
 	}
@@ -39,15 +119,27 @@ func TestAnImageAcquiredAndPresentedWithNothingSubmittedPresents(t *testing.T) {
 	if err != nil {
 		t.Skipf("Vulkan instance creation failed: %v", err)
 	}
-	defer instance.Destroy()
+	t.Cleanup(instance.Destroy)
+	return instance
+}
 
+// createTestSurface makes a surface for a new shown window, and destroys it
+// when the test ends.
+func createTestSurface(t *testing.T, instance hal.Instance) hal.Surface {
+	t.Helper()
 	window := createTestWindow(t, 256, 256)
 	surface, err := instance.CreateSurface(hal.SurfaceTarget{Kind: hal.SurfaceTargetWindowsHWND, WindowHandle: window})
 	if err != nil {
 		t.Skipf("Vulkan surface creation failed: %v", err)
 	}
-	defer surface.Destroy()
+	t.Cleanup(surface.Destroy)
+	return surface
+}
 
+// openTestDevice opens a device on the first adapter that presents to
+// surface, and destroys it when the test ends.
+func openTestDevice(t *testing.T, instance hal.Instance, surface hal.Surface) (hal.Device, hal.Queue) {
+	t.Helper()
 	adapters := instance.EnumerateAdapters(surface)
 	if len(adapters) == 0 {
 		t.Skip("no Vulkan adapter presents to the window")
@@ -56,10 +148,16 @@ func TestAnImageAcquiredAndPresentedWithNothingSubmittedPresents(t *testing.T) {
 	if err != nil {
 		t.Skipf("failed to open Vulkan device: %v", err)
 	}
-	defer opened.Device.Destroy()
-	defer func() { _ = opened.Device.WaitIdle() }()
+	t.Cleanup(opened.Device.Destroy)
+	t.Cleanup(func() { _ = opened.Device.WaitIdle() })
+	return opened.Device, opened.Queue
+}
 
-	err = surface.Configure(opened.Device, &hal.SurfaceConfiguration{
+// configureTestSurface configures surface on device, and unconfigures it
+// when the test ends.
+func configureTestSurface(t *testing.T, surface hal.Surface, device hal.Device) {
+	t.Helper()
+	err := surface.Configure(device, &hal.SurfaceConfiguration{
 		Width:       256,
 		Height:      256,
 		Format:      gputypes.TextureFormatBGRA8Unorm,
@@ -70,27 +168,7 @@ func TestAnImageAcquiredAndPresentedWithNothingSubmittedPresents(t *testing.T) {
 	if err != nil {
 		t.Skipf("surface configure failed: %v", err)
 	}
-	defer surface.Unconfigure(opened.Device)
-
-	swapchain := surface.(*Surface).swapchain
-	fence := opened.Device.(*Device).timelineFence
-	var barrierFenceValue uint64
-	for frame := range 3 {
-		acquired, err := surface.AcquireTexture(nil)
-		if err != nil {
-			t.Fatalf("frame %d: AcquireTexture answered %v", frame, err)
-		}
-		if fence.lastCompleted < barrierFenceValue {
-			t.Fatalf("frame %d: AcquireTexture reset the barrier pool before the barrier submit %d completed (completed: %d)", frame, barrierFenceValue, fence.lastCompleted)
-		}
-		if err := opened.Queue.Present(surface, acquired.Texture, nil); err != nil {
-			t.Fatalf("frame %d: Present of an image nothing was submitted for answered %v", frame, err)
-		}
-		barrierFenceValue = swapchain.barrierFenceValue
-		if barrierFenceValue == 0 {
-			t.Fatalf("frame %d: Present kept no fence value for its barrier submit", frame)
-		}
-	}
+	t.Cleanup(func() { surface.Unconfigure(device) })
 }
 
 // createTestWindow opens a shown window of the predefined STATIC class,
