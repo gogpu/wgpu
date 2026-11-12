@@ -250,31 +250,15 @@ func (e *CommandEncoder) emitStateBarrierPlans(plans []stateBarrierPlan) {
 	}
 }
 
-// ClearBuffer clears a buffer region to zero.
+// ClearBuffer clears a buffer region to zero. D3D12 has no command that
+// fills a buffer, so the region is copied from the device's zero buffer, in
+// chunks of its size, as Rust wgpu-hal dx12/command.rs clear_buffer does.
 func (e *CommandEncoder) ClearBuffer(buffer hal.Buffer, offset, size uint64) {
-	if !e.isRecording {
-		return
+	var regions []hal.BufferCopy
+	for end := offset + size; offset < end; offset += zeroBufferSize {
+		regions = append(regions, hal.BufferCopy{DstOffset: offset, Size: min(zeroBufferSize, end-offset)})
 	}
-
-	buf, ok := buffer.(*Buffer)
-	if !ok {
-		return
-	}
-
-	// D3D12 doesn't have a direct ClearBuffer command
-	// We need to either:
-	// 1. Use ClearUnorderedAccessViewUint (requires UAV)
-	// 2. Use a compute shader
-	// 3. Use CopyBufferRegion from a zero-filled buffer
-	// For now, we'll use UAV clear if the buffer supports it
-
-	if buf.usage&gputypes.BufferUsageStorage != 0 {
-		// Note: UAV clear requires ClearUnorderedAccessViewUint/Float.
-		// This requires setting up a UAV descriptor and calling ClearUnorderedAccessViewUint
-		_ = offset
-		_ = size
-	}
-	// For buffers without storage usage, we'd need a different approach
+	e.CopyBufferToBuffer(e.device.zeroBuffer, buffer, regions)
 }
 
 // CopyBufferToBuffer copies data between buffers.
