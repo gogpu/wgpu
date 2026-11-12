@@ -1544,7 +1544,7 @@ func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.C
 func (d *Device) WaitIdle() error {
 	result := d.cmds.DeviceWaitIdle(d.handle)
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkDeviceWaitIdle failed: %d", result)
+		return mapVulkanResult("vkDeviceWaitIdle", result)
 	}
 	return nil
 }
