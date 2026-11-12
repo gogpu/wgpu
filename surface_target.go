@@ -17,8 +17,10 @@ var ErrUnsupportedSurfaceTarget = errors.New("wgpu: unsupported surface target")
 // ErrSurfaceDeviceMismatch is returned by Surface.Configure when the Device
 // cannot present to the surface. On GLES a Device opened through a surface's
 // adapter is bound to that surface's native display: a surface of another
-// display needs a Device opened through its own adapter. The backend's
-// detail is wrapped in the error.
+// display needs a Device opened through its own adapter. On Vulkan the Device
+// of an adapter requested with no CompatibleSurface is opened on the first
+// graphics queue family, which may not support presenting to the surface.
+// The backend's detail is wrapped in the error.
 var ErrSurfaceDeviceMismatch = errors.New("wgpu: device cannot present to this surface")
 
 // SurfaceTarget provides the raw platform target used to create a Surface.

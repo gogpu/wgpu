@@ -60,8 +60,9 @@ var (
 	// Device cannot present to the surface. On GLES a Device belongs to the
 	// EGL context it was opened on, which is bound to one native display:
 	// GL objects are not shared between contexts, and a Wayland surface of
-	// one wl_display cannot use a context of another. The public package maps
-	// it to wgpu.ErrSurfaceDeviceMismatch.
+	// one wl_display cannot use a context of another. On Vulkan the queue
+	// family a Device was opened on may not support presenting to the
+	// surface. The public package maps it to wgpu.ErrSurfaceDeviceMismatch.
 	ErrSurfaceDeviceMismatch = errors.New("hal: device cannot present to this surface")
 
 	// ErrContextReleased is returned when a backend's native context is used

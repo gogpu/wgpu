@@ -321,6 +321,9 @@ type Surface struct {
 // Returns hal.ErrZeroArea if width or height is zero.
 // This commonly happens when the window is minimized or not yet fully visible.
 // Wait until the window has valid dimensions before calling Configure again.
+//
+// Returns hal.ErrSurfaceDeviceMismatch if the device's queue family cannot
+// present to the surface.
 func (s *Surface) Configure(device hal.Device, config *hal.SurfaceConfiguration) error {
 	if s == nil {
 		return fmt.Errorf("vulkan: surface is nil")

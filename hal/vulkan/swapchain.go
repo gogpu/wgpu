@@ -344,6 +344,19 @@ func validateSurfaceSnapshot(snapshot swapchainSurfaceSnapshot, config *hal.Surf
 	return format, presentMode, alphaMode, usage, nil
 }
 
+// validatePresentSupport answers hal.ErrSurfaceDeviceMismatch when
+// vkGetPhysicalDeviceSurfaceSupportKHR answered that queueFamily cannot
+// present to the surface, and the query's own error when it failed.
+func validatePresentSupport(queueFamily uint32, result vk.Result, supported vk.Bool32) error {
+	if result != vk.Success {
+		return surfaceQueryError(fmt.Sprintf("vkGetPhysicalDeviceSurfaceSupportKHR(queueFamily=%d)", queueFamily), result)
+	}
+	if supported == 0 {
+		return fmt.Errorf("vulkan: queue family %d: %w", queueFamily, hal.ErrSurfaceDeviceMismatch)
+	}
+	return nil
+}
+
 func querySwapchainSurfaceSnapshot(instance *Instance, device vk.PhysicalDevice, surface vk.SurfaceKHR) (swapchainSurfaceSnapshot, error) {
 	var capabilities vk.SurfaceCapabilitiesKHR
 	result := vkGetPhysicalDeviceSurfaceCapabilitiesKHR(instance, device, surface, &capabilities)
@@ -485,6 +498,13 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 
 	if s.instance == nil || device == nil || device.instance == nil || device.instance != s.instance {
 		return fmt.Errorf("vulkan: device does not belong to surface instance")
+	}
+	// A device opened with no surface takes the first graphics queue family,
+	// which need not present to this surface.
+	var presentSupported vk.Bool32
+	presentSupportResult := s.instance.cmds.GetPhysicalDeviceSurfaceSupportKHR(device.physicalDevice, device.graphicsFamily, s.handle, &presentSupported)
+	if err := validatePresentSupport(device.graphicsFamily, presentSupportResult, presentSupported); err != nil {
+		return err
 	}
 
 	// Query every capability used by VkSwapchainCreateInfoKHR and validate the
