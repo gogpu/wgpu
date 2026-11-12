@@ -96,8 +96,7 @@ package main
 import (
     "fmt"
 
-    "github.com/gogpu/wgpu"
-    _ "github.com/gogpu/wgpu/hal/allbackends" // Auto-register platform backends
+    "github.com/gogpu/wgpu" // Platform backends register automatically (ADR-083)
 )
 
 func main() {
@@ -253,17 +252,40 @@ Root Package (public API: *Device, *Buffer, *Texture...)
 
 ### Native HAL Backend Integration
 
-For the default (Pure Go) path, backends auto-register via blank imports:
+For the default (Pure Go) path, importing `github.com/gogpu/wgpu` registers the
+platform backends by default (ADR-083). No blank import is needed:
 
 ```go
-import _ "github.com/gogpu/wgpu/hal/allbackends"
+import "github.com/gogpu/wgpu"
 
-// Platform-specific backends auto-registered:
-// - Windows: Vulkan, DX12, GLES, Software
-// - Linux:   Vulkan, GLES, Software
-// - macOS:   Metal, Vulkan, Software
-// - Android/arm64 preview: Vulkan only
+// Registered by default:
+// - Windows: Vulkan, DX12, GLES (386, amd64, arm64)
+// - Linux:   Vulkan, GLES (amd64, arm64)
+// - macOS:   Metal (amd64, arm64; MoltenVK only with -tags wgpu_moltenvk)
+// - Android: Vulkan, GLES (arm64)
 ```
+
+The Pure Go software backend is **not** registered by default in this release: import `hal/software` (or
+`hal/allbackends`) until v0.35.0, where it becomes default-registered outside the default adapter mask. Keeping it
+explicit leaves every existing program's adapters and picks unchanged.
+
+A test binary that imports `wgputest` is an exception: the package imports `hal/software`, so software is
+registered there even when only `NewNoopDevice` is used, and until v0.35.0 the `BackendEmpty` rule admits it
+whatever mask a request names.
+
+Other GOOS/GOARCH combinations are outside the default registration set; import a backend explicitly (or use
+`hal/allbackends`) until v0.35.0. Some of them, for example linux/386, cannot build the Pure Go backends at all
+because goffi has no syscall files for that architecture.
+
+Opt out per backend with `-tags wgpu_novulkan`, `wgpu_nodx12`, `wgpu_nometal`,
+`wgpu_nogles` or `wgpu_nosoftware`. The latter removes the software backend
+from `wgputest` today and from the default registration in v0.35.0. Until then
+the software backend registers only when the program imports it; select it
+with `RequestAdapterOptions.ForceFallbackAdapter`. `hal/allbackends` remains
+valid until `hal` moves under `internal/` in v0.35.0, after which it is
+removed. On macOS, dropping it loses Vulkan (MoltenVK): default registration
+on darwin is Metal only. `GOOS=ios` satisfies the darwin tag, so iOS builds in
+the default set register Metal.
 
 ---
 
@@ -337,9 +359,8 @@ Cross-platform GPU access via OpenGL ES 3.0+:
 CPU rasterizer for headless and windowed rendering. Always compiled — no build tags or GPU hardware required.
 
 ```go
-// Software backend auto-registers via init().
-// No explicit import needed when using hal/allbackends.
-// For standalone usage:
+// The software backend is not registered by default until v0.35.0. Import it
+// explicitly, then select it with RequestAdapterOptions.ForceFallbackAdapter:
 import _ "github.com/gogpu/wgpu/hal/software"
 
 // Use cases:

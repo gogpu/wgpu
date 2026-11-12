@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/core/track"
-
-	_ "github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/hal/noop"
 )
 
 // =============================================================================
@@ -462,22 +462,35 @@ func newTestDeviceWithTracker(t *testing.T) (*Instance, *Adapter, *Device) {
 	return inst, adapter, device
 }
 
-// newTestDevice creates a test device (internal package wgpu access).
+// newTestDevice creates a noop test device (internal package wgpu access).
+// The tracker tests record copies with nil regions and assert the tracker's
+// state, not a real transfer, which needs the noop backend. Backends register
+// by default now (ADR-083 §2.1), so CreateInstance(nil) would pick a real GPU.
 func newTestDevice(t *testing.T) (*Instance, *Adapter, *Device) {
 	t.Helper()
-	inst, err := CreateInstance(nil)
+	instance, err := noop.NewBackend().CreateInstance(&hal.InstanceDescriptor{})
 	if err != nil {
-		t.Fatalf("CreateInstance: %v", err)
+		t.Fatalf("CreateInstance(noop): %v", err)
 	}
-	adapter, err := inst.RequestAdapter(nil)
+	adapters := instance.EnumerateAdapters(nil)
+	if len(adapters) != 1 {
+		instance.Destroy()
+		t.Fatalf("noop adapters: got %d, want 1", len(adapters))
+	}
+	open, err := adapters[0].Adapter.Open(0, adapters[0].Capabilities.Limits)
 	if err != nil {
-		t.Fatalf("RequestAdapter: %v", err)
+		instance.Destroy()
+		t.Fatalf("Open(noop): %v", err)
 	}
-	device, err := adapter.RequestDevice(nil)
-	if err != nil {
-		t.Fatalf("RequestDevice: %v", err)
-	}
-	return inst, adapter, device
+	device := newDeviceFromHAL(open.Device, open.Queue, 0, adapters[0].Capabilities.Limits, "test-noop")
+	// The caller defers device.Release(); Release is idempotent, so releasing
+	// here too keeps the instance alive until the device is actually gone.
+	t.Cleanup(func() {
+		device.Release()
+		adapters[0].Adapter.Destroy()
+		instance.Destroy()
+	})
+	return nil, nil, device
 }
 
 // createTrackedTexture creates a texture with a valid coreTexture and

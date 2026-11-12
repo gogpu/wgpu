@@ -7,7 +7,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/hal"
-	_ "github.com/gogpu/wgpu/hal/noop" // Import for side effect of registering noop backend
 )
 
 // mockBackend is a simple test backend implementation.

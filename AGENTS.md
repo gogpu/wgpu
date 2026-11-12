@@ -76,7 +76,7 @@ Example: `examples/raytracing-headless/` builds a BLAS through the software HAL 
 
 ## Current Version
 
-v0.34.13 | Go 1.25+ | Dependencies: naga v0.21.10, gpucontext v0.32.0, gputypes v0.8.2, goffi v0.6.8, webgpu v0.5.5
+v0.34.14 | Go 1.25+ | Dependencies: naga v0.21.10, gpucontext v0.32.0, gputypes v0.8.2, goffi v0.6.8, webgpu v0.5.5
 
 ## Build & Test
 

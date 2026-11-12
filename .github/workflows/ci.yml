@@ -118,6 +118,14 @@ jobs:
           # linux: goffi's internal/syscall has no linux/386 files, so the
           # linux/386 combination cannot build in the ecosystem.
           - { goos: windows, goarch: "386", tags: '', name: '386' }
+          # goffi has no syscall files for these GOARCH values, so the default
+          # backends are excluded there by backends_*.go build tags. The root
+          # package must still compile with no backends (ADR-083 §4).
+          - { goos: linux, goarch: "386", tags: '', name: 'linux-386-no-backends' }
+          - { goos: linux, goarch: arm, tags: '', name: 'linux-arm-no-backends' }
+          - { goos: android, goarch: "386", tags: '', name: 'android-386-no-backends' }
+          - { goos: android, goarch: arm, tags: '', name: 'android-arm-no-backends' }
+          - { goos: android, goarch: amd64, tags: '', name: 'android-amd64-no-backends' }
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

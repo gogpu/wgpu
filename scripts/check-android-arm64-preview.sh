@@ -51,6 +51,11 @@ require_checkout() {
 	fi
 }
 
+# The preview proves the Vulkan ABI. Default registration now also includes
+# GLES and the software backend (ADR-083), so the audited binary opts both out;
+# the default build is compiled separately to prove it still works.
+vulkan_only_tags="wgpu_nogles,wgpu_nosoftware"
+
 goffi_module=github.com/go-webgpu/goffi
 # The canonical goffi release is the one go.mod requires; a hard-coded copy here
 # went stale with every goffi bump.
@@ -150,11 +155,13 @@ audit_source_selection() {
 		exit 1
 	fi
 
-	(cd "$root" && env "${env_args[@]}" go list -deps ./examples/triangle-headless) >"$dependencies"
+	(cd "$root" && env "${env_args[@]}" go list -tags "$vulkan_only_tags" -deps ./examples/triangle-headless) >"$dependencies"
 	if grep -Eq 'github.com/gogpu/wgpu/hal/(gles|software)$' "$dependencies"; then
-		echo "Android dependency graph contains a GLES or software fallback" >&2
+		echo "the Vulkan-only Android dependency graph contains a GLES or software fallback" >&2
 		exit 1
 	fi
+	# The default graph now includes both by design (ADR-083); prove it builds.
+	(cd "$root" && env "${env_args[@]}" go list -deps ./examples/triangle-headless) >/dev/null
 }
 
 audit_elf() {
@@ -201,7 +208,8 @@ run_mode() {
 	(
 		cd "$root"
 		env "${env_args[@]}" go test -exec=true ./...
-		env "${env_args[@]}" go build -o "$native_binary" ./examples/triangle-headless
+		env "${env_args[@]}" go build -tags "$vulkan_only_tags" -o "$native_binary" ./examples/triangle-headless
+		env "${env_args[@]}" go build -o "$tmpdir/$label-default" ./examples/triangle-headless
 	)
 	audit_elf "$native_binary" "$label-native" 'libvulkan.so'
 	if [[ -n "$webgpu_dir" ]]; then

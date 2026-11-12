@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.14] - 2026-11-12
+
+A registration patch: the platform hardware backends register by default, the `wgputest` test seam and
+`Device.CheckHealth` are new, and DX12 device-removal errors match `wgpu.ErrDeviceLost`.
+
+### Added
+
+- **The platform hardware backends register by default** (LEAD-007, ADR-083 Phase 0). Importing `github.com/gogpu/wgpu` registers Vulkan, DX12 and OpenGL ES on Windows (386, amd64, arm64), Vulkan and OpenGL ES on Linux (amd64, arm64), Metal on macOS (amd64, arm64; MoltenVK only with `-tags wgpu_moltenvk`), and Vulkan and OpenGL ES on Android (arm64). Other GOOS/GOARCH combinations are outside the default set and register no backends, as before; some of them cannot build the Pure Go backends at all because goffi has no syscall files there. The blank import of `hal/allbackends` is no longer required for the hardware backends; it stays valid until `hal` moves under `internal/` in v0.35.0. Opt out per backend with `wgpu_novulkan`, `wgpu_nodx12`, `wgpu_nometal` and `wgpu_nogles`.
+
+  **The Pure Go software backend is not registered by default in this release.** It stays an explicit import (`hal/software` or `hal/allbackends`) until v0.35.0, where the software bit and the removal of the BackendEmpty mask bypass make it default-registered outside the default adapter mask. Keeping it explicit is what makes this release invariant for every existing program: a program that imported one backend, or one that is absent on the machine, keeps the same adapters and the same no-adapter result. `wgpu_nosoftware` now compiles the software backend out of `wgputest`'s software constructor; from v0.35.0 it also removes it from the default registration.
+- **`wgputest`**, a public test seam. `NewSoftwareDevice` and `NewNoopDevice` return a device, its queue and a cleanup. The noop device records encoder, buffer, texture, pass, bind (with the buffer's label and size), draw and submit calls (a global `Seq`, the enclosing pass and the creating encoder) and injects faults on `CreateCommandEncoder` and `WriteBuffer`. It never skips: a backend missing from the build is reported as `wgputest.ErrUnavailable`.
+- **`Device.CheckHealth()`** reports a lost or unhealthy device. A lost-device error satisfies `errors.Is(err, wgpu.ErrDeviceLost)`. DX12 implements the check today; other backends return nil.
+
+### Changed
+
+- **A program that imported a single backend (or none) now sees every platform hardware backend**, so a plain `RequestAdapter` picks hardware first. That is the one intended behaviour change of this release. With `hal/software` imported, `RequestAdapterOptions.ForceFallbackAdapter` still forces the software backend until `BackendsSoftware` lands in v0.35.0.
+- **On macOS, dropping the `hal/allbackends` import loses Vulkan (MoltenVK).** Default registration on darwin is Metal only; MoltenVK Vulkan is opt-in with `-tags wgpu_moltenvk`. `GOOS=ios` satisfies the darwin build tag, so iOS builds in the default set register Metal.
+- **Consumer CI matrices change**: tests that skipped for lack of a registered backend now run. Request the backend a test needs through the `Backends` mask — the software backend is not registered by default in this release, so in a program that does not import it a mask names exactly the hardware backends in it — and let its absence fail through the repository's require switch. A test binary that imports `wgputest` is the exception: the package imports `hal/software`, which registers software for the whole binary even when only `NewNoopDevice` is called, and until v0.35.0 the `BackendEmpty` rule admits software whatever mask is requested. Mask-and-skip tests that adopt `wgputest` must account for that.
+- **`hal/noop` no longer registers itself in `init`.** It shares the `BackendEmpty` variant with the Pure Go software backend, which registers when imported (and by default from v0.35.0), so an automatic registration could replace software depending on package initialization order. Call `noop.Register()` explicitly where the global HAL registry needs the noop backend; `wgputest.NewNoopDevice` uses a private instance and needs no registration.
+
+### Fixed
+
+- **A DX12 device-removal error satisfies `errors.Is(err, wgpu.ErrDeviceLost)`**: the removal reason and the device-lost sentinel are joined.
+
 ## [0.34.13] - 2026-11-11
 
 A Metal shader patch: naga v0.21.10.
@@ -4584,7 +4608,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.34.13...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.34.14...HEAD
+[0.34.14]: https://github.com/gogpu/wgpu/compare/v0.34.13...v0.34.14
 [0.17.0]: https://github.com/gogpu/wgpu/compare/v0.16.17...v0.17.0
 [0.16.14]: https://github.com/gogpu/wgpu/compare/v0.16.13...v0.16.14
 [0.16.13]: https://github.com/gogpu/wgpu/compare/v0.16.12...v0.16.13

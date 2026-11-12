@@ -27,6 +27,9 @@ type Queue struct {
 	device    *Device
 	pending   *pendingWrites
 
+	// test, when non-nil, records the public calls for package wgputest.
+	test testHooks
+
 	// lastSubmissionIndex is the most recent submission index returned by
 	// hal.Queue.Submit(). Used by DestroyQueue to conservatively defer
 	// resource destruction until after the latest known submission completes.
@@ -58,7 +61,14 @@ type transitRecording struct {
 func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.submitLocked(commandBuffers)
+	index, err := q.submitLocked(commandBuffers)
+	if err != nil {
+		return index, err
+	}
+	if q.test != nil {
+		q.test.Submitted(index, len(commandBuffers))
+	}
+	return index, nil
 }
 
 // submitLocked is Submit with q.mu held. Queue.WriteTexture calls it for the
@@ -277,6 +287,11 @@ func (q *Queue) Poll() uint64 {
 //
 // Matches Rust wgpu-core queue.rs:647-672 (validate_write_buffer_impl).
 func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
+	if q.test != nil {
+		if err := q.test.FaultWriteBuffer(); err != nil {
+			return err
+		}
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 

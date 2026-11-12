@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -106,7 +107,8 @@ type Device struct {
 	readbackHeap d3d12.D3D12_HEAP_PROPERTIES
 
 	// Debug: operation step counter for tracking which call kills the device.
-	debugStep int
+	// Atomic: checkHealth also runs from public CheckHealth on any goroutine.
+	debugStep atomic.Int64
 
 	// Per-frame tracking for CPU/GPU overlap (DX12-OPT-002).
 	frames         [maxFramesInFlight]frameState
@@ -717,14 +719,20 @@ func (d *Device) getOrCreateEmptyRootSignature() (*d3d12.ID3D12RootSignature, er
 // checkHealth verifies the device is still alive and logs the current step.
 // Returns an error if the device has been removed.
 func (d *Device) checkHealth(operation string) error {
-	d.debugStep++
+	step := d.debugStep.Add(1)
 	d.DrainDebugMessages()
 	if reason := d.raw.GetDeviceRemovedReason(); reason != nil {
-		hal.Logger().Error("dx12: device removed", "step", d.debugStep, "operation", operation, "reason", reason)
+		hal.Logger().Error("dx12: device removed", "step", step, "operation", operation, "reason", reason)
 		d.logDREDBreadcrumbs()
-		return fmt.Errorf("dx12: device removed at step %d (%s): %w", d.debugStep, operation, reason)
+		return deviceRemovedError(step, operation, reason)
 	}
 	return nil
+}
+
+// deviceRemovedError builds the device-removal error. The backend's reason and
+// hal.ErrDeviceLost are both wrapped, so errors.Is matches either one.
+func deviceRemovedError(step int64, operation string, reason error) error {
+	return fmt.Errorf("dx12: device removed at step %d (%s): %w: %w", step, operation, reason, hal.ErrDeviceLost)
 }
 
 // CheckHealth is a public diagnostic method that checks if the DX12 device

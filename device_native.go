@@ -25,6 +25,9 @@ type Device struct {
 	instance *Instance
 	released atomic.Bool
 
+	// test, when non-nil, records the public calls for package wgputest.
+	test testHooks
+
 	// recordings holds the command encoders and command buffers that still
 	// carry resource references; Release discards them.
 	recordings recordingRegistry
@@ -102,6 +105,9 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 	// explicit lifecycle management (BUG-WGPU-RESOURCE-LIFECYCLE-001).
 	buf.cleanup = registerBufferCleanup(buf, d, coreBuffer, desc.Label)
 
+	if d.test != nil {
+		d.test.BufferCreated(desc.Label, desc.Size, desc.Usage)
+	}
 	return buf, nil
 }
 
@@ -164,6 +170,9 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		d.destroyTextureDeferred(halTexture, td)
 	})
 
+	if d.test != nil {
+		d.test.TextureCreated(desc.Label)
+	}
 	return &Texture{hal: halTexture, device: d, format: desc.Format, viewFormats: copyViewFormats(desc.ViewFormats), coreTexture: coreTexture}, nil
 }
 
@@ -232,6 +241,9 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	}
 	if textureRef != nil {
 		textureRef.Clone()
+	}
+	if d.test != nil {
+		d.test.TextureViewCreated(halDesc.Label)
 	}
 	return &TextureView{
 		hal:          halView,
@@ -1023,6 +1035,11 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 	if d.released.Load() {
 		return nil, ErrReleased
 	}
+	if d.test != nil {
+		if err := d.test.FaultCreateCommandEncoder(); err != nil {
+			return nil, err
+		}
+	}
 
 	label := ""
 	if desc != nil {
@@ -1059,6 +1076,7 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 			trackedRefs: make([]*core.ResourceRef, 0, 64),
 		}
 		d.recordings.addEncoder(enc)
+		d.attachTestHooks(enc, label)
 		return enc, nil
 	}
 
@@ -1071,7 +1089,18 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 
 	enc := &CommandEncoder{core: coreEncoder, device: d}
 	d.recordings.addEncoder(enc)
+	d.attachTestHooks(enc, label)
 	return enc, nil
+}
+
+// attachTestHooks binds the wgputest recorder to a user command encoder and
+// records its creation. It is a no-op on a device without a recorder.
+func (d *Device) attachTestHooks(enc *CommandEncoder, label string) {
+	if d.test == nil {
+		return
+	}
+	enc.test = d.test
+	enc.testEncoder = d.test.EncoderCreated(label)
 }
 
 // CreateFence creates a GPU synchronization fence.
