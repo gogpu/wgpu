@@ -8,6 +8,7 @@ package vulkan
 import (
 	"fmt"
 	"image"
+	"slices"
 	"sync"
 	"time"
 	"unsafe"
@@ -121,21 +122,24 @@ func (r *relaySemaphores) destroy(cmds *vk.Commands, device vk.Device) {
 
 // Queue implements hal.Queue for Vulkan.
 type Queue struct {
-	handle          vk.Queue
-	device          *Device
-	familyIndex     uint32
-	activeSwapchain *Swapchain // Set by AcquireTexture, used by Submit for synchronization
-	acquireUsed     bool       // True if acquire semaphore was consumed by a submit
-	relay           *relaySemaphores
-	mu              sync.Mutex // Protects Submit() and Present() from concurrent access
+	handle      vk.Queue
+	device      *Device
+	familyIndex uint32
+	relay       *relaySemaphores
+	mu          sync.Mutex // Protects Submit() and Present() from concurrent access
+
+	// activeSwapchains are the swapchains with an image acquired and not yet
+	// presented or discarded, in acquire order. Set by AcquireTexture, used by
+	// Submit for synchronization. A frame drawn into several windows holds
+	// several at once.
+	activeSwapchains []*Swapchain
 
 	// BUG-WGPU-VK-005: Offscreen submit semaphore suppression.
 	// When swapchainSuppressed is true, Submit skips swapchain semaphore binding.
-	// savedSwapchain/savedAcquireUsed hold the original values for restoration.
-	// Same pattern as VK-004 (WriteTexture, lines 620-634) but caller-controlled.
+	// savedSwapchains holds the active swapchains for restoration.
+	// Same pattern as VK-004 (WriteTexture) but caller-controlled.
 	swapchainSuppressed bool
-	savedSwapchain      *Swapchain
-	savedAcquireUsed    bool
+	savedSwapchains     []*Swapchain
 }
 
 func validateSwapchainSubmission(swapchain *Swapchain, device *Device) error {
@@ -166,13 +170,30 @@ func validateSwapchainSubmission(swapchain *Swapchain, device *Device) error {
 	return nil
 }
 
-func (q *Queue) markActiveSwapchainBroken(err error) {
-	if q.activeSwapchain != nil {
-		q.activeSwapchain.markBroken(err)
+// activateSwapchain records that swapchain has acquired an image whose
+// acquire semaphore no submit has waited on yet. q.mu is held.
+func (q *Queue) activateSwapchain(swapchain *Swapchain) {
+	swapchain.acquireUsed = false
+	if !slices.Contains(q.activeSwapchains, swapchain) {
+		q.activeSwapchains = append(q.activeSwapchains, swapchain)
 	}
 }
 
-func (q *Queue) advanceRelay() (wait, signal vk.Semaphore, err error) {
+// deactivateSwapchain forgets swapchain's acquired image once it is
+// presented, discarded or retired. q.mu is held.
+func (q *Queue) deactivateSwapchain(swapchain *Swapchain) {
+	swapchain.acquireUsed = false
+	q.activeSwapchains = slices.DeleteFunc(q.activeSwapchains, func(active *Swapchain) bool { return active == swapchain })
+}
+
+// markSwapchainsBroken marks each of swapchains broken with err.
+func markSwapchainsBroken(swapchains []*Swapchain, err error) {
+	for _, swapchain := range swapchains {
+		swapchain.markBroken(err)
+	}
+}
+
+func (q *Queue) advanceRelay(swapchains []*Swapchain) (wait, signal vk.Semaphore, err error) {
 	if q.relay == nil {
 		return 0, 0, nil
 	}
@@ -181,28 +202,26 @@ func (q *Queue) advanceRelay() (wait, signal vk.Semaphore, err error) {
 		return wait, signal, nil
 	}
 	err = fmt.Errorf("vulkan: relay semaphore advance: %w", err)
-	q.markActiveSwapchainBroken(err)
+	markSwapchainsBroken(swapchains, err)
 	return 0, 0, err
 }
 
 func (q *Queue) submitTimeline(
 	submitInfo *vk.SubmitInfo,
-	signalSems *[3]vk.Semaphore,
-	waitCount, signalCount uint32,
-	consumedAcquire bool,
+	signalSems []vk.Semaphore,
+	consumed []*Swapchain,
 	signalValue uint64,
 ) (uint64, error) {
-	if consumedAcquire {
-		q.activeSwapchain.acquireFenceValues[q.activeSwapchain.currentAcquireIdx] = signalValue
-	}
-
-	signalSems[signalCount] = q.device.timelineFence.timelineSemaphore
-	signalCount++
+	signalSems = append(signalSems, q.device.timelineFence.timelineSemaphore)
+	signalCount := uint32(len(signalSems))
 	submitInfo.SignalSemaphoreCount = signalCount
 	submitInfo.PSignalSemaphores = &signalSems[0]
 
-	var waitValues [2]uint64
-	var signalValues [3]uint64
+	// Binary semaphores get value 0 (ignored); the timeline semaphore, always
+	// last, gets signalValue.
+	waitCount := submitInfo.WaitSemaphoreCount
+	waitValues := make([]uint64, waitCount)
+	signalValues := make([]uint64, signalCount)
 	signalValues[signalCount-1] = signalValue
 	timelineSubmitInfo := vk.TimelineSemaphoreSubmitInfo{
 		SType: vk.StructureTypeTimelineSemaphoreSubmitInfo,
@@ -218,9 +237,7 @@ func (q *Queue) submitTimeline(
 	result := vkQueueSubmit(q, 1, submitInfo, vk.Fence(0))
 	if result != vk.Success {
 		err := fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
-		if consumedAcquire {
-			q.activeSwapchain.markBroken(err)
-		}
+		markSwapchainsBroken(consumed, err)
 		return 0, err
 	}
 	return signalValue, nil
@@ -257,28 +274,33 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 		*pooledSlice = vkCmdBuffers[:0]
 		cmdBufferPool.Put(pooledSlice)
 	}()
-	return q.submitLocked(vkCmdBuffers)
+	return q.submitLocked(vkCmdBuffers, q.activeSwapchains)
 }
 
 // submitLocked submits vkCmdBuffers, which must not be empty, with the
-// active swapchain's acquire wait, present signal, relay and fence tracking
-// that Submit describes. q.mu is held.
-func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer) (uint64, error) {
-	if err := validateSwapchainSubmission(q.activeSwapchain, q.device); err != nil {
-		return 0, err
+// acquire wait, present signal, relay and fence tracking that Submit
+// describes, for each of swapchains. q.mu is held.
+func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer, swapchains []*Swapchain) (uint64, error) {
+	for _, swapchain := range swapchains {
+		if err := validateSwapchainSubmission(swapchain, q.device); err != nil {
+			return 0, err
+		}
 	}
 
-	// Build wait/signal semaphore arrays. Maximum sizes:
-	//   wait:   acquire(1) + relay(1) = 2
-	//   signal: present(1) + relay(1) + timeline(1) = 3
+	// Wait: each swapchain's acquire, and the relay. Signal: a present
+	// semaphore per swapchain, the relay, and the timeline semaphore that
+	// submitTimeline adds. The backing arrays hold a frame of up to three
+	// windows without allocating.
 	var (
-		waitSems   [2]vk.Semaphore
-		waitStages [2]vk.PipelineStageFlags
-		waitCount  uint32
-
-		signalSems  [3]vk.Semaphore
-		signalCount uint32
+		waitBacking     [4]vk.Semaphore
+		stageBacking    [4]vk.PipelineStageFlags
+		signalBacking   [5]vk.Semaphore
+		consumedBacking [3]*Swapchain
 	)
+	waitSems := waitBacking[:0]
+	waitStages := stageBacking[:0]
+	signalSems := signalBacking[:0]
+	consumed := consumedBacking[:0]
 
 	// ADR-058: Acquire wait and present signal are now SEPARATE concerns.
 	//
@@ -290,46 +312,45 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer) (uint64, error) {
 	// accumulated semaphores, ensuring every submission completes before display.
 	// This fixes g3d#22: multiple submits per frame with only the first signaling
 	// present caused a race where present didn't wait for later submissions.
-	consumedAcquire := false
-	if q.activeSwapchain != nil && !q.acquireUsed {
-		if q.activeSwapchain.currentAcquireSem == 0 {
+	//
+	// Both apply to every active swapchain: a frame drawn into several windows
+	// acquires them all before its submit, and presents each after it.
+	for _, swapchain := range swapchains {
+		if swapchain.acquireUsed {
+			continue
+		}
+		if swapchain.currentAcquireSem == 0 {
 			err := fmt.Errorf("vulkan: active swapchain acquire semaphore is invalid")
-			q.activeSwapchain.markBroken(err)
+			swapchain.markBroken(err)
 			return 0, err
 		}
-		waitSems[waitCount] = q.activeSwapchain.currentAcquireSem
-		waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
-		waitCount++
-		q.acquireUsed = true
-		consumedAcquire = true
+		waitSems = append(waitSems, swapchain.currentAcquireSem)
+		waitStages = append(waitStages, vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit))
+		swapchain.acquireUsed = true
+		consumed = append(consumed, swapchain)
 	}
-
-	// ADR-058: Signal a present semaphore on EVERY submit with an active swapchain.
-	if q.activeSwapchain != nil {
-		presentSem, err := q.activeSwapchain.allocPresentSemaphore()
+	for _, swapchain := range swapchains {
+		presentSem, err := swapchain.allocPresentSemaphore()
 		if err != nil {
-			q.activeSwapchain.markBroken(err)
+			swapchain.markBroken(err)
 			return 0, err
 		}
-		signalSems[signalCount] = presentSem
-		signalCount++
+		signalSems = append(signalSems, presentSem)
 	}
 
 	// VK-SYNC-001: Add relay semaphores for GPU-side submission ordering.
 	// This ensures that barriers from one submission are visible to the next
 	// (required by the wgpu_hal Queue trait, not guaranteed by Vulkan spec).
-	relayWait, relaySignal, err := q.advanceRelay()
+	relayWait, relaySignal, err := q.advanceRelay(swapchains)
 	if err != nil {
 		return 0, err
 	}
 	if relayWait != 0 {
-		waitSems[waitCount] = relayWait
-		waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit)
-		waitCount++
+		waitSems = append(waitSems, relayWait)
+		waitStages = append(waitStages, vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit))
 	}
 	if relaySignal != 0 {
-		signalSems[signalCount] = relaySignal
-		signalCount++
+		signalSems = append(signalSems, relaySignal)
 	}
 
 	submitInfo := vk.SubmitInfo{
@@ -337,20 +358,26 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer) (uint64, error) {
 		CommandBufferCount: uint32(len(vkCmdBuffers)),
 		PCommandBuffers:    &vkCmdBuffers[0],
 	}
-	if waitCount > 0 {
-		submitInfo.WaitSemaphoreCount = waitCount
+	if len(waitSems) > 0 {
+		submitInfo.WaitSemaphoreCount = uint32(len(waitSems))
 		submitInfo.PWaitSemaphores = &waitSems[0]
 		submitInfo.PWaitDstStageMask = &waitStages[0]
 	}
-	if signalCount > 0 {
-		submitInfo.SignalSemaphoreCount = signalCount
+	if len(signalSems) > 0 {
+		submitInfo.SignalSemaphoreCount = uint32(len(signalSems))
 		submitInfo.PSignalSemaphores = &signalSems[0]
 	}
 
 	signalValue := q.device.timelineFence.nextSignalValue()
 
+	// VK-IMPL-004: Record which submission consumed each acquire semaphore,
+	// for the pre-acquire wait.
+	for _, swapchain := range consumed {
+		swapchain.acquireFenceValues[swapchain.currentAcquireIdx] = signalValue
+	}
+
 	if q.device.timelineFence.isTimeline {
-		return q.submitTimeline(&submitInfo, &signalSems, waitCount, signalCount, consumedAcquire, signalValue)
+		return q.submitTimeline(&submitInfo, signalSems, consumed, signalValue)
 	}
 
 	// Binary path (VK-IMPL-003): Get a fence from the pool to track this submission.
@@ -358,26 +385,19 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer) (uint64, error) {
 	// Previously, user-provided fences caused a double submit (real + empty for pool tracking).
 	// Now the HAL manages fences internally, eliminating the double submit entirely.
 	pool := q.device.timelineFence.pool
-
-	// VK-IMPL-004: Record fence value for pre-acquire wait (binary path).
-	if consumedAcquire {
-		q.activeSwapchain.acquireFenceValues[q.activeSwapchain.currentAcquireIdx] = signalValue
-	}
 	poolFence, err := pool.signal(q.device.cmds, q.device.handle, signalValue)
 	if err != nil {
-		if consumedAcquire {
-			q.activeSwapchain.markBroken(fmt.Errorf("vulkan: Submit fencePool signal: %w", err))
-		}
-		return 0, fmt.Errorf("vulkan: Submit fencePool signal: %w", err)
+		err = fmt.Errorf("vulkan: Submit fencePool signal: %w", err)
+		markSwapchainsBroken(consumed, err)
+		return 0, err
 	}
 
 	// Single vkQueueSubmit with pool fence — no more double submit.
 	result := vkQueueSubmit(q, 1, &submitInfo, poolFence)
 	if result != vk.Success {
-		if consumedAcquire {
-			q.activeSwapchain.markBroken(fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result))
-		}
-		return 0, fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+		err := fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+		markSwapchainsBroken(consumed, err)
+		return 0, err
 	}
 	return signalValue, nil
 }
@@ -408,7 +428,9 @@ func (q *Queue) PollCompleted() uint64 {
 	return pool.lastCompleted
 }
 
-// SubmitForPresent submits command buffers with swapchain synchronization.
+// SubmitForPresent submits command buffers with swapchain synchronization:
+// they wait on swapchain's acquire, if no submit has yet, and signal one of its
+// present semaphores.
 //
 // VK-SYNC-001: Every submission chains through relay semaphores to guarantee
 // GPU-side execution ordering between consecutive vkQueueSubmit calls.
@@ -422,152 +444,28 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 	if swapchain == nil {
 		return fmt.Errorf("vulkan: swapchain is nil")
 	}
-	if err := validateSwapchainSubmission(swapchain, q.device); err != nil {
-		return err
-	}
-	if q.activeSwapchain != nil && q.activeSwapchain != swapchain {
-		return fmt.Errorf("vulkan: queue has a different active swapchain")
-	}
-	if swapchain.currentAcquireSem == 0 || swapchain.currentImage >= uint32(len(swapchain.presentPools)) {
-		err := fmt.Errorf("vulkan: swapchain semaphore state is invalid")
-		swapchain.markBroken(err)
-		return err
-	}
 
 	// Convert command buffers to Vulkan handles.
 	// Use sync.Pool to avoid per-frame heap allocation (VK-PERF-001).
 	pooledSlice := cmdBufferPool.Get().(*[]vk.CommandBuffer)
 	vkCmdBuffers := (*pooledSlice)[:0]
-	for _, cb := range commandBuffers {
-		vkCB, ok := cb.(*CommandBuffer)
-		if !ok {
-			*pooledSlice = vkCmdBuffers
-			cmdBufferPool.Put(pooledSlice)
-			return fmt.Errorf("vulkan: command buffer is not a Vulkan command buffer")
-		}
-		vkCmdBuffers = append(vkCmdBuffers, vkCB.handle)
-	}
 	defer func() {
 		*pooledSlice = vkCmdBuffers[:0]
 		cmdBufferPool.Put(pooledSlice)
 	}()
-
-	// Build wait/signal semaphore arrays. Maximum sizes:
-	//   wait:   acquire(1) + relay(1) = 2
-	//   signal: present(1) + relay(1) + timeline(1) = 3
-	var (
-		waitSems   [2]vk.Semaphore
-		waitStages [2]vk.PipelineStageFlags
-		waitCount  uint32
-
-		signalSems  [3]vk.Semaphore
-		signalCount uint32
-	)
-
-	// ADR-058: Acquire wait — only on first submit (same as Submit()).
-	if q.activeSwapchain != swapchain || !q.acquireUsed {
-		waitSems[waitCount] = swapchain.currentAcquireSem
-		waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)
-		waitCount++
-	}
-
-	// ADR-058: Present signal — allocate from pool on every submit.
-	presentSem, err := swapchain.allocPresentSemaphore()
-	if err != nil {
-		swapchain.markBroken(err)
-		return err
-	}
-	signalSems[signalCount] = presentSem
-	signalCount++
-
-	// VK-SYNC-001: Add relay semaphores for GPU-side submission ordering.
-	if q.relay != nil {
-		relayWait, relaySignal, err := q.relay.advance(q.device.cmds, q.device.handle)
-		if err != nil {
-			swapchain.markBroken(fmt.Errorf("vulkan: relay semaphore advance: %w", err))
-			return fmt.Errorf("vulkan: relay semaphore advance: %w", err)
+	for _, cb := range commandBuffers {
+		vkCB, ok := cb.(*CommandBuffer)
+		if !ok {
+			return fmt.Errorf("vulkan: command buffer is not a Vulkan command buffer")
 		}
-		if relayWait != 0 {
-			waitSems[waitCount] = relayWait
-			waitStages[waitCount] = vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit)
-			waitCount++
-		}
-		signalSems[signalCount] = relaySignal
-		signalCount++
+		vkCmdBuffers = append(vkCmdBuffers, vkCB.handle)
 	}
 
-	submitInfo := vk.SubmitInfo{
-		SType:                vk.StructureTypeSubmitInfo,
-		WaitSemaphoreCount:   waitCount,
-		PWaitSemaphores:      &waitSems[0],
-		PWaitDstStageMask:    &waitStages[0],
-		CommandBufferCount:   uint32(len(vkCmdBuffers)),
-		PCommandBuffers:      &vkCmdBuffers[0],
-		SignalSemaphoreCount: signalCount,
-		PSignalSemaphores:    &signalSems[0],
+	if !slices.Contains(q.activeSwapchains, swapchain) {
+		q.activeSwapchains = append(q.activeSwapchains, swapchain)
 	}
-
-	// Timeline path (VK-IMPL-001): Also signal the timeline semaphore on this submit.
-	if q.device.timelineFence.isTimeline {
-		signalValue := q.device.timelineFence.nextSignalValue()
-
-		// VK-IMPL-004: Record which submission consumed this acquire semaphore.
-		swapchain.acquireFenceValues[swapchain.currentAcquireIdx] = signalValue
-
-		// Add timeline semaphore to the signal list.
-		signalSems[signalCount] = q.device.timelineFence.timelineSemaphore
-		signalCount++
-		submitInfo.SignalSemaphoreCount = signalCount
-		submitInfo.PSignalSemaphores = &signalSems[0]
-
-		// Build timeline values arrays. Binary semaphores get value 0 (ignored),
-		// timeline semaphore (always last) gets signalValue.
-		var waitValues [2]uint64
-		var signalValues [3]uint64
-		signalValues[signalCount-1] = signalValue
-
-		timelineSubmitInfo := vk.TimelineSemaphoreSubmitInfo{
-			SType:                     vk.StructureTypeTimelineSemaphoreSubmitInfo,
-			WaitSemaphoreValueCount:   waitCount,
-			PWaitSemaphoreValues:      &waitValues[0],
-			SignalSemaphoreValueCount: signalCount,
-			PSignalSemaphoreValues:    &signalValues[0],
-		}
-		submitInfo.PNext = (*uintptr)(unsafe.Pointer(&timelineSubmitInfo))
-
-		result := vkQueueSubmit(q, 1, &submitInfo, vk.Fence(0))
-		if result != vk.Success {
-			swapchain.markBroken(fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result))
-			return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
-		}
-		q.activeSwapchain = swapchain
-		q.acquireUsed = true
-		return nil
-	}
-
-	// Binary path (VK-IMPL-003): Track submission with fence pool for waitForGPU
-	// and VK-IMPL-004 pre-acquire semaphore wait.
-	pool := q.device.timelineFence.pool
-	signalValue := q.device.timelineFence.nextSignalValue()
-
-	// VK-IMPL-004: Record which submission consumed this acquire semaphore.
-	swapchain.acquireFenceValues[swapchain.currentAcquireIdx] = signalValue
-
-	poolFence, err := pool.signal(q.device.cmds, q.device.handle, signalValue)
-	if err != nil {
-		swapchain.markBroken(fmt.Errorf("vulkan: SubmitForPresent fencePool signal: %w", err))
-		return fmt.Errorf("vulkan: SubmitForPresent fencePool signal: %w", err)
-	}
-
-	result := vkQueueSubmit(q, 1, &submitInfo, poolFence)
-	if result != vk.Success {
-		swapchain.markBroken(fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result))
-		return fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
-	}
-
-	q.activeSwapchain = swapchain
-	q.acquireUsed = true
-	return nil
+	_, err := q.submitLocked(vkCmdBuffers, []*Swapchain{swapchain})
+	return err
 }
 
 // WriteBuffer writes data to a buffer immediately.
@@ -742,18 +640,16 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	// VK-004: Staging uploads must NOT consume swapchain semaphores.
 	// When WriteTexture is called between BeginFrame/EndFrame (e.g., in onDraw),
-	// the activeSwapchain acquire semaphore must be preserved for the render pass
-	// Submit, not consumed by this staging upload. Temporarily clear activeSwapchain
+	// the active swapchains' acquire semaphores must be preserved for the render pass
+	// Submit, not consumed by this staging upload. Temporarily clear activeSwapchains
 	// so the internal Submit runs without render-pass synchronization.
 	q.mu.Lock()
-	savedSwapchain := q.activeSwapchain
-	savedAcquireUsed := q.acquireUsed
-	q.activeSwapchain = nil
+	savedSwapchains := q.activeSwapchains
+	q.activeSwapchains = nil
 	q.mu.Unlock()
 	defer func() {
 		q.mu.Lock()
-		q.activeSwapchain = savedSwapchain
-		q.acquireUsed = savedAcquireUsed
+		q.activeSwapchains = savedSwapchains
 		q.mu.Unlock()
 	}()
 
@@ -812,16 +708,13 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 
 	swapchain := vkSurface.swapchain
 	var err error
-	if q.activeSwapchain == swapchain && !q.acquireUsed {
+	if slices.Contains(q.activeSwapchains, swapchain) && !swapchain.acquireUsed {
 		err = q.submitPresentBarrier(swapchain)
 	}
 	if err == nil {
 		err = swapchain.present(q, damageRects)
 	}
-	if q.activeSwapchain == swapchain {
-		q.activeSwapchain = nil
-		q.acquireUsed = false
-	}
+	q.deactivateSwapchain(swapchain)
 	return err
 }
 
@@ -835,7 +728,7 @@ func (q *Queue) submitPresentBarrier(swapchain *Swapchain) error {
 	cmdBuf, err := swapchain.recordPresentBarrier()
 	var fenceValue uint64
 	if err == nil {
-		fenceValue, err = q.submitLocked([]vk.CommandBuffer{cmdBuf})
+		fenceValue, err = q.submitLocked([]vk.CommandBuffer{cmdBuf}, []*Swapchain{swapchain})
 	}
 	if err != nil {
 		swapchain.markBroken(fmt.Errorf("vulkan: present barrier submit failed: %w", err))
@@ -869,34 +762,30 @@ func (q *Queue) SupportsCommandBufferCopies() bool {
 // suppression, the first (offscreen) submit hijacks swapchain semaphores,
 // leaving the compositor submit without synchronization -> race -> flickering.
 //
-// When suppressed is true: saves activeSwapchain/acquireUsed, clears activeSwapchain.
+// When suppressed is true: saves activeSwapchains, then clears them.
 // When suppressed is false: restores saved values.
 //
-// Same save/restore pattern as VK-004 in WriteTexture (lines 620-634).
+// Same save/restore pattern as VK-004 in WriteTexture.
 func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if suppressed {
 		// Save current swapchain state and suppress semaphore binding.
-		q.savedSwapchain = q.activeSwapchain
-		q.savedAcquireUsed = q.acquireUsed
-		q.activeSwapchain = nil
+		q.savedSwapchains = q.activeSwapchains
+		q.activeSwapchains = nil
 		q.swapchainSuppressed = true
 	} else if q.swapchainSuppressed {
 		// Restore saved swapchain state so the next Submit (compositor)
 		// correctly binds acquire/present semaphores.
-		q.activeSwapchain = q.savedSwapchain
-		q.acquireUsed = q.savedAcquireUsed
-		q.savedSwapchain = nil
-		q.savedAcquireUsed = false
+		q.activeSwapchains = q.savedSwapchains
+		q.savedSwapchains = nil
 		q.swapchainSuppressed = false
 	}
 }
 
 // Vulkan function wrapper
 
-//nolint:unparam // Vulkan API wrapper — signature mirrors vkQueueSubmit spec
 func vkQueueSubmit(q *Queue, submitCount uint32, submits *vk.SubmitInfo, fence vk.Fence) vk.Result {
 	return q.device.cmds.QueueSubmit(q.handle, submitCount, submits, fence)
 }

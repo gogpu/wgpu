@@ -302,8 +302,8 @@ func TestSurfaceTeardownDropsReferencesAfterWaitIdleFailure(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			device := &Device{cmds: &vk.Commands{}}
-			swapchain := &Swapchain{device: device, handle: 1}
-			device.queue = &Queue{device: device, activeSwapchain: swapchain, acquireUsed: true}
+			swapchain := &Swapchain{device: device, handle: 1, acquireUsed: true}
+			device.queue = &Queue{device: device, activeSwapchains: []*Swapchain{swapchain}}
 			surface := &Surface{
 				handle:    1,
 				instance:  &Instance{},
@@ -316,7 +316,7 @@ func TestSurfaceTeardownDropsReferencesAfterWaitIdleFailure(t *testing.T) {
 			if surface.swapchain != nil || surface.device != nil {
 				t.Fatalf("surface retained failed swapchain teardown references: swapchain=%p device=%p", surface.swapchain, surface.device)
 			}
-			if device.queue.activeSwapchain != nil || device.queue.acquireUsed {
+			if len(device.queue.activeSwapchains) != 0 || swapchain.acquireUsed {
 				t.Fatal("surface teardown left the failed swapchain attached to its queue")
 			}
 			if test.name == "destroy" && surface.handle != 0 {
