@@ -833,14 +833,16 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 // breaks the swapchain. q.mu is held.
 func (q *Queue) submitPresentBarrier(swapchain *Swapchain) error {
 	cmdBuf, err := swapchain.recordPresentBarrier()
+	var fenceValue uint64
 	if err == nil {
-		_, err = q.submitLocked([]vk.CommandBuffer{cmdBuf})
+		fenceValue, err = q.submitLocked([]vk.CommandBuffer{cmdBuf})
 	}
 	if err != nil {
 		swapchain.markBroken(fmt.Errorf("vulkan: present barrier submit failed: %w", err))
 		return err
 	}
 	swapchain.barrierPending = true
+	swapchain.barrierFenceValue = fenceValue
 	swapchain.imageLayouts[swapchain.currentImage] = vk.ImageLayoutPresentSrcKhr
 	return nil
 }

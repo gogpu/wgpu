@@ -61,12 +61,15 @@ type Swapchain struct {
 	barrierPool vk.CommandPool
 
 	// ADR-059: barrierPending tracks whether a barrier command buffer from
-	// ensurePresentLayout is still potentially in-flight on the GPU. The pool
-	// reset is deferred to acquireNextImage, where the acquire fence wait
-	// guarantees the previous frame (including its barrier) has completed.
-	// This eliminates the synchronous vkWaitForFences that was previously
-	// required in ensurePresentLayout.
+	// the barrier pool may still be in flight on the GPU. The pool reset is
+	// deferred to acquireNextImage. This eliminates the synchronous
+	// vkWaitForFences that was previously required in ensurePresentLayout.
 	barrierPending bool
+
+	// barrierFenceValue is the fence value of the submit that carried
+	// submitPresentBarrier's barrier, or 0. acquireNextImage waits for it
+	// before it resets barrierPool.
+	barrierFenceValue uint64
 
 	// broken is set after a synchronization, layout, or presentation failure.
 	// A broken swapchain cannot safely reuse its binary semaphores; callers must
@@ -936,6 +939,7 @@ func (sc *Swapchain) destroyResourcesAfterIdle() error {
 		sc.barrierPool = 0
 	}
 	sc.barrierPending = false
+	sc.barrierFenceValue = 0
 	sc.imageLayouts = nil
 	sc.currentAcquireSem = 0
 	sc.currentAcquireIdx = 0
@@ -1024,6 +1028,7 @@ func (sc *Swapchain) abandonDeviceResources() {
 	sc.acquireFence = 0
 	sc.barrierPool = 0
 	sc.barrierPending = false
+	sc.barrierFenceValue = 0
 	sc.currentAcquireSem = 0
 	sc.imageAcquired = false
 	sc.device = nil
@@ -1153,16 +1158,26 @@ func (sc *Swapchain) acquireNextImage() (*SwapchainTexture, bool, error) {
 		return nil, false, err
 	}
 
-	// ADR-059: Deferred barrier pool reset. The previous frame's barrier CB is
-	// guaranteed complete because acquireNextImage waits on the acquire fence,
-	// which requires the previous present (and therefore the barrier) to finish.
+	// ADR-059: Deferred barrier pool reset. Resetting the pool while its
+	// command buffer is pending invalidates it
+	// (VUID-vkResetCommandPool-commandPool-00040), and the pre-acquire wait
+	// above does not cover a barrier submitPresentBarrier submitted: it waits
+	// for the submit that last consumed the acquire semaphore it reuses, an
+	// earlier frame's.
 	if sc.barrierPending && sc.barrierPool != 0 {
+		if err := sc.device.timelineFence.waitForValue(
+			sc.device.cmds, sc.device.handle, sc.barrierFenceValue, timeout,
+		); err != nil {
+			sc.markBroken(fmt.Errorf("vulkan: wait for the present barrier: %w", err))
+			return nil, false, sc.failureErr
+		}
 		resetResult := sc.device.cmds.ResetCommandPool(sc.device.handle, sc.barrierPool, 0)
 		if resetResult != vk.Success {
 			sc.markBroken(mapVulkanResult("vkResetCommandPool (deferred barrier)", resetResult))
 			return nil, false, sc.failureErr
 		}
 		sc.barrierPending = false
+		sc.barrierFenceValue = 0
 	}
 
 	// Store the current acquire index and semaphore for use in Submit.
