@@ -46,6 +46,10 @@ import (
 // before executing, while CPU continues recording the next frame).
 const maxFramesInFlight = 2
 
+// zeroBufferSize is the size of Device.zeroBuffer, Rust wgpu-hal's
+// ZERO_BUFFER_SIZE (dx12/mod.rs).
+const zeroBufferSize = 256 << 10
+
 // frameState tracks allocators and fence value for one in-flight frame slot.
 type frameState struct {
 	allocators []*CommandAllocator
@@ -146,6 +150,12 @@ type Device struct {
 	// and shared across all encoders.
 	// Matches Rust wgpu-hal DeviceShared.cmd_signatures (dx12/mod.rs:683).
 	cmdSignatures commandSignatures
+
+	// zeroBuffer is the buffer ClearBuffer copies zeroes from. A committed
+	// resource created without D3D12_HEAP_FLAG_CREATE_NOT_ZEROED starts
+	// zeroed, and nothing writes it. Matches Rust wgpu-hal
+	// DeviceShared.zero_buffer (dx12/mod.rs).
+	zeroBuffer *Buffer
 }
 
 // commandSignatures holds pre-created ID3D12CommandSignature objects for
@@ -317,6 +327,13 @@ func newDevice(instance *Instance, adapterPtr unsafe.Pointer, adapterDesc *dxgi.
 		dev.cleanup()
 		return nil, err
 	}
+
+	zeroBuffer, err := dev.CreateBuffer(&hal.BufferDescriptor{Label: "zero buffer", Size: zeroBufferSize, Usage: gputypes.BufferUsageCopySrc})
+	if err != nil {
+		dev.cleanup()
+		return nil, fmt.Errorf("dx12: failed to create the zero buffer: %w", err)
+	}
+	dev.zeroBuffer = zeroBuffer.(*Buffer)
 
 	adapterKey := pipelinecache.DX12AdapterKey(
 		adapterDesc.AdapterLuid.LowPart,
@@ -966,6 +983,11 @@ func (d *Device) cleanup() {
 	if d.emptyRootSignature != nil {
 		d.emptyRootSignature.Release()
 		d.emptyRootSignature = nil
+	}
+
+	if d.zeroBuffer != nil {
+		d.zeroBuffer.Destroy()
+		d.zeroBuffer = nil
 	}
 
 	// Release indirect command signatures.
