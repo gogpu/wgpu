@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.14] - 2026-11-12
+
+A registration patch: the platform hardware backends register by default, the `wgputest` test seam and
+`Device.CheckHealth` are new, and DX12 device-removal errors match `wgpu.ErrDeviceLost`.
+
 ### Added
 
 - **The platform hardware backends register by default** (LEAD-007, ADR-083 Phase 0). Importing `github.com/gogpu/wgpu` registers Vulkan, DX12 and OpenGL ES on Windows (386, amd64, arm64), Vulkan and OpenGL ES on Linux (amd64, arm64), Metal on macOS (amd64, arm64; MoltenVK only with `-tags wgpu_moltenvk`), and Vulkan and OpenGL ES on Android (arm64). Other GOOS/GOARCH combinations are outside the default set and register no backends, as before; some of them cannot build the Pure Go backends at all because goffi has no syscall files there. The blank import of `hal/allbackends` is no longer required for the hardware backends; it stays valid until `hal` moves under `internal/` in v0.35.0. Opt out per backend with `wgpu_novulkan`, `wgpu_nodx12`, `wgpu_nometal` and `wgpu_nogles`.
@@ -4603,7 +4608,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.34.13...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.34.14...HEAD
+[0.34.14]: https://github.com/gogpu/wgpu/compare/v0.34.13...v0.34.14
 [0.17.0]: https://github.com/gogpu/wgpu/compare/v0.16.17...v0.17.0
 [0.16.14]: https://github.com/gogpu/wgpu/compare/v0.16.13...v0.16.14
 [0.16.13]: https://github.com/gogpu/wgpu/compare/v0.16.12...v0.16.13

@@ -19,8 +19,9 @@
 
 ---
 
-## Current State: v0.34.13
+## Current State: v0.34.14
 
+✅ **Platform hardware backends register by default (v0.34.14)** — importing `wgpu` registers Vulkan, DX12 and OpenGL ES on Windows, Vulkan and OpenGL ES on Linux, Metal on macOS (MoltenVK with `-tags wgpu_moltenvk`) and Vulkan/OpenGL ES on Android, with per-backend opt-out build tags; the Pure Go software backend stays an explicit import until v0.35.0; `wgputest` and `Device.CheckHealth` are new
 ✅ **Metal: run-time-indexed stores into workgroup vectors are correct (v0.34.13)** — naga v0.21.10 writes them through a scalar pointer; the readback corpus passes on the Apple Paravirtual device with no known failure left
 ✅ **Vulkan shaders use only what the device enabled, and `discard` follows WGSL (v0.34.12)** — naga gets the device's SPIR-V capabilities (packed dot products native or polyfilled), `discard` demotes to a helper invocation where `VK_EXT_shader_demote_to_helper_invocation` is supported
 ✅ **naga's readback corpus runs on every adapter in the test suite (v0.34.12)** — `TestReadbackCorpus` compares the words every backend writes with the corpus's expected values
@@ -141,12 +142,18 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.13:**
+**Next patch release, v0.34.15:**
 - [ ] GLES: compute blit for non-renderable copy sources; snorm readback without EXT_render_snorm; vertex-storage flag tightened against Mesa d3d12 (P2-GLES-023, P1-GLES-025 items 2 and 4)
 - [ ] Metal: compressed small mips and HDR formats (P2-MTL-001)
 - [ ] Software: ASTC sampling (P1-SW-029 step 2)
 - [ ] Release only: `BindGroupLayout` reference counted as Rust and Dawn do; the Release-vs-create race contract (P2-CORE-027, P2-CORE-026)
 - [ ] A tracked WARP + GPU-based-validation test package (P2-INFRA-009, P1-CORE-028 for the selection API)
+
+**Patch release v0.34.14** (2026-11-12, registration):
+- [x] Platform hardware backends register by default with per-backend opt-out build tags; the Pure Go software backend stays an explicit import until v0.35.0 (ADR-083 Phase 0)
+- [x] `wgputest`: software and noop test devices with a recorder and fault injection (P1-API-027)
+- [x] `Device.CheckHealth()`; a DX12 device-removal error satisfies `errors.Is(err, wgpu.ErrDeviceLost)`
+- [x] `hal/noop` stops registering itself in `init`
 
 **Patch release v0.34.13** (2026-11-11, naga v0.21.10):
 - [x] naga v0.21.10: Metal stores into run-time-indexed components of workgroup vectors and matrix columns, MSL parity fixes (atomic `workgroupUniformLoad`, packed `vec3` bitcasts, return temporary names)
