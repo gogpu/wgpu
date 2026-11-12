@@ -23,6 +23,10 @@ import (
 // submission is ready for presentation" and break the swapchain, so the next
 // acquire failed too.
 //
+// The next acquire resets the pool the barrier was recorded in, so it first
+// waits for the barrier's submit: resetting the pool while that submit is
+// pending invalidates its command buffer.
+//
 // The test is skipped if no Vulkan GPU is available (headless CI).
 func TestAnImageAcquiredAndPresentedWithNothingSubmittedPresents(t *testing.T) {
 	if testing.Short() {
@@ -68,13 +72,23 @@ func TestAnImageAcquiredAndPresentedWithNothingSubmittedPresents(t *testing.T) {
 	}
 	defer surface.Unconfigure(opened.Device)
 
+	swapchain := surface.(*Surface).swapchain
+	fence := opened.Device.(*Device).timelineFence
+	var barrierFenceValue uint64
 	for frame := range 3 {
 		acquired, err := surface.AcquireTexture(nil)
 		if err != nil {
 			t.Fatalf("frame %d: AcquireTexture answered %v", frame, err)
 		}
+		if fence.lastCompleted < barrierFenceValue {
+			t.Fatalf("frame %d: AcquireTexture reset the barrier pool before the barrier submit %d completed (completed: %d)", frame, barrierFenceValue, fence.lastCompleted)
+		}
 		if err := opened.Queue.Present(surface, acquired.Texture, nil); err != nil {
 			t.Fatalf("frame %d: Present of an image nothing was submitted for answered %v", frame, err)
+		}
+		barrierFenceValue = swapchain.barrierFenceValue
+		if barrierFenceValue == 0 {
+			t.Fatalf("frame %d: Present kept no fence value for its barrier submit", frame)
 		}
 	}
 }
