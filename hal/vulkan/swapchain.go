@@ -857,12 +857,14 @@ func retireOldSwapchain(device *Device, oldSwapchain *Swapchain, oldHandle vk.Sw
 
 // releaseSyncResources releases synchronization primitives after the device is
 // idle. It keeps the idle wait explicit so callers can propagate failures and
-// reconfiguration can remain transactional.
+// reconfiguration can remain transactional. A lost device counts as idle: it
+// runs no more work, and Vulkan lets its objects be destroyed, so the
+// swapchain is destroyed too and its window can take another device's.
 func (sc *Swapchain) releaseSyncResources() error {
 	if sc == nil || sc.device == nil {
 		return nil
 	}
-	if result := vkDeviceWaitIdle(sc.device); result != vk.Success {
+	if result := vkDeviceWaitIdle(sc.device); result != vk.Success && result != vk.ErrorDeviceLost {
 		return mapVulkanResult("vkDeviceWaitIdle before releasing swapchain synchronization", result)
 	}
 	sc.releaseSyncResourcesAfterIdle()
