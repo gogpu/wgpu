@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Vulkan configures a surface only on a device whose queue family can present to it** (#396, by @dvoyni). `Surface.Configure` asks `vkGetPhysicalDeviceSurfaceSupportKHR` for the device's queue family and returns `wgpu.ErrSurfaceDeviceMismatch` instead of creating a swapchain the family cannot present to, which Vulkan makes invalid usage.
+
 ## [0.34.14] - 2026-11-12
 
 A registration patch: the platform hardware backends register by default, the `wgputest` test seam and
