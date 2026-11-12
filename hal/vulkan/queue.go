@@ -236,7 +236,7 @@ func (q *Queue) submitTimeline(
 
 	result := vkQueueSubmit(q, 1, submitInfo, vk.Fence(0))
 	if result != vk.Success {
-		err := fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+		err := mapVulkanResult("vkQueueSubmit", result)
 		markSwapchainsBroken(consumed, err)
 		return 0, err
 	}
@@ -395,7 +395,7 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer, swapchains []*Swap
 	// Single vkQueueSubmit with pool fence — no more double submit.
 	result := vkQueueSubmit(q, 1, &submitInfo, poolFence)
 	if result != vk.Success {
-		err := fmt.Errorf("vulkan: vkQueueSubmit failed: %d", result)
+		err := mapVulkanResult("vkQueueSubmit", result)
 		markSwapchainsBroken(consumed, err)
 		return 0, err
 	}

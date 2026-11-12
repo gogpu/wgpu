@@ -589,7 +589,7 @@ func (s *Surface) createSwapchain(device *Device, config *hal.SurfaceConfigurati
 		oldSwapchain = s.swapchain
 		oldSwapchainHandle = oldSwapchain.handle
 		if result := vkDeviceWaitIdle(device); result != vk.Success {
-			return fmt.Errorf("vulkan: vkDeviceWaitIdle before reconfigure failed: %d", result)
+			return mapVulkanResult("vkDeviceWaitIdle before reconfigure", result)
 		}
 	}
 
@@ -863,7 +863,7 @@ func (sc *Swapchain) releaseSyncResources() error {
 		return nil
 	}
 	if result := vkDeviceWaitIdle(sc.device); result != vk.Success {
-		return fmt.Errorf("vulkan: vkDeviceWaitIdle before releasing swapchain synchronization failed: %d", result)
+		return mapVulkanResult("vkDeviceWaitIdle before releasing swapchain synchronization", result)
 	}
 	sc.releaseSyncResourcesAfterIdle()
 	return nil
@@ -1392,7 +1392,7 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 	}
 	result := sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, vk.Fence(0))
 	if result != vk.Success {
-		return fmt.Errorf("vulkan: vkQueueSubmit (barrier) failed: %d", result)
+		return mapVulkanResult("vkQueueSubmit (barrier)", result)
 	}
 	sc.barrierPending = true
 
