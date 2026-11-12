@@ -206,6 +206,22 @@ func TestQuerySwapchainPresentModesFailsClosed(t *testing.T) {
 	}
 }
 
+// TestValidatePresentSupportRejectsAQueueFamilyThatCannotPresent stands in
+// for the driver's answer to vkGetPhysicalDeviceSurfaceSupportKHR for the
+// device's queue family: a device opened with no surface on a family that
+// cannot present to it cannot configure it.
+func TestValidatePresentSupportRejectsAQueueFamilyThatCannotPresent(t *testing.T) {
+	if err := validatePresentSupport(0, vk.Success, vk.Bool32(1)); err != nil {
+		t.Fatalf("a queue family that presents answered %v", err)
+	}
+	if err := validatePresentSupport(0, vk.Success, vk.Bool32(0)); !errors.Is(err, hal.ErrSurfaceDeviceMismatch) {
+		t.Fatalf("a queue family that cannot present answered %v, want hal.ErrSurfaceDeviceMismatch", err)
+	}
+	if err := validatePresentSupport(0, vk.ErrorSurfaceLostKhr, vk.Bool32(0)); !errors.Is(err, hal.ErrSurfaceLost) {
+		t.Fatalf("a failed present-support query answered %v, want hal.ErrSurfaceLost", err)
+	}
+}
+
 func TestQuerySwapchainImagesUsesActualReturnedCount(t *testing.T) {
 	countCalls, fillCalls := 0, 0
 	images, err := querySwapchainImagesWith(func(count *uint32, images *vk.Image) vk.Result {
