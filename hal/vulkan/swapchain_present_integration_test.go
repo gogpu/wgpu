@@ -55,6 +55,71 @@ func TestAnImageAcquiredAndPresentedWithNothingSubmittedPresents(t *testing.T) {
 	}
 }
 
+// TestAnEmptySubmissionThenPresentTransitionsWithATrackedBarrier presents an
+// image whose frame submitted work that never touched the swapchain image: the
+// submission consumed the acquire semaphore, so present() does not supply one,
+// and no render pass injected the inline PRESENT_SRC_KHR barrier, so present
+// falls back to ensurePresentLayout's own barrier submission.
+//
+// That submission must be tracked like every other one. The next acquire
+// resets the command pool the barrier was recorded in, and resetting the pool
+// while its command buffer is still pending invalidates the transition
+// (VUID-vkResetCommandPool-commandPool-00040) and leaves the image in
+// UNDEFINED at present (VUID-VkPresentInfoKHR-pImageIndices-01430).
+//
+// The test is skipped if no Vulkan GPU is available (headless CI).
+func TestAnEmptySubmissionThenPresentTransitionsWithATrackedBarrier(t *testing.T) {
+	instance := createTestInstance(t)
+	surface := createTestSurface(t, instance)
+	device, queue := openTestDevice(t, instance, surface)
+	configureTestSurface(t, surface, device)
+
+	swapchain := surface.(*Surface).swapchain
+	fence := device.(*Device).timelineFence
+	commandBuffers := make([]hal.CommandBuffer, 0, 3)
+	var barrierFenceValue uint64
+	for frame := range 3 {
+		acquired, err := surface.AcquireTexture(nil)
+		if err != nil {
+			t.Fatalf("frame %d: AcquireTexture answered %v", frame, err)
+		}
+		if fence.lastCompleted < barrierFenceValue {
+			t.Fatalf("frame %d: AcquireTexture reset the barrier pool before the barrier submit %d completed (completed: %d)", frame, barrierFenceValue, fence.lastCompleted)
+		}
+
+		encoder, err := device.CreateCommandEncoder(&hal.CommandEncoderDescriptor{Label: "empty submission"})
+		if err != nil {
+			t.Fatalf("frame %d: CreateCommandEncoder answered %v", frame, err)
+		}
+		if err := encoder.BeginEncoding("empty submission"); err != nil {
+			t.Fatalf("frame %d: BeginEncoding answered %v", frame, err)
+		}
+		commandBuffer, err := encoder.EndEncoding()
+		if err != nil {
+			t.Fatalf("frame %d: EndEncoding answered %v", frame, err)
+		}
+		if _, err := queue.Submit([]hal.CommandBuffer{commandBuffer}); err != nil {
+			t.Fatalf("frame %d: Submit answered %v", frame, err)
+		}
+		commandBuffers = append(commandBuffers, commandBuffer)
+
+		if err := queue.Present(surface, acquired.Texture, nil); err != nil {
+			t.Fatalf("frame %d: Present answered %v", frame, err)
+		}
+		barrierFenceValue = swapchain.barrierFenceValue
+		if barrierFenceValue == 0 {
+			t.Fatalf("frame %d: Present kept no fence value for its layout barrier submit", frame)
+		}
+	}
+
+	if err := device.WaitIdle(); err != nil {
+		t.Fatalf("WaitIdle answered %v", err)
+	}
+	for _, commandBuffer := range commandBuffers {
+		device.FreeCommandBuffer(commandBuffer)
+	}
+}
+
 // TestTwoSurfacesAcquiredTogetherBothPresent acquires an image from each of
 // two surfaces, submits once, and presents both, as a frame drawn into two
 // windows does. The queue used to track only the surface acquired last, so

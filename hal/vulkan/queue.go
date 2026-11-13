@@ -725,13 +725,31 @@ func (q *Queue) Present(surface hal.Surface, _ hal.SurfaceTexture, damageRects [
 // image only after a submit has waited on its acquire semaphore. A failure
 // breaks the swapchain. q.mu is held.
 func (q *Queue) submitPresentBarrier(swapchain *Swapchain) error {
-	cmdBuf, err := swapchain.recordPresentBarrier()
-	var fenceValue uint64
-	if err == nil {
-		fenceValue, err = q.submitLocked([]vk.CommandBuffer{cmdBuf}, []*Swapchain{swapchain})
-	}
-	if err != nil {
+	if err := q.submitPresentBarrierLocked(swapchain); err != nil {
 		swapchain.markBroken(fmt.Errorf("vulkan: present barrier submit failed: %w", err))
+		return err
+	}
+	return nil
+}
+
+// submitPresentBarrierLocked records the transition of swapchain's current
+// image to PRESENT_SRC_KHR and submits it through the queue's tracked
+// submission path, so acquireNextImage can wait for the barrier's fence value
+// before it resets the command pool the barrier was recorded in.
+//
+// The submission waits on the swapchain's acquire semaphore only if no earlier
+// submit consumed it: a frame whose submission never touched the swapchain
+// image reaches this path with the acquire already consumed, and must not wait
+// on it again. Rust wgpu-core routes the present transition through the queue's
+// pending writes the same way (queue.rs, prepare_surface_texture_for_present).
+// q.mu is held.
+func (q *Queue) submitPresentBarrierLocked(swapchain *Swapchain) error {
+	cmdBuf, err := swapchain.recordPresentBarrier()
+	if err != nil {
+		return err
+	}
+	fenceValue, err := q.submitLocked([]vk.CommandBuffer{cmdBuf}, []*Swapchain{swapchain})
+	if err != nil {
 		return err
 	}
 	swapchain.barrierPending = true
