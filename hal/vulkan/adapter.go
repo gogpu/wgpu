@@ -331,12 +331,14 @@ func (a *qualifiedAdapter) TextureFormatCapabilities(format gputypes.TextureForm
 	return a.base.TextureFormatCapabilities(format)
 }
 
+// SurfaceCapabilities answers for the surface the adapter was qualified for
+// from the snapshot taken then, and for any other surface as the base adapter
+// does.
 func (a *qualifiedAdapter) SurfaceCapabilities(surface hal.Surface) *hal.SurfaceCapabilities {
-	vkSurface, ok := surface.(*Surface)
-	if !ok || vkSurface != a.surface {
-		return nil
+	if vkSurface, ok := surface.(*Surface); ok && vkSurface == a.surface {
+		return cloneSurfaceCapabilities(a.snapshot.public)
 	}
-	return cloneSurfaceCapabilities(a.snapshot.public)
+	return a.base.SurfaceCapabilities(surface)
 }
 
 // Destroy is intentionally a no-op. The cached physical adapter owns no
