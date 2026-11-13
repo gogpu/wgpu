@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **naga v0.21.12** (from v0.21.10). v0.21.11 stops the SPIR-V writer dropping the code after a `switch` whose every case ends in `break` — a silent Vulkan miscompile since v0.15.0, pinned by the `flow/switch-all-break-rt` corpus case. v0.21.12 brings the MSL/HLSL writers closer to Rust naga for existing WGSL input: an entry point's input aliases are emitted after the private-global block, a barrier that names several memories emits its calls in storage → workgroup → subgroup → texture order, an anonymous entry-point result struct takes Rust's `VertexOutput`/`FragmentOutput`/`ComputeOutput` fallback name, and HLSL names anonymous types, functions and globals, writes no implicit void `return;` and numbers `SV_GroupIndex` per entry point. The SPIR-V input frontend does not reach this module, which uses naga's WGSL frontend and SPIR-V writer and never calls `spirv.Parse`. The MSL written for all 69 readback corpus shaders is byte-identical to v0.21.11, so the writer fixes move none of them. Gate: the corpus passes on every local adapter under `VK_LAYER_KHRONOS_validation` (69 cases × 10 adapter configurations; 5 skips where the adapter lacks `shader-f16`) and the full suite is green.
+
 ### Fixed
 
 - **Vulkan configures a surface only on a device whose queue family can present to it** (#396, by @dvoyni). `Surface.Configure` asks `vkGetPhysicalDeviceSurfaceSupportKHR` for the device's queue family and returns `wgpu.ErrSurfaceDeviceMismatch` instead of creating a swapchain the family cannot present to, which Vulkan makes invalid usage.
