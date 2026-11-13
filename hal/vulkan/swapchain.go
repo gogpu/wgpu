@@ -1340,10 +1340,11 @@ func (sc *Swapchain) SetImageLayout(imageIndex uint32, layout vk.ImageLayout) {
 // swapchain (blit-only, offscreen-only paths) or when the inline barrier was not
 // injected.
 //
-// ADR-059: The barrier CB is submitted without a fence -- the command pool reset is
-// deferred to acquireNextImage, where the acquire fence wait guarantees the
-// previous frame (including this barrier) has completed. This avoids a
-// synchronous vkWaitForFences per frame.
+// ADR-059: The barrier CB is submitted through the queue's tracked submission
+// path (submitPresentBarrierLocked), which keeps the submit's fence value in
+// barrierFenceValue. The command pool reset stays deferred to acquireNextImage,
+// which waits for that value first: the reset is ordered after the submit
+// without a synchronous wait on the present path.
 //
 // If the tracked layout is already PRESENT_SRC_KHR (e.g., from a previous
 // barrier or from the inline EndEncoding barrier), the function returns immediately.
@@ -1364,40 +1365,16 @@ func (sc *Swapchain) ensurePresentLayout(queue *Queue) error {
 		return nil
 	}
 
-	cmdBuf, err := sc.recordPresentBarrier()
-	if err != nil {
+	// ADR-059/060: Submit the barrier through the queue's tracked submission
+	// path. It signals a present semaphore from the per-image pool that
+	// presentWaitSemaphores collects AFTER this call, and its fence value lands
+	// in barrierFenceValue for the deferred pool reset in acquireNextImage.
+	// P2-VK-019: a hand-rolled vkQueueSubmit here kept no fence value, so the
+	// deferred reset ran while this command buffer was still pending
+	// (VUID-vkResetCommandPool-commandPool-00040), voiding the transition.
+	if err := queue.submitPresentBarrierLocked(sc); err != nil {
 		return err
 	}
-
-	// ADR-060: Signal a present semaphore from the barrier submit.
-	// This ensures vkQueuePresentKHR explicitly waits for the barrier to
-	// complete via the per-image present semaphore pool. The present() method
-	// calls ensurePresentLayout BEFORE presentWaitSemaphores, so this
-	// semaphore is included in the wait list.
-	//
-	// The command pool reset is deferred to acquireNextImage, where the acquire
-	// fence wait guarantees the previous frame (including this barrier) has
-	// completed. This eliminates the synchronous vkWaitForFences that was
-	// previously required here.
-	barrierSem, err := sc.allocPresentSemaphore()
-	if err != nil {
-		return fmt.Errorf("vulkan: barrier present semaphore alloc: %w", err)
-	}
-	submitInfo := vk.SubmitInfo{
-		SType:                vk.StructureTypeSubmitInfo,
-		CommandBufferCount:   1,
-		PCommandBuffers:      &cmdBuf,
-		SignalSemaphoreCount: 1,
-		PSignalSemaphores:    &barrierSem,
-	}
-	result := sc.device.cmds.QueueSubmit(queue.handle, 1, &submitInfo, vk.Fence(0))
-	if result != vk.Success {
-		return mapVulkanResult("vkQueueSubmit (barrier)", result)
-	}
-	sc.barrierPending = true
-
-	// Update tracked layout — the barrier transitions to PRESENT_SRC_KHR.
-	sc.imageLayouts[idx] = vk.ImageLayoutPresentSrcKhr
 
 	hal.Logger().Debug("vulkan: inserted PRESENT_SRC_KHR barrier",
 		"imageIndex", idx, "oldLayout", currentLayout)
