@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Vulkan configures a surface only on a device whose queue family can present to it** (#396, by @dvoyni). `Surface.Configure` asks `vkGetPhysicalDeviceSurfaceSupportKHR` for the device's queue family and returns `wgpu.ErrSurfaceDeviceMismatch` instead of creating a swapchain the family cannot present to, which Vulkan makes invalid usage.
+- **Vulkan presents an acquired image that nothing was submitted for** (#393, by @dvoyni). `Queue.Present` submits the `PRESENT_SRC_KHR` barrier as the submission that waits on the acquire semaphore when no submit consumed it, instead of failing and breaking the swapchain. The barrier's command pool is not reset until that submit has completed (`VUID-vkResetCommandPool-commandPool-00040`).
+- **Vulkan presents every surface a frame acquired** (#395, by @dvoyni). The queue tracked one active swapchain, so acquiring from a second surface replaced the first: its present failed with "no successful swapchain submission is ready for presentation", and its swapchain was marked broken. Every swapchain with an acquired, unpresented image is tracked now, and each submit waits on all of them.
+- **A device lost at submit or wait-idle answers `wgpu.ErrDeviceLost`** (#398, by @dvoyni). `vkQueueSubmit`, `vkDeviceWaitIdle` and the present barrier's submit map through `mapVulkanResult`, so `errors.Is(err, wgpu.ErrDeviceLost)` holds for a loss there; other error codes keep their message.
+- **DX12 `ClearBuffer` clears the range — before this, every DX12 clear was a no-op** (#400, by @dvoyni). `CommandEncoder.ClearBuffer` recorded nothing on DX12, so a cleared buffer kept its old contents. D3D12 has no fill command; the range is now copied from a 256 KiB zero buffer in chunks, as wgpu-hal does, for buffers with and without Storage usage.
+- **Vulkan answers a surface's capabilities from an adapter requested with another surface** (#401, by @dvoyni). Such an adapter answered nil for any surface but its own, so a second window was configured without capabilities and could pick a present mode the surface does not support (gogpu's multiwindow failed to configure its second window on WSLg). The adapter now answers for any surface, as an adapter requested without one already did.
 
 ## [0.34.14] - 2026-11-12
 
