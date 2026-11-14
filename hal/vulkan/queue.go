@@ -209,7 +209,7 @@ func (q *Queue) advanceRelay(swapchains []*Swapchain) (wait, signal vk.Semaphore
 func (q *Queue) submitTimeline(
 	submitInfo *vk.SubmitInfo,
 	signalSems []vk.Semaphore,
-	consumed []*Swapchain,
+	swapchains []*Swapchain,
 	signalValue uint64,
 ) (uint64, error) {
 	signalSems = append(signalSems, q.device.timelineFence.timelineSemaphore)
@@ -237,7 +237,7 @@ func (q *Queue) submitTimeline(
 	result := vkQueueSubmit(q, 1, submitInfo, vk.Fence(0))
 	if result != vk.Success {
 		err := mapVulkanResult("vkQueueSubmit", result)
-		markSwapchainsBroken(consumed, err)
+		markSwapchainsBroken(swapchains, err)
 		return 0, err
 	}
 	return signalValue, nil
@@ -315,14 +315,19 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer, swapchains []*Swap
 	//
 	// Both apply to every active swapchain: a frame drawn into several windows
 	// acquires them all before its submit, and presents each after it.
+	// Validate the acquire semaphores before any of them is marked used: a
+	// swapchain that cannot join this submission must fail alone rather than
+	// leave the swapchains before it waiting on a submit that never happens.
 	for _, swapchain := range swapchains {
-		if swapchain.acquireUsed {
-			continue
-		}
-		if swapchain.currentAcquireSem == 0 {
+		if !swapchain.acquireUsed && swapchain.currentAcquireSem == 0 {
 			err := fmt.Errorf("vulkan: active swapchain acquire semaphore is invalid")
 			swapchain.markBroken(err)
 			return 0, err
+		}
+	}
+	for _, swapchain := range swapchains {
+		if swapchain.acquireUsed {
+			continue
 		}
 		waitSems = append(waitSems, swapchain.currentAcquireSem)
 		waitStages = append(waitStages, vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit))
@@ -332,7 +337,12 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer, swapchains []*Swap
 	for _, swapchain := range swapchains {
 		presentSem, err := swapchain.allocPresentSemaphore()
 		if err != nil {
-			swapchain.markBroken(err)
+			// The submission is half-built: the acquires above are marked used
+			// and the present semaphores already allocated will never be
+			// signaled. A surface left that way would present forever on a
+			// semaphore nothing signals, so every swapchain of this submit
+			// fails closed instead.
+			markSwapchainsBroken(swapchains, err)
 			return 0, err
 		}
 		signalSems = append(signalSems, presentSem)
@@ -377,7 +387,7 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer, swapchains []*Swap
 	}
 
 	if q.device.timelineFence.isTimeline {
-		return q.submitTimeline(&submitInfo, signalSems, consumed, signalValue)
+		return q.submitTimeline(&submitInfo, signalSems, swapchains, signalValue)
 	}
 
 	// Binary path (VK-IMPL-003): Get a fence from the pool to track this submission.
@@ -388,7 +398,7 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer, swapchains []*Swap
 	poolFence, err := pool.signal(q.device.cmds, q.device.handle, signalValue)
 	if err != nil {
 		err = fmt.Errorf("vulkan: Submit fencePool signal: %w", err)
-		markSwapchainsBroken(consumed, err)
+		markSwapchainsBroken(swapchains, err)
 		return 0, err
 	}
 
@@ -396,7 +406,7 @@ func (q *Queue) submitLocked(vkCmdBuffers []vk.CommandBuffer, swapchains []*Swap
 	result := vkQueueSubmit(q, 1, &submitInfo, poolFence)
 	if result != vk.Success {
 		err := mapVulkanResult("vkQueueSubmit", result)
-		markSwapchainsBroken(consumed, err)
+		markSwapchainsBroken(swapchains, err)
 		return 0, err
 	}
 	return signalValue, nil
@@ -461,11 +471,16 @@ func (q *Queue) SubmitForPresent(commandBuffers []hal.CommandBuffer, swapchain *
 		vkCmdBuffers = append(vkCmdBuffers, vkCB.handle)
 	}
 
+	// Record the swapchain on the queue only after the submit succeeded: a
+	// rejected swapchain must not poison every later Submit, which validates
+	// every active swapchain.
+	if _, err := q.submitLocked(vkCmdBuffers, []*Swapchain{swapchain}); err != nil {
+		return err
+	}
 	if !slices.Contains(q.activeSwapchains, swapchain) {
 		q.activeSwapchains = append(q.activeSwapchains, swapchain)
 	}
-	_, err := q.submitLocked(vkCmdBuffers, []*Swapchain{swapchain})
-	return err
+	return nil
 }
 
 // WriteBuffer writes data to a buffer immediately.
