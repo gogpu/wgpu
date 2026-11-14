@@ -1,0 +1,172 @@
+cmd/sw-triangle	wgpu	//go:build windows	N
+internal/core/track	internal/hal	//go:build !(js && wasm)	N
+cmd/sw-test	wgpu	all	N
+internal/hal/allbackends	internal/hal/vulkan	//go:build darwin && !(js && wasm)	N
+internal/hal/software/shader	internal/hal/software/raster	//go:build !(js && wasm)	N+INT
+cmd/wgpu-triangle-mt	internal/hal/vulkan	//go:build windows	N
+internal/hal/gles	internal/hal/gles/egl	//go:build integration && linux && !(js && wasm)	INT
+wgpu	internal/hal	//go:build rust	N
+internal/hal/dx12	internal/hal/dx12/d3d12	//go:build windows && !(js && wasm)	N+INT
+examples/compute-sum	wgpu	all	N
+internal/hal/software	internal/hal/software/shader	//go:build !(js && wasm)	N+INT
+internal/hal/gles	internal/hal/gles/gl	//go:build integration && linux && !(js && wasm)	INT
+wgpu	internal/wgputestbridge	//go:build !rust && !(js && wasm)	N
+internal/shaderir	internal/hal	all	N
+internal/hal/vulkan	internal/hal	//go:build darwin && !(js && wasm)	N
+cmd/vulkan-triangle	internal/hal/vulkan	//go:build windows	N
+cmd/gles-test	internal/hal/gles/gl	//go:build windows	N
+wgpu	internal/hal/metal	//go:build integration && darwin && !rust && !(js && wasm)	EXT
+wgputest	internal/hal/software	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware	N
+internal/indirect	internal/hal	//go:build !(js && wasm)	N+INT
+wgpu	internal/browser	//go:build js && wasm	N+INT
+cmd/gles-test	internal/hal/gles	//go:build windows	N
+internal/core	internal/raytracing	//go:build !(js && wasm)	N
+internal/hal/dx12	internal/handletable	//go:build windows && !(js && wasm)	N
+wgpu	internal/stencilblit	//go:build !rust && !(js && wasm)	N
+internal/hal/gles	internal/shaderir	//go:build (windows || linux) && !(js && wasm)	N
+internal/hal/noop	internal/hal	//go:build !(js && wasm)	N+EXT
+internal/hal/vulkan	internal/hal/vulkan/vk	//go:build !(js && wasm)	N+INT
+wgputest	wgpu	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware	EXT
+internal/hal/vulkan	internal/hal	//go:build android && arm64	N
+internal/raytracing	internal/hal	all	N+INT
+examples/compute-particles	wgpu	all	N
+internal/hal/gles	internal/handletable	//go:build (windows || linux) && !(js && wasm)	N
+wgputest	wgpu	//go:build rust	N
+examples/compute-sum	internal/hal/allbackends	all	N
+cmd/dx12-test	internal/hal	//go:build windows	N
+internal/hal/allbackends	internal/hal/gles	//go:build linux && !android && !(js && wasm)	N
+internal/hal/vulkan	internal/hal/vulkan/vk	//go:build linux && !android && !(js && wasm)	N
+wgpu	internal/indirect	//go:build js && wasm	N
+internal/core	internal/pipeconst	//go:build !(js && wasm)	N+INT
+wgpu	internal/indirect	//go:build rust || (js && wasm)	INT
+cmd/gles-test	internal/hal	//go:build windows	N
+internal/core/testutil	internal/hal	//go:build !(js && wasm)	N
+internal/hal/metal	internal/hal/metal/mslmap	//go:build darwin && !(js && wasm)	N+INT
+wgpu	internal/hal/software/shader	//go:build !rust && !(js && wasm)	EXT
+internal/core/testutil	internal/core	//go:build !(js && wasm)	N+EXT
+internal/hal/dx12	internal/hal/dx12/d3dcompile	//go:build windows && !(js && wasm)	N
+wgputest	wgpu	//go:build js && wasm	N
+wgpu	internal/hal/gles	//go:build ((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nogles	N
+internal/hal/gles	internal/hal/gles/gl	//go:build (windows || linux) && !(js && wasm)	INT
+wgputest	internal/hal	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware	EXT
+wgpu	internal/hal	//go:build !rust && !(js && wasm)	N+INT+EXT
+examples/browser-test	wgpu	//go:build js && wasm	N
+internal/hal/vulkan	internal/hal	//go:build linux && !android && !(js && wasm)	N
+internal/hal/gles	internal/hal	//go:build linux && !(js && wasm)	N+INT
+wgpu	internal/pipeconst	//go:build rust	INT
+internal/hal/vulkan/memory	internal/hal/vulkan/vk	//go:build !(js && wasm)	N+INT
+wgpu	internal/core/track	//go:build !rust && !(js && wasm)	INT
+internal/hal/software/shader	internal/hal	//go:build !(js && wasm)	N
+cmd/sw-test	internal/hal	all	N
+internal/core	internal/hal	all	INT
+internal/hal/gles	internal/indirect	//go:build (windows || linux) && !(js && wasm)	N
+cmd/wgpu-triangle-mt	cmd/internal/thread	//go:build windows	N
+cmd/vk-test	internal/hal/vulkan	//go:build windows	N
+internal/hal/gles	internal/hal	//go:build integration && linux && !(js && wasm)	INT
+internal/core	internal/core/testutil	//go:build !(js && wasm)	EXT
+internal/hal/gles	internal/hal	//go:build windows && !(js && wasm)	N+INT
+wgputest	internal/hal/noop	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware	EXT
+internal/hal/software	internal/shaderir	//go:build !(js && wasm)	N
+examples/compute-copy	internal/hal/allbackends	all	N
+internal/hal	internal/hal/noop	//go:build !(js && wasm)	EXT
+wgpu	internal/core	//go:build !rust && !(js && wasm)	N+EXT+INT
+wgputest	internal/wgputestbridge	//go:build !rust && !(js && wasm)	N
+internal/core	internal/hal/allbackends	//go:build integration && !(js && wasm)	EXT
+wgputest	internal/hal	//go:build !rust && !(js && wasm)	N
+cmd/vulkan-triangle	cmd/internal/thread	//go:build windows	N
+internal/core	internal/core/track	//go:build !(js && wasm)	N+INT
+internal/hal/vulkan	internal/hal/vulkan/vk	//go:build darwin && !(js && wasm)	N
+wgpu	internal/hal	//go:build !rust && !(js && wasm) && !android	INT
+cmd/vulkan-renderpass-test	internal/hal/vulkan/vk	//go:build windows	N
+examples/triangle-headless	wgpu	all	N
+cmd/wgpu-triangle	wgpu	//go:build windows	N
+examples/triangle-headless	internal/hal/allbackends	all	N
+wgputest	internal/hal/noop	//go:build !rust && !(js && wasm)	N
+internal/hal/gles	internal/hal/gles/internal/eglrefs	//go:build linux && !(js && wasm)	N
+cmd/vk-test	internal/hal/vulkan/vk	//go:build windows	N
+internal/hal/gles	internal/hal	//go:build (windows || linux) && !(js && wasm)	N+INT
+internal/hal/allbackends	internal/shaderir	//go:build !android && !(js && wasm) && !rust	EXT
+internal/hal/allbackends	internal/hal/metal	//go:build darwin && !(js && wasm)	N
+examples/compute-copy	wgpu	all	N
+wgpu	internal/hal/software	//go:build !rust && !(js && wasm)	INT+EXT
+internal/hal/allbackends	wgpu	//go:build !android && !(js && wasm) && !rust	EXT
+internal/hal/vulkan	internal/hal	//go:build (linux || windows) && !(js && wasm)	INT
+internal/hal/vulkan	internal/hal	//go:build !android && !js && !(js && wasm)	N
+internal/core	internal/hal/noop	//go:build !(js && wasm)	INT
+internal/hal/vulkan	internal/hal/vulkan/vk	//go:build android && arm64	N
+internal/hal/vulkan	internal/hal	//go:build windows && !(js && wasm)	N+INT
+wgpu	internal/indirect	//go:build rust	N
+internal/defaultregtest	wgpu	//go:build !rust && !(js && wasm)	INT
+cmd/sw-triangle	internal/hal/allbackends	//go:build windows	N
+internal/hal/gles	internal/hal/gles/gl	//go:build linux && !(js && wasm)	N+INT
+wgpu	internal/shaderir	//go:build !rust && !(js && wasm)	INT+EXT
+internal/hal/allbackends	internal/hal/vulkan	//go:build windows && !(js && wasm)	N
+internal/hal/gles	internal/hal/gles/gl	//go:build (linux || windows) && !(js && wasm)	INT
+internal/hal/allbackends	internal/hal/software	//go:build !android && !(js && wasm)	N
+cmd/wgpu-triangle-mt	wgpu	//go:build windows	N
+internal/hal/gles/egl	internal/hal/gles/internal/eglrefs	//go:build linux && !(js && wasm)	N
+internal/hal/vulkan	internal/indirect	//go:build !(js && wasm)	N
+examples/software-test	internal/hal/software	all	N
+cmd/vk-test	internal/hal	//go:build windows	N
+internal/hal/metal	internal/shaderir	//go:build darwin && !(js && wasm)	N
+internal/stencilblit	internal/shaderir	all	INT
+internal/hal/allbackends	internal/hal/dx12	//go:build windows && !(js && wasm)	N
+wgpu	internal/hal/vulkan	//go:build integration && !rust && !(js && wasm)	EXT
+wgpu	internal/hal/software	//go:build !rust && !(js && wasm) && !android	INT
+internal/core	internal/indirect	//go:build !(js && wasm)	N
+internal/hal/software	internal/hal	//go:build !(js && wasm)	N+INT
+wgpu	internal/indirect	all	N
+internal/hal/dx12	internal/hal	//go:build windows && !(js && wasm)	N+INT
+cmd/dx12-test	internal/hal/dx12	//go:build windows	N
+internal/hal/dx12	internal/hal/dx12/dxgi	//go:build windows && !(js && wasm)	N+INT
+examples/browser-compute	wgpu	//go:build js && wasm	N
+internal/hal/software/shader	internal/hal/software/internal/texcompress	//go:build !(js && wasm)	INT
+internal/hal/dx12	internal/shaderir	//go:build windows && !(js && wasm)	N+INT
+examples/raytracing-headless	internal/hal	all	N
+internal/hal/dx12	internal/pipelinecache	//go:build windows && !(js && wasm)	N
+wgpu	internal/hal/vulkan	//go:build ((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_novulkan	N
+internal/hal/gles	internal/hal/gles/gl	//go:build windows && !(js && wasm)	N+INT
+internal/defaultregtest	internal/hal	//go:build !rust && !(js && wasm)	INT
+internal/hal/allbackends	internal/hal	//go:build !android && !(js && wasm) && !rust	EXT
+internal/hal/allbackends	internal/hal/vulkan	//go:build linux && !android && !(js && wasm)	N
+internal/hal/gles	internal/hal/gles/egl	//go:build linux && !(js && wasm)	N+INT
+internal/hal/gles	internal/hal	//go:build integration && linux && !(js && wasm) && wgpu_gles_force_es	INT
+internal/hal/gles	internal/hal	//go:build (linux || windows) && !(js && wasm)	INT
+examples/software-test	wgpu	all	N
+internal/core	internal/hal	//go:build !(js && wasm)	N+INT
+examples/compute-particles	internal/hal/allbackends	all	N
+internal/hal/software	internal/hal	//go:build linux && !(js && wasm)	N
+internal/hal/metal	internal/indirect	//go:build darwin && !(js && wasm)	N
+cmd/gles-test	internal/hal/gles/wgl	//go:build windows	N
+internal/hal/gles	internal/hal/gles/wgl	//go:build windows && !(js && wasm)	N
+internal/hal/dx12/dxgi	internal/hal/dx12/d3d12	//go:build windows && !(js && wasm)	N
+wgpu	internal/hal/metal	//go:build darwin && (amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nometal	N
+internal/hal/vulkan	internal/pipelinecache	//go:build !(js && wasm)	N
+cmd/wgpu-triangle	internal/hal/vulkan	//go:build windows	N
+internal/hal/allbackends	internal/hal/gles	//go:build windows && !(js && wasm)	N
+internal/hal/vulkan	internal/hal/vulkan/memory	//go:build !(js && wasm)	N
+examples/raytracing-headless	internal/hal/software	all	N
+internal/hal/allbackends	internal/core	//go:build !android && !(js && wasm) && !rust	EXT
+internal/hal/vulkan	internal/hal/vulkan/vk	//go:build (linux || windows) && !(js && wasm)	INT
+internal/core	internal/hal	//go:build integration && !(js && wasm)	EXT
+internal/hal/vulkan	internal/hal/vulkan/vk	//go:build windows && !(js && wasm)	INT
+cmd/sw-test	internal/hal/software	all	N
+wgpu	internal/hal/dx12	//go:build windows && (386 || amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nodx12	N
+internal/hal/metal	internal/hal	//go:build darwin && !(js && wasm)	N+INT
+internal/hal/vulkan	internal/hal	//go:build !android && !(js && wasm)	N
+internal/hal/allbackends	internal/hal/vulkan	//go:build android && arm64	N
+internal/hal/dx12	internal/indirect	//go:build windows && !(js && wasm)	N
+internal/hal/vulkan	internal/hal/vulkan/vk	all	INT
+wgpu	internal/hal/noop	//go:build !rust && !(js && wasm)	INT+EXT
+internal/hal/gles	internal/handletable	//go:build windows && !(js && wasm)	N
+internal/hal/vulkan	internal/shaderir	//go:build !(js && wasm)	N+INT
+cmd/vulkan-triangle	internal/hal	//go:build windows	N
+wgpu	internal/pipeconst	//go:build js && wasm	N+INT
+wgpu	internal/pipeconst	//go:build !rust && !(js && wasm)	EXT
+wgpu	internal/hal/noop	//go:build !rust && !(js && wasm) && !android	INT
+wgputest	wgpu	//go:build !rust && !(js && wasm)	N
+internal/hal/gles	internal/handletable	//go:build linux && !(js && wasm)	N
+wgpu	internal/hal/vulkan	//go:build darwin && (amd64 || arm64) && wgpu_moltenvk && !rust && !(js && wasm) && !wgpu_novulkan	N
+internal/core	internal/shaderir	//go:build !(js && wasm)	N+INT
+internal/hal/software	internal/hal/software/raster	//go:build !(js && wasm)	N+INT
+internal/hal/vulkan	internal/hal	//go:build !(js && wasm)	N+INT

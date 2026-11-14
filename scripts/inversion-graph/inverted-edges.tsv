@@ -1,0 +1,12 @@
+# Edges removed by the Q12 inversion (ADR-070 §13, option a, user-approved 2026-11-15).
+# The four columns match the graph format; the last one names the field that goes.
+# Removing these from edges-all.tsv must make the native bucket acyclic — that is the
+# whole point of the plan, and graph.sh checks it in scc-after.txt.
+# src	dst	context	class	reason
+internal/queue	internal/device	all	N	queue_native.go:27 device *Device -> deviceHost interface
+internal/encoder	internal/device	all	N	encoder_native.go:22, :1089 device *Device -> deviceHost interface
+internal/resource	internal/device	all	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206 -> deviceHost
+internal/pipeline	internal/device	all	N	pipeline_native.go:62,167 (dead fields, deleted); shader_native.go:18 -> deviceHost
+internal/surface	internal/device	all	N	surface_native.go:47 -> deviceHost with HALQueue()
+internal/surface	internal/instance	all	N	surface_native.go:46 -> instanceHost interface
+internal/device	internal/instance	all	N	device_native.go:25 -> instanceHost interface (the cut is this side, not instance -> device)

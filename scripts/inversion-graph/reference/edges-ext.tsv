@@ -1,0 +1,15 @@
+wgpu	internal/hal/metal	//go:build integration && darwin && !rust && !(js && wasm)	EXT
+wgputest	wgpu	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware	EXT
+wgpu	internal/hal/software/shader	//go:build !rust && !(js && wasm)	EXT
+wgputest	internal/hal	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware	EXT
+internal/core	internal/core/testutil	//go:build !(js && wasm)	EXT
+wgputest	internal/hal/noop	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware	EXT
+internal/hal	internal/hal/noop	//go:build !(js && wasm)	EXT
+internal/core	internal/hal/allbackends	//go:build integration && !(js && wasm)	EXT
+internal/hal/allbackends	internal/shaderir	//go:build !android && !(js && wasm) && !rust	EXT
+internal/hal/allbackends	wgpu	//go:build !android && !(js && wasm) && !rust	EXT
+wgpu	internal/hal/vulkan	//go:build integration && !rust && !(js && wasm)	EXT
+internal/hal/allbackends	internal/hal	//go:build !android && !(js && wasm) && !rust	EXT
+internal/hal/allbackends	internal/core	//go:build !android && !(js && wasm) && !rust	EXT
+internal/core	internal/hal	//go:build integration && !(js && wasm)	EXT
+wgpu	internal/pipeconst	//go:build !rust && !(js && wasm)	EXT

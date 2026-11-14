@@ -1,0 +1,7 @@
+== context native — 149 edges ==
+  acyclic (no SCC > 1)
+== context rust — 120 edges ==
+  acyclic (no SCC > 1)
+== context wasm — 51 edges ==
+  acyclic (no SCC > 1)
+== total cycles: 0 ==
