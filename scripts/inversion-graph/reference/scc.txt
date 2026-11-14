@@ -1,0 +1,7 @@
+== context native — 156 edges ==
+  CYCLE (8 packages): internal/pendingwrites <-> internal/instance <-> internal/surface <-> internal/pipeline <-> internal/encoder <-> internal/resource <-> internal/device <-> internal/queue
+== context rust — 125 edges ==
+  CYCLE (6 packages): internal/surface <-> internal/pipeline <-> internal/encoder <-> internal/resource <-> internal/device <-> internal/instance
+== context wasm — 52 edges ==
+  acyclic (no SCC > 1)
+== total cycles: 2 ==

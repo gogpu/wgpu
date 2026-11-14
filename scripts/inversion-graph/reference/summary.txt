@@ -1,0 +1,7 @@
+imports.tsv lines : 886   (floor 800)
+records           : 875   (floor 600)
+edges (A+B)       : 217   (floor 120)
+pairs             : 168   (floor 100)
+packages          : 63   (floor 45)
+cycles, A+B       : 2
+cycles, after Q12 : 0

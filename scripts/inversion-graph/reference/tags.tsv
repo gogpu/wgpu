@@ -1,0 +1,935 @@
+adapter_browser.go	//go:build js && wasm
+adapter_native.go	//go:build !rust && !(js && wasm)
+adapter_request_device_test.go	//go:build !rust && !(js && wasm)
+adapter_rust.go	//go:build rust
+arraylength_repro_test.go	//go:build integration && darwin && !rust && !(js && wasm)
+backends_dx12.go	//go:build windows && (386 || amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nodx12
+backends_gles.go	//go:build ((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nogles
+backends_metal.go	//go:build darwin && (amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nometal
+backends_moltenvk.go	//go:build darwin && (amd64 || arm64) && wgpu_moltenvk && !rust && !(js && wasm) && !wgpu_novulkan
+backends_vulkan.go	//go:build ((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_novulkan
+bind_browser.go	//go:build js && wasm
+bind_dynamic_offsets.go	//go:build !rust && !(js && wasm)
+bind_dynamic_offsets_test.go	//go:build !rust && !(js && wasm)
+bind_group_usage_test.go	//go:build !rust && !(js && wasm)
+bind_native.go	//go:build !rust && !(js && wasm)
+bind_rust.go	//go:build rust
+binder.go	//go:build !rust && !(js && wasm)
+binder_rebind_test.go	//go:build !rust && !(js && wasm)
+binder_test.go	//go:build !rust && !(js && wasm)
+buffer.go	//go:build !rust && !(js && wasm)
+buffer_browser.go	//go:build js && wasm
+buffer_mapping_bench_test.go	//go:build !rust && !(js && wasm)
+buffer_mapping_test.go	//go:build !rust && !(js && wasm)
+buffer_rust.go	//go:build rust
+cleanup_test.go	//go:build !rust && !(js && wasm)
+cmd/dx12-test/main.go	//go:build windows
+cmd/gles-test/main.go	//go:build windows
+cmd/sw-triangle/main.go	//go:build windows
+cmd/sw-triangle/window_windows.go	//go:build windows
+cmd/vk-gen/main.go		fmt.Fprintln(f, "//go:build !(js && wasm)")
+cmd/vk-test/main.go	//go:build windows
+cmd/vulkan-renderpass-test/ffi_direct.go	//go:build windows
+cmd/vulkan-renderpass-test/main.go	//go:build windows
+cmd/vulkan-triangle/main.go	//go:build windows
+cmd/vulkan-triangle/shaders.go	//go:build windows
+cmd/vulkan-triangle/window_windows.go	//go:build windows
+cmd/wgpu-triangle-mt/main.go	//go:build windows
+cmd/wgpu-triangle-mt/window_windows.go	//go:build windows
+cmd/wgpu-triangle/main.go	//go:build windows
+cmd/wgpu-triangle/window_windows.go	//go:build windows
+comparable_api_test.go	//go:build !rust && !(js && wasm)
+compute_workgroup_storage_test.go	//go:build !rust && !(js && wasm)
+computepass_browser.go	//go:build js && wasm
+computepass_indirect_state_test.go	//go:build !rust && !(js && wasm)
+computepass_native.go	//go:build !rust && !(js && wasm)
+computepass_rust.go	//go:build rust
+copy_aspect_native_test.go	//go:build !rust && !(js && wasm)
+copy_usage_coverage_test.go	//go:build !rust && !(js && wasm)
+copy_zero_size_native_test.go	//go:build !rust && !(js && wasm)
+core/adapter.go	//go:build !(js && wasm)
+core/adapter_test.go	//go:build !(js && wasm)
+core/backend.go	//go:build !(js && wasm)
+core/backend_test.go	//go:build !(js && wasm)
+core/buffer_mapping.go	//go:build !(js && wasm)
+core/buffer_mapping_test.go	//go:build !(js && wasm)
+core/buffer_test.go	//go:build !(js && wasm)
+core/command.go	//go:build !(js && wasm)
+core/command_encoder.go	//go:build !(js && wasm)
+core/command_encoder_test.go	//go:build !(js && wasm)
+core/command_indirect_count.go	//go:build !(js && wasm)
+core/command_test.go	//go:build !(js && wasm)
+core/core_command_encoder_test.go	//go:build !(js && wasm)
+core/core_test.go	//go:build !(js && wasm)
+core/create_buffer_test.go	//go:build !(js && wasm)
+core/debug.go	//go:build !(js && wasm)
+core/debug_test.go	//go:build !(js && wasm)
+core/destroy_queue.go	//go:build !(js && wasm)
+core/destroy_queue_test.go	//go:build !(js && wasm)
+core/device.go	//go:build !(js && wasm)
+core/device_hal_test.go	//go:build !(js && wasm)
+core/device_poll.go	//go:build !(js && wasm)
+core/device_poll_test.go	//go:build !(js && wasm)
+core/device_test.go	//go:build !(js && wasm)
+core/device_tracker.go	//go:build !(js && wasm)
+core/device_tracker_reuse_test.go	//go:build !(js && wasm)
+core/device_tracker_test.go	//go:build !(js && wasm)
+core/doc.go	//go:build !(js && wasm)
+core/error.go	//go:build !(js && wasm)
+core/error_scope.go	//go:build !(js && wasm)
+core/error_scope_test.go	//go:build !(js && wasm)
+core/error_test.go	//go:build !(js && wasm)
+core/feature_format.go	//go:build !(js && wasm)
+core/feature_format_test.go	//go:build !(js && wasm)
+core/feature_gate_cases_test.go	//go:build !(js && wasm)
+core/feature_validate.go	//go:build !(js && wasm)
+core/feature_validate_test.go	//go:build !(js && wasm)
+core/format_filterable.go	//go:build !(js && wasm)
+core/format_filterable_test.go	//go:build !(js && wasm)
+core/global.go	//go:build !(js && wasm)
+core/global_test.go	//go:build !(js && wasm)
+core/hal_integration_test.go	//go:build integration && !(js && wasm)
+core/hub.go	//go:build !(js && wasm)
+core/hub_test.go	//go:build !(js && wasm)
+core/id.go	//go:build !(js && wasm)
+core/identity.go	//go:build !(js && wasm)
+core/indirect_count_test.go	//go:build !(js && wasm)
+core/indirect_usage_test.go	//go:build !(js && wasm)
+core/indirect_validation.go	//go:build !(js && wasm)
+core/indirect_validation_test.go	//go:build !(js && wasm)
+core/instance.go	//go:build !(js && wasm)
+core/instance_display_test.go	//go:build !(js && wasm)
+core/instance_gles_qualify_test.go	//go:build !(js && wasm)
+core/instance_gles_test.go	//go:build !(js && wasm)
+core/instance_registration_test.go	//go:build !(js && wasm)
+core/instance_surface_test.go	//go:build !(js && wasm)
+core/instance_test.go	//go:build !(js && wasm)
+core/multi_cb_encoder_test.go	//go:build !(js && wasm)
+core/pass_usage.go	//go:build !(js && wasm)
+core/pass_usage_test.go	//go:build !(js && wasm)
+core/pipeline.go	//go:build !(js && wasm)
+core/pipeline_test.go	//go:build !(js && wasm)
+core/query_validate.go	//go:build !(js && wasm)
+core/query_validate_test.go	//go:build !(js && wasm)
+core/queue.go	//go:build !(js && wasm)
+core/queue_test.go	//go:build !(js && wasm)
+core/ray_tracing.go	//go:build !(js && wasm)
+core/registry.go	//go:build !(js && wasm)
+core/render_pass_depth_slice_test.go	//go:build !(js && wasm)
+core/render_pass_extent_test.go	//go:build !(js && wasm)
+core/render_pass_overlap_test.go	//go:build !(js && wasm)
+core/render_pass_renderable_test.go	//go:build !(js && wasm)
+core/render_pass_viewport_test.go	//go:build !(js && wasm)
+core/renderpass_timestamp_test.go	//go:build !(js && wasm)
+core/resource.go	//go:build !(js && wasm)
+core/resource_accessors.go	//go:build !(js && wasm)
+core/resource_accessors_test.go	//go:build !(js && wasm)
+core/resource_ref.go	//go:build !(js && wasm)
+core/resource_ref_test.go	//go:build !(js && wasm)
+core/shader_features.go	//go:build !(js && wasm)
+core/shader_features_test.go	//go:build !(js && wasm)
+core/snatch.go	//go:build !(js && wasm)
+core/snatch_test.go	//go:build !(js && wasm)
+core/spirv_capabilities.go	//go:build !(js && wasm)
+core/spirv_capabilities_test.go	//go:build !(js && wasm)
+core/stencil_blit.go	//go:build !(js && wasm)
+core/storage.go	//go:build !(js && wasm)
+core/surface.go	//go:build !(js && wasm)
+core/surface_test.go	//go:build !(js && wasm)
+core/testutil/assert.go	//go:build !(js && wasm)
+core/testutil/assert_test.go	//go:build !(js && wasm)
+core/testutil/validation_env.go	//go:build !(js && wasm)
+core/testutil/validation_env_test.go	//go:build !(js && wasm)
+core/texture_copy_scope_test.go	//go:build !(js && wasm)
+core/texture_scope_test.go	//go:build !(js && wasm)
+core/texture_usage_validate.go	//go:build !(js && wasm)
+core/thread_safety_test.go	//go:build !(js && wasm)
+core/track.go	//go:build !(js && wasm)
+core/track/allocator.go	//go:build !(js && wasm)
+core/track/allocator_test.go	//go:build !(js && wasm)
+core/track/buffer.go	//go:build !(js && wasm)
+core/track/buffer_test.go	//go:build !(js && wasm)
+core/track/encoder_tracker.go	//go:build !(js && wasm)
+core/track/encoder_tracker_test.go	//go:build !(js && wasm)
+core/track/texture.go	//go:build !(js && wasm)
+core/track/texture_compat_matrix_test.go	//go:build !(js && wasm)
+core/track/texture_test.go	//go:build !(js && wasm)
+core/track/tracking_data.go	//go:build !(js && wasm)
+core/tracked_submission_test.go	//go:build !(js && wasm)
+core/validate.go	//go:build !(js && wasm)
+core/validate_constants_test.go	//go:build !(js && wasm)
+core/validate_copy.go	//go:build !(js && wasm)
+core/validate_copy_layout.go	//go:build !(js && wasm)
+core/validate_copy_layout_test.go	//go:build !(js && wasm)
+core/validate_copy_test.go	//go:build !(js && wasm)
+core/validate_device.go	//go:build !(js && wasm)
+core/validate_device_test.go	//go:build !(js && wasm)
+core/validate_render_attachment.go	//go:build !(js && wasm)
+core/validate_shader.go	//go:build !(js && wasm)
+core/validate_shader_test.go	//go:build !(js && wasm)
+core/validate_test.go	//go:build !(js && wasm)
+core/validate_texture_copy.go	//go:build !(js && wasm)
+core/validate_texture_copy_downlevel_test.go	//go:build !(js && wasm)
+core/validate_texture_copy_range.go	//go:build !(js && wasm)
+core/validate_texture_copy_range_test.go	//go:build !(js && wasm)
+core/validate_texture_copy_test.go	//go:build !(js && wasm)
+core/validate_texture_view.go	//go:build !(js && wasm)
+core/validate_texture_view_test.go	//go:build !(js && wasm)
+core/validate_texture_write.go	//go:build !(js && wasm)
+core/validate_texture_write_test.go	//go:build !(js && wasm)
+core/validate_viewport.go	//go:build !(js && wasm)
+coverage_device_test.go	//go:build !rust && !(js && wasm)
+coverage_encoder_test.go	//go:build !rust && !(js && wasm)
+coverage_mapping_test.go	//go:build !rust && !(js && wasm)
+coverage_pipeline_test.go	//go:build !rust && !(js && wasm)
+coverage_surface_test.go	//go:build !rust && !(js && wasm)
+coverage_wrap_test.go	//go:build !rust && !(js && wasm)
+depth_only_pass_repro_test.go	//go:build integration && !rust && !(js && wasm)
+descriptor.go	//go:build !rust && !(js && wasm)
+descriptor_browser.go	//go:build js && wasm
+descriptor_rust.go	//go:build rust
+descriptor_test.go	//go:build !rust && !(js && wasm)
+device_browser.go	//go:build js && wasm
+device_checkhealth_browser.go	//go:build js && wasm
+device_checkhealth_native.go	//go:build !rust && !(js && wasm)
+device_checkhealth_rust.go	//go:build rust
+device_checkhealth_test.go	//go:build !rust && !(js && wasm)
+device_constants_browser_test.go	//go:build js && wasm
+device_constants_rust_test.go	//go:build rust
+device_native.go	//go:build !rust && !(js && wasm)
+device_release_test.go	//go:build !rust && !(js && wasm)
+device_rust.go	//go:build rust
+device_test.go	//go:build !rust && !(js && wasm)
+display_handle_native_test.go	//go:build !rust && !(js && wasm)
+encoder_browser.go	//go:build js && wasm
+encoder_copy_validation_test.go	//go:build !rust && !(js && wasm)
+encoder_depth_slice_rust_test.go	//go:build rust
+encoder_native.go	//go:build !rust && !(js && wasm)
+encoder_pool.go	//go:build !rust && !(js && wasm)
+encoder_pool_test.go	//go:build !rust && !(js && wasm)
+encoder_rust.go	//go:build rust
+encoder_test.go	//go:build !rust && !(js && wasm)
+encoder_usage_scope_test.go	//go:build !rust && !(js && wasm)
+enum_values_rust_test.go	//go:build rust
+error.go	//go:build !rust && !(js && wasm)
+error_browser.go	//go:build js && wasm
+error_context_released_test.go	//go:build !rust && !(js && wasm)
+error_rust.go	//go:build rust
+examples/browser-compute/main.go	//go:build js && wasm
+examples/browser-test/main.go	//go:build js && wasm
+export_test.go	//go:build !rust && !(js && wasm)
+fence.go	//go:build !rust && !(js && wasm)
+fence_browser.go	//go:build js && wasm
+fence_rust.go	//go:build rust
+hal/allbackends/array_layer_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/bind_group_rebind_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/bind_group_usage_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/buffer_layout_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/clip_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/color_format_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/compressed_texture_decode_cases_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/compressed_texture_decode_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/compressed_texture_ideal_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/compressed_texture_sample_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/cube_texture_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/cull_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_attachment_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_only_fragment_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_only_pipeline_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_pass_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_persist_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_slice_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/depth_stencil_upload_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/descriptor_pool_dynamic_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/discard_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/discard_semantics_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/dispatch_indirect_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/doc.go	//go:build !(js && wasm)
+hal/allbackends/draw_args_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/draw_first_instance_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/draw_index_offset_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/draw_zero_instances_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/dynamic_offsets_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/encoder_error_discard_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/encoder_error_leak_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/encoder_locked_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/ffi_pointer_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/fill_rule_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/flat_varying_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/integer_target_clear_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/layered_texture_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/literal_zero_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/msaa_store_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/override_cases_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/overrides_adapters_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/perspective_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/pipeline_defaults_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/pipeline_layout_release_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/pipeline_overrides_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/quad_derivatives_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/query_set_release_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/raster_rig_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/readback_corpus_format_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/readback_corpus_selftest_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/readback_corpus_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/register.go	//go:build !android && !(js && wasm)
+hal/allbackends/register_android.go	//go:build android && arm64
+hal/allbackends/register_darwin.go	//go:build darwin && !(js && wasm)
+hal/allbackends/register_linux.go	//go:build linux && !android && !(js && wasm)
+hal/allbackends/register_windows.go	//go:build windows && !(js && wasm)
+hal/allbackends/release_before_submit_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/released_layout_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/render_bundle_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/render_stage_constants_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/render_target_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/sampled_render_target_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/sampler_lod_clamp_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/sampler_pipeline_switch_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/shader_features_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/shader_layout_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/shader_lower_once_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/special_constants_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/srgb_view_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/stale_attachment_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/stencil_blit_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/stencil_mask_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/stencil_two_sided_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/stencil_upload_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/stencil_wrap_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/storage_oob_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/subgroup_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/submit_order_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/texture_copy_layout_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/texture_format_copy_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/texture_gather_compare_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/texture_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/timestamp_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/unorm_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/vertex_broadcast_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/view_format_render_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/view_layer_binding_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/view_mip_cube_array_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/viewport_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/vvl_capture_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/workgroup_zero_readback_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/write_ordering_test.go	//go:build !android && !(js && wasm) && !rust
+hal/allbackends/write_texture_region_test.go	//go:build !android && !(js && wasm) && !rust
+hal/api.go	//go:build !(js && wasm)
+hal/backends.go	//go:build !(js && wasm)
+hal/backends_test.go	//go:build !(js && wasm)
+hal/bench_cross_backend_test.go	//go:build !(js && wasm)
+hal/bench_raytracing_test.go	//go:build !(js && wasm)
+hal/command.go	//go:build !(js && wasm)
+hal/descriptor.go	//go:build !(js && wasm)
+hal/doc.go	//go:build !(js && wasm)
+hal/dx12/adapter.go	//go:build windows && !(js && wasm)
+hal/dx12/adapter_features_test.go	//go:build windows && !(js && wasm)
+hal/dx12/adapter_filter.go	//go:build windows && !(js && wasm)
+hal/dx12/adapter_filter_test.go	//go:build windows && !(js && wasm)
+hal/dx12/bind_group.go	//go:build windows && !(js && wasm)
+hal/dx12/bind_group_state.go	//go:build windows && !(js && wasm)
+hal/dx12/bind_group_test.go	//go:build windows && !(js && wasm)
+hal/dx12/buffer_heap_test.go	//go:build windows && !(js && wasm)
+hal/dx12/buffer_state_test.go	//go:build windows && !(js && wasm)
+hal/dx12/command.go	//go:build windows && !(js && wasm)
+hal/dx12/command_test.go	//go:build windows && !(js && wasm)
+hal/dx12/compute_integration_test.go	//go:build windows && !(js && wasm)
+hal/dx12/compute_test.go	//go:build windows && !(js && wasm)
+hal/dx12/convert.go	//go:build windows && !(js && wasm)
+hal/dx12/convert_test.go	//go:build windows && !(js && wasm)
+hal/dx12/copy_commands.go	//go:build windows && !(js && wasm)
+hal/dx12/copy_plan.go	//go:build windows && !(js && wasm)
+hal/dx12/copy_plan_test.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/const.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/device.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/doc.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/dred.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/error.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/guid.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/interfaces.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/layout_test.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/loader.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/pipeline_state.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/raytracing.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/resource_test.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/types.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/types_test.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/view_helpers.go	//go:build windows && !(js && wasm)
+hal/dx12/d3d12/view_helpers_test.go	//go:build windows && !(js && wasm)
+hal/dx12/d3dcompile/d3dcompile.go	//go:build windows && !(js && wasm)
+hal/dx12/dcomp.go	//go:build windows && !(js && wasm)
+hal/dx12/debug_messages_test.go	//go:build windows && !(js && wasm)
+hal/dx12/device.go	//go:build windows && !(js && wasm)
+hal/dx12/device_lifecycle_test.go	//go:build windows && !(js && wasm)
+hal/dx12/device_removed_test.go	//go:build windows && !(js && wasm)
+hal/dx12/doc.go	//go:build !(js && wasm)
+hal/dx12/dxgi/const.go	//go:build windows && !(js && wasm)
+hal/dx12/dxgi/doc.go	//go:build windows && !(js && wasm)
+hal/dx12/dxgi/error.go	//go:build windows && !(js && wasm)
+hal/dx12/dxgi/factory.go	//go:build windows && !(js && wasm)
+hal/dx12/dxgi/guid.go	//go:build windows && !(js && wasm)
+hal/dx12/dxgi/interfaces.go	//go:build windows && !(js && wasm)
+hal/dx12/dxgi/types.go	//go:build windows && !(js && wasm)
+hal/dx12/dxil_dump_test.go	//go:build windows && !(js && wasm)
+hal/dx12/handles.go	//go:build windows && !(js && wasm)
+hal/dx12/init.go	//go:build windows && !(js && wasm)
+hal/dx12/instance.go	//go:build windows && !(js && wasm)
+hal/dx12/naga_options_test.go	//go:build windows && !(js && wasm)
+hal/dx12/pipeline.go	//go:build windows && !(js && wasm)
+hal/dx12/pso_cache.go	//go:build windows && !(js && wasm)
+hal/dx12/pso_cache_key.go	//go:build windows && !(js && wasm)
+hal/dx12/query.go	//go:build windows && !(js && wasm)
+hal/dx12/queue.go	//go:build windows && !(js && wasm)
+hal/dx12/raytracing.go	//go:build windows && !(js && wasm)
+hal/dx12/render_3d_test.go	//go:build windows && !(js && wasm)
+hal/dx12/resource.go	//go:build windows && !(js && wasm)
+hal/dx12/resource_test.go	//go:build windows && !(js && wasm)
+hal/dx12/shader_cache.go	//go:build windows && !(js && wasm)
+hal/dx12/shader_cache_test.go	//go:build windows && !(js && wasm)
+hal/dx12/shader_capabilities.go	//go:build windows && !(js && wasm)
+hal/dx12/special_constants.go	//go:build windows && !(js && wasm)
+hal/dx12/state_tracker.go	//go:build windows && !(js && wasm)
+hal/dx12/state_tracker_test.go	//go:build windows && !(js && wasm)
+hal/dx12/storage_texture_test.go	//go:build windows && !(js && wasm)
+hal/dx12/surface.go	//go:build windows && !(js && wasm)
+hal/dx12/view_desc.go	//go:build windows && !(js && wasm)
+hal/dx12/view_desc_test.go	//go:build windows && !(js && wasm)
+hal/dx12/warp_adapter_test.go	//go:build windows && !(js && wasm)
+hal/error.go	//go:build !(js && wasm)
+hal/error_test.go	//go:build !(js && wasm)
+hal/gles/adapter.go	//go:build windows && !(js && wasm)
+hal/gles/adapter_context.go	//go:build windows && !(js && wasm)
+hal/gles/adapter_context_linux.go	//go:build linux && !(js && wasm)
+hal/gles/adapter_context_linux_test.go	//go:build linux && !(js && wasm)
+hal/gles/adapter_context_windows_test.go	//go:build windows && !(js && wasm)
+hal/gles/adapter_linux.go	//go:build linux && !(js && wasm)
+hal/gles/adapter_open_test.go	//go:build linux && !(js && wasm)
+hal/gles/api.go	//go:build windows && !(js && wasm)
+hal/gles/api_linux.go	//go:build linux && !(js && wasm)
+hal/gles/bind_group_handles_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/binding_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/capabilities.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/capabilities_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/command.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/command_test.go	//go:build windows && !(js && wasm)
+hal/gles/compressed_texture.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/compute_integration_windows_test.go	//go:build windows && !(js && wasm)
+hal/gles/compute_readback_es_linux_test.go	//go:build integration && linux && !(js && wasm) && wgpu_gles_force_es
+hal/gles/compute_test.go	//go:build (linux || windows) && !(js && wasm)
+hal/gles/context_api_force_es_linux.go	//go:build linux && !(js && wasm) && wgpu_gles_force_es
+hal/gles/context_api_force_es_linux_test.go	//go:build linux && !(js && wasm) && wgpu_gles_force_es
+hal/gles/context_api_linux.go	//go:build linux && !(js && wasm) && !wgpu_gles_force_es
+hal/gles/context_current_linux_test.go	//go:build linux && !(js && wasm)
+hal/gles/convert_test.go	//go:build windows && !(js && wasm)
+hal/gles/copy_integration_linux_test.go	//go:build integration && linux && !(js && wasm)
+hal/gles/depth_only_pass_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/device.go	//go:build windows && !(js && wasm)
+hal/gles/device_linux.go	//go:build linux && !(js && wasm)
+hal/gles/doc.go	//go:build !(js && wasm)
+hal/gles/egl/context.go	//go:build linux && !(js && wasm)
+hal/gles/egl/context_policy_test.go	//go:build linux && !(js && wasm)
+hal/gles/egl/display.go	//go:build linux && !(js && wasm)
+hal/gles/egl/display_registry.go	//go:build linux && !(js && wasm)
+hal/gles/egl/doc.go	//go:build linux && !(js && wasm)
+hal/gles/egl/egl.go	//go:build linux && !(js && wasm)
+hal/gles/egl/robustness_test.go	//go:build linux && !(js && wasm)
+hal/gles/egl/types.go	//go:build linux && !(js && wasm)
+hal/gles/egl/wayland_egl.go	//go:build linux && !(js && wasm)
+hal/gles/empty_fragment.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/expose_linux_test.go	//go:build linux && !(js && wasm)
+hal/gles/fence_context_windows_test.go	//go:build windows && !(js && wasm)
+hal/gles/gl/const.go	//go:build !(js && wasm)
+hal/gles/gl/const_test.go	//go:build windows && !(js && wasm)
+hal/gles/gl/context.go	//go:build windows && !(js && wasm)
+hal/gles/gl/context_linux.go	//go:build linux && !(js && wasm)
+hal/gles/gl/doc.go	//go:build !(js && wasm)
+hal/gles/gl/parity_test.go	//go:build !(js && wasm)
+hal/gles/gl/required.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/gl/required_linux_test.go	//go:build linux && !(js && wasm)
+hal/gles/gl/required_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/gl/required_windows_test.go	//go:build windows && !(js && wasm)
+hal/gles/gl/version.go	//go:build !(js && wasm)
+hal/gles/indirect_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/init.go	//go:build windows && !(js && wasm)
+hal/gles/init_linux.go	//go:build linux && !(js && wasm)
+hal/gles/integration_test.go	//go:build integration && linux && !(js && wasm)
+hal/gles/layered_texture.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/lifetime_repro_test.go	//go:build integration && linux && !(js && wasm)
+hal/gles/msaa_es_linux_test.go	//go:build integration && linux && !(js && wasm) && wgpu_gles_force_es
+hal/gles/ownership_linux_test.go	//go:build linux && !(js && wasm)
+hal/gles/queue.go	//go:build windows && !(js && wasm)
+hal/gles/queue_linux.go	//go:build linux && !(js && wasm)
+hal/gles/resource.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/resource_linux.go	//go:build linux && !(js && wasm)
+hal/gles/resource_windows.go	//go:build windows && !(js && wasm)
+hal/gles/robust_access.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/sampled_view_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/sampler.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/sampler_state.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/sampler_state_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/sampler_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/shader.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/shader_capabilities.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/shader_capabilities_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/shader_overrides_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/shader_policies_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/shared_display_integration_test.go	//go:build integration && linux && !(js && wasm)
+hal/gles/storage_texture_es_linux_test.go	//go:build integration && linux && !(js && wasm) && wgpu_gles_force_es
+hal/gles/surface.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/texture_format.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/texture_format_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/texture_target_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/version_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/vertex_binding_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/vertex_divisor_test.go	//go:build (windows || linux) && !(js && wasm)
+hal/gles/wayland_lifetime_linux_test.go	//go:build linux && !(js && wasm)
+hal/gles/wgl/doc.go	//go:build !(js && wasm)
+hal/gles/wgl/hidden_window.go	//go:build windows && !(js && wasm)
+hal/gles/wgl/robust_test.go	//go:build windows && !(js && wasm)
+hal/gles/wgl/wgl.go	//go:build windows && !(js && wasm)
+hal/indirect_count.go	//go:build !(js && wasm)
+hal/indirect_count_test.go	//go:build !(js && wasm)
+hal/logger.go	//go:build !(js && wasm)
+hal/logger_test.go	//go:build !(js && wasm)
+hal/metal/adapter.go	//go:build darwin && !(js && wasm)
+hal/metal/adapter_features_test.go	//go:build darwin && !(js && wasm)
+hal/metal/adapter_view_format_test.go	//go:build darwin && !(js && wasm)
+hal/metal/api.go	//go:build darwin && !(js && wasm)
+hal/metal/compute_test.go	//go:build darwin && !(js && wasm)
+hal/metal/conv.go	//go:build darwin && !(js && wasm)
+hal/metal/conv_test.go	//go:build darwin && !(js && wasm)
+hal/metal/device.go	//go:build darwin && !(js && wasm)
+hal/metal/doc.go	//go:build !(js && wasm)
+hal/metal/encoder.go	//go:build darwin && !(js && wasm)
+hal/metal/encoder_test.go	//go:build darwin && !(js && wasm)
+hal/metal/frame_pool.go	//go:build darwin && !(js && wasm)
+hal/metal/icb_indexed.go	//go:build darwin && !(js && wasm)
+hal/metal/icb_indexed_test.go	//go:build darwin && !(js && wasm)
+hal/metal/icb_pipeline.go	//go:build darwin && !(js && wasm)
+hal/metal/icb_pipeline_test.go	//go:build darwin && !(js && wasm)
+hal/metal/indirect_count_test.go	//go:build darwin && !(js && wasm)
+hal/metal/init.go	//go:build darwin && !(js && wasm)
+hal/metal/langversion.go	//go:build darwin && !(js && wasm)
+hal/metal/langversion_test.go	//go:build darwin && !(js && wasm)
+hal/metal/main_test.go	//go:build darwin && !(js && wasm)
+hal/metal/metal.go	//go:build darwin && !(js && wasm)
+hal/metal/objc.go	//go:build darwin && !(js && wasm)
+hal/metal/objc_test.go	//go:build darwin && !(js && wasm)
+hal/metal/queue.go	//go:build darwin && !(js && wasm)
+hal/metal/raytracing.go	//go:build darwin && !(js && wasm)
+hal/metal/resource.go	//go:build darwin && !(js && wasm)
+hal/metal/surface.go	//go:build darwin && !(js && wasm)
+hal/metal/surface_test.go	//go:build darwin && !(js && wasm)
+hal/metal/texture_copy.go	//go:build darwin && !(js && wasm)
+hal/metal/texture_copy_aspect_test.go	//go:build darwin && !(js && wasm)
+hal/metal/texture_copy_test.go	//go:build darwin && !(js && wasm)
+hal/metal/types.go	//go:build darwin && !(js && wasm)
+hal/metal/vertex_layout_test.go	//go:build darwin && !(js && wasm)
+hal/noop/adapter.go	//go:build !(js && wasm)
+hal/noop/api.go	//go:build !(js && wasm)
+hal/noop/bench_test.go	//go:build !(js && wasm)
+hal/noop/command.go	//go:build !(js && wasm)
+hal/noop/device.go	//go:build !(js && wasm)
+hal/noop/doc.go	//go:build !(js && wasm)
+hal/noop/noop_test.go	//go:build !(js && wasm)
+hal/noop/queue.go	//go:build !(js && wasm)
+hal/noop/register.go	//go:build !(js && wasm)
+hal/noop/resource.go	//go:build !(js && wasm)
+hal/noop/swapchain_suppressed_test.go	//go:build !(js && wasm)
+hal/noop_register_test.go	//go:build !(js && wasm)
+hal/raytracing.go	//go:build !(js && wasm)
+hal/registry.go	//go:build !(js && wasm)
+hal/registry_test.go	//go:build !(js && wasm)
+hal/resource.go	//go:build !(js && wasm)
+hal/software/adapter.go	//go:build !(js && wasm)
+hal/software/api.go	//go:build !(js && wasm)
+hal/software/blit_darwin.go	//go:build darwin && !(js && wasm)
+hal/software/blit_linux.go	//go:build linux && !(js && wasm)
+hal/software/blit_other.go	//go:build !windows && !linux && !darwin && !(js && wasm)
+hal/software/blit_wayland.go	//go:build linux && !(js && wasm)
+hal/software/blit_windows.go	//go:build windows && !(js && wasm)
+hal/software/color_target.go	//go:build !(js && wasm)
+hal/software/command.go	//go:build !(js && wasm)
+hal/software/compressed_copy_test.go	//go:build !(js && wasm)
+hal/software/compute_test.go	//go:build !(js && wasm)
+hal/software/copy_texture_test.go	//go:build !(js && wasm)
+hal/software/damage_test.go	//go:build !(js && wasm)
+hal/software/device.go	//go:build !(js && wasm)
+hal/software/doc.go	//go:build !(js && wasm)
+hal/software/draw.go	//go:build !(js && wasm)
+hal/software/draw_cull_test.go	//go:build !(js && wasm)
+hal/software/draw_test.go	//go:build !(js && wasm)
+hal/software/emitter_opcodes_test.go	//go:build !(js && wasm)
+hal/software/image_load_bounds_test.go	//go:build !(js && wasm)
+hal/software/init.go	//go:build !(js && wasm)
+hal/software/integration_test.go	//go:build !(js && wasm)
+hal/software/queue.go	//go:build !(js && wasm)
+hal/software/raster/blend.go	//go:build !(js && wasm)
+hal/software/raster/blend_test.go	//go:build !(js && wasm)
+hal/software/raster/clip.go	//go:build !(js && wasm)
+hal/software/raster/clip_test.go	//go:build !(js && wasm)
+hal/software/raster/clipper_test.go	//go:build !(js && wasm)
+hal/software/raster/cull.go	//go:build !(js && wasm)
+hal/software/raster/depth.go	//go:build !(js && wasm)
+hal/software/raster/discard_test.go	//go:build !(js && wasm)
+hal/software/raster/doc.go	//go:build !(js && wasm)
+hal/software/raster/facing_spec_test.go	//go:build !(js && wasm)
+hal/software/raster/fill_rule_test.go	//go:build !(js && wasm)
+hal/software/raster/flat_test.go	//go:build !(js && wasm)
+hal/software/raster/incremental.go	//go:build !(js && wasm)
+hal/software/raster/incremental_test.go	//go:build !(js && wasm)
+hal/software/raster/interpolate.go	//go:build !(js && wasm)
+hal/software/raster/interpolate_test.go	//go:build !(js && wasm)
+hal/software/raster/parallel.go	//go:build !(js && wasm)
+hal/software/raster/parallel_test.go	//go:build !(js && wasm)
+hal/software/raster/pipeline.go	//go:build !(js && wasm)
+hal/software/raster/quad.go	//go:build !(js && wasm)
+hal/software/raster/quad_test.go	//go:build !(js && wasm)
+hal/software/raster/raster_test.go	//go:build !(js && wasm)
+hal/software/raster/stencil.go	//go:build !(js && wasm)
+hal/software/raster/stencil_test.go	//go:build !(js && wasm)
+hal/software/raster/tile.go	//go:build !(js && wasm)
+hal/software/raster/tile_test.go	//go:build !(js && wasm)
+hal/software/raster/triangle.go	//go:build !(js && wasm)
+hal/software/raster/types.go	//go:build !(js && wasm)
+hal/software/raster/unorm.go	//go:build !(js && wasm)
+hal/software/raster/unorm_paths_test.go	//go:build !(js && wasm)
+hal/software/raster/unorm_test.go	//go:build !(js && wasm)
+hal/software/raster/viewport.go	//go:build !(js && wasm)
+hal/software/raster/viewport_test.go	//go:build !(js && wasm)
+hal/software/raytracing.go	//go:build !(js && wasm)
+hal/software/raytracing_test.go	//go:build !(js && wasm)
+hal/software/readpixels_test.go	//go:build !(js && wasm)
+hal/software/render_target.go	//go:build !(js && wasm)
+hal/software/resource.go	//go:build !(js && wasm)
+hal/software/shader/buffer_layout_test.go	//go:build !(js && wasm)
+hal/software/shader/builtin.go	//go:build !(js && wasm)
+hal/software/shader/callback.go	//go:build !(js && wasm)
+hal/software/shader/color_codec.go	//go:build !(js && wasm)
+hal/software/shader/color_codec_test.go	//go:build !(js && wasm)
+hal/software/shader/composite_dynamic_test.go	//go:build !(js && wasm)
+hal/software/shader/compressed_sample_test.go	//go:build !(js && wasm)
+hal/software/shader/compute.go	//go:build !(js && wasm)
+hal/software/shader/compute_test.go	//go:build !(js && wasm)
+hal/software/shader/controlflow_test.go	//go:build !(js && wasm)
+hal/software/shader/coverage_boost_test.go	//go:build !(js && wasm)
+hal/software/shader/coverage_test.go	//go:build !(js && wasm)
+hal/software/shader/debug.go	//go:build !(js && wasm)
+hal/software/shader/debug_test.go	//go:build !(js && wasm)
+hal/software/shader/doc.go	//go:build !(js && wasm)
+hal/software/shader/frem_test.go	//go:build !(js && wasm)
+hal/software/shader/gather_compare_test.go	//go:build !(js && wasm)
+hal/software/shader/glsl_coverage_boost_test.go	//go:build !(js && wasm)
+hal/software/shader/glsl_ext.go	//go:build !(js && wasm)
+hal/software/shader/glsl_ext_new_test.go	//go:build !(js && wasm)
+hal/software/shader/glsl_ext_test.go	//go:build !(js && wasm)
+hal/software/shader/glsl_matrix.go	//go:build !(js && wasm)
+hal/software/shader/glsl_matrix_test.go	//go:build !(js && wasm)
+hal/software/shader/glsl_pack.go	//go:build !(js && wasm)
+hal/software/shader/glsl_pack_test.go	//go:build !(js && wasm)
+hal/software/shader/glsl_split.go	//go:build !(js && wasm)
+hal/software/shader/glsl_split_test.go	//go:build !(js && wasm)
+hal/software/shader/ids.go	//go:build !(js && wasm)
+hal/software/shader/ids_test.go	//go:build !(js && wasm)
+hal/software/shader/instrcount_off.go	//go:build !swinstrcount
+hal/software/shader/instrcount_on.go	//go:build swinstrcount
+hal/software/shader/interface.go	//go:build !(js && wasm)
+hal/software/shader/interface_test.go	//go:build !(js && wasm)
+hal/software/shader/interpreter.go	//go:build !(js && wasm)
+hal/software/shader/interpreter_test.go	//go:build !(js && wasm)
+hal/software/shader/limits.go	//go:build !(js && wasm)
+hal/software/shader/limits_test.go	//go:build !(js && wasm)
+hal/software/shader/module.go	//go:build !(js && wasm)
+hal/software/shader/opcode_table_test.go	//go:build !(js && wasm)
+hal/software/shader/opcodes.go	//go:build !(js && wasm)
+hal/software/shader/ops_bits.go	//go:build !(js && wasm)
+hal/software/shader/ops_bits_test.go	//go:build !(js && wasm)
+hal/software/shader/ops_numeric.go	//go:build !(js && wasm)
+hal/software/shader/ops_numeric_test.go	//go:build !(js && wasm)
+hal/software/shader/ops_vec.go	//go:build !(js && wasm)
+hal/software/shader/prepare.go	//go:build !(js && wasm)
+hal/software/shader/quad.go	//go:build !(js && wasm)
+hal/software/shader/quad_test.go	//go:build !(js && wasm)
+hal/software/shader/sample.go	//go:build !(js && wasm)
+hal/software/shader/sample_test.go	//go:build !(js && wasm)
+hal/software/shader/shader_test.go	//go:build !(js && wasm)
+hal/software/shader/testhelpers_test.go	//go:build !(js && wasm)
+hal/software/shader/texel.go	//go:build !(js && wasm)
+hal/software/shader/texel_test.go	//go:build !(js && wasm)
+hal/software/shader/texture_test.go	//go:build !(js && wasm)
+hal/software/shader/typed_values_test.go	//go:build !(js && wasm)
+hal/software/shader/uniform_test.go	//go:build !(js && wasm)
+hal/software/shader/value.go	//go:build !(js && wasm)
+hal/software/shader/value_tags_test.go	//go:build !(js && wasm)
+hal/software/shader/variables_test.go	//go:build !(js && wasm)
+hal/software/shader/workgroup_test.go	//go:build !(js && wasm)
+hal/software/shader_blit_test.go	//go:build !(js && wasm)
+hal/software/software_test.go	//go:build !(js && wasm)
+hal/software/stats.go	//go:build !(js && wasm)
+hal/software/stats_e2e_test.go	//go:build !(js && wasm)
+hal/software/stats_test.go	//go:build !(js && wasm)
+hal/software/storage_texture_test.go	//go:build !(js && wasm)
+hal/software/submit_test.go	//go:build !(js && wasm)
+hal/software/subresource.go	//go:build !(js && wasm)
+hal/software/subresource_layout_test.go	//go:build !(js && wasm)
+hal/software/subresource_render_test.go	//go:build !(js && wasm)
+hal/software/subresource_sample_test.go	//go:build !(js && wasm)
+hal/software/subresource_test.go	//go:build !(js && wasm)
+hal/software/unorm_test.go	//go:build !(js && wasm)
+hal/software/vertex_format_test.go	//go:build !(js && wasm)
+hal/software/vertex_path_bench_test.go	//go:build !(js && wasm)
+hal/software/workgroup_barrier_test.go	//go:build !(js && wasm)
+hal/software/writepixels_test.go	//go:build !(js && wasm)
+hal/surface_target.go	//go:build !(js && wasm)
+hal/surface_target_test.go	//go:build !(js && wasm)
+hal/vulkan/adapter.go	//go:build !(js && wasm)
+hal/vulkan/adapter_surface_test.go	//go:build !(js && wasm)
+hal/vulkan/android_surface_policy.go	//go:build !(js && wasm)
+hal/vulkan/android_surface_policy_test.go	//go:build !(js && wasm)
+hal/vulkan/api.go	//go:build !(js && wasm)
+hal/vulkan/api_android.go	//go:build android && arm64
+hal/vulkan/api_darwin.go	//go:build darwin && !(js && wasm)
+hal/vulkan/api_linux.go	//go:build linux && !android && !(js && wasm)
+hal/vulkan/api_linux_test.go	//go:build linux && !android && !(js && wasm)
+hal/vulkan/api_test.go	//go:build windows && !(js && wasm)
+hal/vulkan/api_windows.go	//go:build windows && !(js && wasm)
+hal/vulkan/bench_descriptor_test.go	//go:build windows && !(js && wasm)
+hal/vulkan/bench_hot_path_test.go	//go:build windows && !(js && wasm)
+hal/vulkan/bundle.go	//go:build !(js && wasm)
+hal/vulkan/command.go	//go:build !(js && wasm)
+hal/vulkan/command_nullguard_test.go	//go:build !(js && wasm)
+hal/vulkan/compute_integration_test.go	//go:build windows && !(js && wasm)
+hal/vulkan/compute_test.go	//go:build (linux || windows) && !(js && wasm)
+hal/vulkan/convert.go	//go:build !(js && wasm)
+hal/vulkan/convert_test.go	//go:build !(js && wasm)
+hal/vulkan/copy_test.go	//go:build !(js && wasm)
+hal/vulkan/debug.go	//go:build !(js && wasm)
+hal/vulkan/depth_slice_view.go	//go:build !(js && wasm)
+hal/vulkan/depth_slice_view_test.go	//go:build windows && !(js && wasm)
+hal/vulkan/depth_stencil_formats.go	//go:build !(js && wasm)
+hal/vulkan/depth_stencil_formats_test.go	//go:build !(js && wasm)
+hal/vulkan/depth_stencil_layer_copy_test.go	//go:build !(js && wasm)
+hal/vulkan/descriptor.go	//go:build !(js && wasm)
+hal/vulkan/descriptor_test.go	//go:build !(js && wasm)
+hal/vulkan/descriptor_writes_test.go	//go:build !(js && wasm)
+hal/vulkan/device.go	//go:build !(js && wasm)
+hal/vulkan/device_surface_lifecycle_test.go	//go:build !(js && wasm)
+hal/vulkan/doc.go	//go:build !(js && wasm)
+hal/vulkan/feature_support.go	//go:build !(js && wasm)
+hal/vulkan/feature_support_test.go	//go:build !(js && wasm)
+hal/vulkan/fence.go	//go:build !(js && wasm)
+hal/vulkan/fence_pool.go	//go:build !(js && wasm)
+hal/vulkan/indirect_count.go	//go:build !(js && wasm)
+hal/vulkan/indirect_count_test.go	//go:build !(js && wasm)
+hal/vulkan/init.go	//go:build !android && !js && !(js && wasm)
+hal/vulkan/init_android.go	//go:build android && arm64
+hal/vulkan/instance_extensions_test.go	//go:build !(js && wasm)
+hal/vulkan/maintenance1_test.go	//go:build !(js && wasm)
+hal/vulkan/memory/allocator.go	//go:build !(js && wasm)
+hal/vulkan/memory/buddy.go	//go:build !(js && wasm)
+hal/vulkan/memory/buddy_test.go	//go:build !(js && wasm)
+hal/vulkan/memory/doc.go	//go:build !(js && wasm)
+hal/vulkan/memory/types.go	//go:build !(js && wasm)
+hal/vulkan/memory/types_test.go	//go:build !(js && wasm)
+hal/vulkan/naga_options.go	//go:build !(js && wasm)
+hal/vulkan/naga_options_test.go	//go:build !(js && wasm)
+hal/vulkan/pipeline.go	//go:build !(js && wasm)
+hal/vulkan/pipeline_cache.go	//go:build !(js && wasm)
+hal/vulkan/pipeline_test.go	//go:build !(js && wasm)
+hal/vulkan/platform_android.go	//go:build android && arm64
+hal/vulkan/platform_state_default.go	//go:build !android && !(js && wasm)
+hal/vulkan/query.go	//go:build !(js && wasm)
+hal/vulkan/queue.go	//go:build !(js && wasm)
+hal/vulkan/raytracing.go	//go:build !(js && wasm)
+hal/vulkan/relay_test.go	//go:build !(js && wasm)
+hal/vulkan/renderpass.go	//go:build !(js && wasm)
+hal/vulkan/renderpass_alloc_test.go	//go:build !(js && wasm)
+hal/vulkan/renderpass_depthonly_test.go	//go:build !(js && wasm)
+hal/vulkan/renderpass_test.go	//go:build !(js && wasm)
+hal/vulkan/resource.go	//go:build !(js && wasm)
+hal/vulkan/resource_test.go	//go:build !(js && wasm)
+hal/vulkan/robustness_integration_test.go	//go:build windows && !(js && wasm)
+hal/vulkan/shader_capability_features_test.go	//go:build !(js && wasm)
+hal/vulkan/spirv_capabilities_test.go	//go:build !(js && wasm)
+hal/vulkan/swapchain.go	//go:build !(js && wasm)
+hal/vulkan/swapchain_adr060_test.go	//go:build !(js && wasm)
+hal/vulkan/swapchain_fail_closed_test.go	//go:build !(js && wasm)
+hal/vulkan/swapchain_platform.go	//go:build !(js && wasm)
+hal/vulkan/swapchain_platform_test.go	//go:build !(js && wasm)
+hal/vulkan/swapchain_present_integration_test.go	//go:build windows && !(js && wasm)
+hal/vulkan/swapchain_rust_parity_test.go	//go:build !(js && wasm)
+hal/vulkan/unsafe.go	//go:build !(js && wasm)
+hal/vulkan/vk/android_support_test.go	//go:build !(js && wasm)
+hal/vulkan/vk/c_int_test.go	//go:build !(js && wasm)
+hal/vulkan/vk/commands.go	//go:build !(js && wasm)
+hal/vulkan/vk/commands_gen.go	//go:build !(js && wasm)
+hal/vulkan/vk/commands_load_test.go	//go:build !(js && wasm)
+hal/vulkan/vk/commands_manual.go	//go:build !(js && wasm)
+hal/vulkan/vk/const_ext.go	//go:build !(js && wasm)
+hal/vulkan/vk/const_gen_test.go	//go:build !(js && wasm)
+hal/vulkan/vk/doc.go	//go:build !(js && wasm)
+hal/vulkan/vk/generated_wrappers_linux_test.go	//go:build linux
+hal/vulkan/vk/generated_wrappers_test.go	//go:build !(js && wasm)
+hal/vulkan/vk/loader.go	//go:build !(js && wasm)
+hal/vulkan/vk/offscreen_instance_test.go	//go:build !(js && wasm)
+hal/vulkan/vk/push_constants_test.go	//go:build !(js && wasm)
+hal/vulkan/vk/signatures.go	//go:build !(js && wasm)
+hal/vulkan/vk/types_ext_fix.go	//go:build !(js && wasm)
+hal/vulkan/vk/vulkan_helpers_test.go	//go:build !(js && wasm)
+headless_surface_native_test.go	//go:build !rust && !(js && wasm) && !android
+indirect_count_integration_test.go	//go:build integration && darwin && !rust && !(js && wasm)
+instance_browser.go	//go:build js && wasm
+instance_lifecycle_native_test.go	//go:build !rust && !(js && wasm)
+instance_native.go	//go:build !rust && !(js && wasm)
+instance_rust.go	//go:build rust
+integration_test.go	//go:build !rust && !(js && wasm)
+internal/browser/adapter.go	//go:build js && wasm
+internal/browser/bind.go	//go:build js && wasm
+internal/browser/browser.go	//go:build js && wasm
+internal/browser/buffer.go	//go:build js && wasm
+internal/browser/computepass.go	//go:build js && wasm
+internal/browser/convert.go	//go:build js && wasm
+internal/browser/convert_constants_test.go	//go:build js && wasm
+internal/browser/convert_resources.go	//go:build js && wasm
+internal/browser/convert_resources_test.go	//go:build js && wasm
+internal/browser/convert_surface_js.go	//go:build js && wasm
+internal/browser/device.go	//go:build js && wasm
+internal/browser/encoder.go	//go:build js && wasm
+internal/browser/errors.go	//go:build js && wasm
+internal/browser/instance.go	//go:build js && wasm
+internal/browser/pipeline.go	//go:build js && wasm
+internal/browser/promise.go	//go:build js && wasm
+internal/browser/queue.go	//go:build js && wasm
+internal/browser/renderpass.go	//go:build js && wasm
+internal/browser/renderpass_indirect_test.go	//go:build js && wasm
+internal/browser/sampler.go	//go:build js && wasm
+internal/browser/shader.go	//go:build js && wasm
+internal/browser/surface.go	//go:build js && wasm
+internal/browser/texture.go	//go:build js && wasm
+internal/defaultregtest/backends_test.go	//go:build !rust && !(js && wasm)
+internal/defaultregtest/doc.go	//go:build !rust && !(js && wasm)
+internal/indirect/dispatch.go	//go:build !(js && wasm)
+internal/indirect/dispatch_test.go	//go:build !(js && wasm)
+internal/thread/renderloop.go	//go:build !(js && wasm)
+internal/thread/thread.go	//go:build !(js && wasm)
+internal/thread/thread_test.go	//go:build !(js && wasm)
+internal/wgputestbridge/bridge.go	//go:build !(js && wasm)
+internal/wgputestbridge/hooks_test.go	//go:build !(js && wasm)
+lifecycle_test.go	//go:build !rust && !(js && wasm)
+logger.go	//go:build !rust && !(js && wasm)
+logger_browser.go	//go:build js && wasm
+logger_rust.go	//go:build rust
+map_pending.go	//go:build !rust && !(js && wasm)
+map_pending_browser.go	//go:build js && wasm
+map_pending_rust.go	//go:build rust
+map_types.go	//go:build !rust && !(js && wasm)
+map_types_browser.go	//go:build js && wasm
+map_types_rust.go	//go:build rust
+mapped_range.go	//go:build !rust && !(js && wasm)
+mapped_range_browser.go	//go:build js && wasm
+mapped_range_rust.go	//go:build rust
+mapped_range_test.go	//go:build !rust && !(js && wasm)
+mapping_test.go	//go:build !rust && !(js && wasm)
+metal_icb_benchmark_test.go	//go:build integration && darwin && !rust && !(js && wasm)
+mrt_test.go	//go:build !rust && !(js && wasm)
+pending_writes.go	//go:build !rust && !(js && wasm)
+pending_writes_bench_test.go	//go:build !rust && !(js && wasm)
+pending_writes_helpers_test.go	//go:build !rust && !(js && wasm)
+pending_writes_test.go	//go:build !rust && !(js && wasm)
+pipeline_browser.go	//go:build js && wasm
+pipeline_defaults_browser_test.go	//go:build js && wasm
+pipeline_defaults_native_test.go	//go:build !rust && !(js && wasm)
+pipeline_defaults_rust_test.go	//go:build rust
+pipeline_native.go	//go:build !rust && !(js && wasm)
+pipeline_rust.go	//go:build rust
+query_native.go	//go:build !rust && !(js && wasm)
+query_native_test.go	//go:build !rust && !(js && wasm)
+query_renderbundle_native_test.go	//go:build !rust && !(js && wasm)
+queue_barrier_test.go	//go:build !rust && !(js && wasm)
+queue_browser.go	//go:build js && wasm
+queue_native.go	//go:build !rust && !(js && wasm)
+queue_rust.go	//go:build rust
+queue_submit_order_test.go	//go:build !rust && !(js && wasm)
+queue_test.go	//go:build !rust && !(js && wasm)
+queue_write_texture_native_test.go	//go:build !rust && !(js && wasm)
+r8sample_repro_test.go	//go:build !rust && !(js && wasm)
+recording_registry.go	//go:build !rust && !(js && wasm)
+render_pass_depth_slice_test.go	//go:build !rust && !(js && wasm)
+render_pass_extent_test.go	//go:build !rust && !(js && wasm)
+render_pass_overlap_test.go	//go:build !rust && !(js && wasm)
+render_stage_constants_test.go	//go:build !rust && !(js && wasm)
+renderbundle_execute.go	//go:build !rust && !(js && wasm)
+renderbundle_finish.go	//go:build !rust && !(js && wasm)
+renderbundle_native.go	//go:build !rust && !(js && wasm)
+renderbundle_native_test.go	//go:build !rust && !(js && wasm)
+renderpass_browser.go	//go:build js && wasm
+renderpass_indirect_browser_test.go	//go:build js && wasm
+renderpass_indirect_count.go	//go:build !rust && !(js && wasm)
+renderpass_indirect_count_test.go	//go:build !rust && !(js && wasm)
+renderpass_indirect_rust_test.go	//go:build rust
+renderpass_indirect_test.go	//go:build !rust && !(js && wasm)
+renderpass_indirect_wrappers_test.go	//go:build rust || (js && wasm)
+renderpass_native.go	//go:build !rust && !(js && wasm)
+renderpass_rust.go	//go:build rust
+resource_test.go	//go:build !rust && !(js && wasm)
+sampler_browser.go	//go:build js && wasm
+sampler_lod_device_test.go	//go:build !rust && !(js && wasm)
+sampler_lod_native_test.go	//go:build !rust && !(js && wasm)
+sampler_lod_rust_test.go	//go:build rust
+sampler_native.go	//go:build !rust && !(js && wasm)
+sampler_rust.go	//go:build rust
+shader_browser.go	//go:build js && wasm
+shader_lower_once_test.go	//go:build !rust && !(js && wasm)
+shader_native.go	//go:build !rust && !(js && wasm)
+shader_rust.go	//go:build rust
+software_shader_errors_test.go	//go:build !rust && !(js && wasm)
+software_shader_ids_test.go	//go:build !rust && !(js && wasm)
+staging_belt.go	//go:build !rust && !(js && wasm)
+staging_belt_test.go	//go:build !rust && !(js && wasm)
+stencil_blit_native.go	//go:build !rust && !(js && wasm)
+submit_validation_test.go	//go:build !rust && !(js && wasm)
+surface_backend_native_test.go	//go:build !rust && !(js && wasm)
+surface_browser.go	//go:build js && wasm
+surface_native.go	//go:build !rust && !(js && wasm)
+surface_rust.go	//go:build rust
+surface_rust_android.go	//go:build rust && android
+surface_rust_darwin.go	//go:build rust && darwin
+surface_rust_linux.go	//go:build rust && linux && !android
+surface_rust_windows.go	//go:build rust && windows
+surface_target_hal_test.go	//go:build !rust && !(js && wasm)
+surface_target_linux_test.go	//go:build linux && !rust
+surface_target_native_test.go	//go:build !rust && !(js && wasm)
+surface_texture_format_native_test.go	//go:build !rust && !(js && wasm)
+surface_texture_lifetime_native_test.go	//go:build !rust && !(js && wasm)
+testhooks_native.go	//go:build !rust && !(js && wasm)
+texture_browser.go	//go:build js && wasm
+texture_copy_layout_test.go	//go:build !rust && !(js && wasm)
+texture_copy_lifetime_test.go	//go:build !rust && !(js && wasm)
+texture_copy_range_test.go	//go:build !rust && !(js && wasm)
+texture_copy_region_test.go	//go:build !rust && !(js && wasm)
+texture_copy_scope_test.go	//go:build !rust && !(js && wasm)
+texture_copy_validation_test.go	//go:build !rust && !(js && wasm)
+texture_defaults_native_test.go	//go:build !rust && !(js && wasm)
+texture_native.go	//go:build !rust && !(js && wasm)
+texture_rust.go	//go:build rust
+texture_view_default_dimension_test.go	//go:build !rust && !(js && wasm)
+texture_view_format_native_test.go	//go:build !rust && !(js && wasm)
+wgpu_feature_gate_test.go	//go:build !rust && !(js && wasm)
+wgpu_test.go	//go:build !rust && !(js && wasm)
+wgputest/backend.go	//go:build !rust && !(js && wasm)
+wgputest/backend_noop.go	//go:build !rust && !(js && wasm)
+wgputest/backend_software.go	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware
+wgputest/backend_software_off.go	//go:build !rust && !(js && wasm) && !(((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !wgpu_nosoftware)
+wgputest/device.go	//go:build !rust && !(js && wasm)
+wgputest/device_rust.go	//go:build rust
+wgputest/device_wasm.go	//go:build js && wasm
+wgputest/unavailable_nosoftware_test.go	//go:build !rust && !(js && wasm) && wgpu_nosoftware
+wgputest/unavailable_rust_test.go	//go:build rust
+wgputest/unavailable_wasm_test.go	//go:build js && wasm
+wgputest/wgputest_test.go	//go:build ((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware
+wgputest_factory.go	//go:build !rust && !(js && wasm)
+wrap.go	//go:build !rust && !(js && wasm)
+wrap_browser.go	//go:build js && wasm
+wrap_rust.go	//go:build rust
+wrap_test.go	//go:build !rust && !(js && wasm)
