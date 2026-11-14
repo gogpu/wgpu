@@ -19,7 +19,9 @@
 
 ---
 
-## Current State: v0.34.14
+## Current State: v0.34.15
+
+✅ **Vulkan presents what it acquired and survives device loss (v0.34.15)** — present barriers are tracked submissions whose fence is waited before the command pool is reset, every acquired surface presents, a surface is configured only on a queue family that can present to it and answers capabilities from any surface, and Unconfigure on a lost device destroys its swapchain; DX12 `ClearBuffer` clears its range; naga v0.21.12
 
 ✅ **Platform hardware backends register by default (v0.34.14)** — importing `wgpu` registers Vulkan, DX12 and OpenGL ES on Windows, Vulkan and OpenGL ES on Linux, Metal on macOS (MoltenVK with `-tags wgpu_moltenvk`) and Vulkan/OpenGL ES on Android, with per-backend opt-out build tags; the Pure Go software backend stays an explicit import until v0.35.0; `wgputest` and `Device.CheckHealth` are new
 ✅ **Metal: run-time-indexed stores into workgroup vectors are correct (v0.34.13)** — naga v0.21.10 writes them through a scalar pointer; the readback corpus passes on the Apple Paravirtual device with no known failure left
