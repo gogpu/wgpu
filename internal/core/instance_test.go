@@ -53,9 +53,11 @@ func TestNewInstance(t *testing.T) {
 		want gputypes.Backends
 	}{
 		{
+			// The shared default since gputypes v0.9.1: every hardware backend,
+			// GL included, software never (ADR-083 §6).
 			name: "nil descriptor uses defaults",
 			desc: nil,
-			want: gputypes.BackendsPrimary,
+			want: gputypes.BackendsAll,
 		},
 		{
 			name: "custom backends",
