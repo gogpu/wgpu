@@ -28,6 +28,12 @@ func (i *Instance) HAL() hal.Handles {
 // The handles are borrowed and valid only while this adapter lives; see
 // package hal. HAL returns the zero Handles (Kind KindUnknown) after the
 // adapter is released.
+//
+// On js/wasm the adapter holds no instance link; releasing the instance does
+// not invalidate the adapter (WebGPU has no instance destroy), so a released
+// instance's adapter still reports its handles until Adapter.Release(). On the
+// native and rust builds, where a cached adapter is instance-owned, releasing
+// the instance also yields the zero Handles.
 func (a *Adapter) HAL() hal.Handles {
 	if a == nil {
 		return hal.Handles{}

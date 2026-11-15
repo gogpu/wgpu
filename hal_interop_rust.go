@@ -17,7 +17,10 @@ func (i *Instance) halHandles() hal.Handles {
 
 // halHandles is the "rust"-build body of Adapter.HAL.
 func (a *Adapter) halHandles() hal.Handles {
-	if a == nil || a.released || a.r == nil {
+	// A cached adapter is instance-owned: releasing the instance releases the
+	// wgpu-native instance underneath, so report nothing once either is gone
+	// rather than a stale pointer; hal_interop.go promises the zero Handles.
+	if a == nil || a.released || a.r == nil || (a.instance != nil && a.instance.isReleased()) {
 		return hal.Handles{}
 	}
 	h := hal.WebGPUHandles{Adapter: a.r.Handle()}

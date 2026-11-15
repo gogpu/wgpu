@@ -128,6 +128,11 @@ func (i *Instance) Release() {
 	}
 }
 
+// isReleased reports whether the instance has been released.
+func (i *Instance) isReleased() bool {
+	return i == nil || i.released
+}
+
 // convertRustLimits converts go-webgpu Limits to gputypes.Limits.
 //
 //nolint:dupl // Symmetric field-by-field mapping (rwgpu→gputypes vs gputypes→rwgpu), not real duplication.
