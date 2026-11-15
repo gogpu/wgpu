@@ -320,6 +320,18 @@ jobs:
         install-mode: none
         args: --timeout=5m
 
+    # Compiles the rust-tagged files, tests included: the build and test jobs
+    # use the native tags, and cross-compile runs `go build .` only, so nothing
+    # else type-checks hal_interop_rust_test.go and the other rust-tagged
+    # tests. Same skip as the test job's "Run go vet" step: intentional
+    # unsafe.Pointer FFI use in internal/hal/vulkan/vk and internal/hal/gles.
+    - name: Run go vet with the rust build tag
+      run: |
+        go vet -tags rust $(go list -tags rust ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
+
+    # js/wasm is not wired here yet: `GOOS=js GOARCH=wasm go vet ./...` stops on
+    # cmd/sw-test, which imports internal/hal/software (no js/wasm files).
+
   # Lint the other desktop targets. The job above type-checks only the linux
   # files, so code under darwin or windows build tags (internal/hal/metal, internal/hal/dx12,
   # internal/hal/gles/wgl) is never linted otherwise. The code is pure Go

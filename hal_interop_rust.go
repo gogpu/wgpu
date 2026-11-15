@@ -17,9 +17,10 @@ func (i *Instance) halHandles() hal.Handles {
 
 // halHandles is the "rust"-build body of Adapter.HAL.
 func (a *Adapter) halHandles() hal.Handles {
-	// A cached adapter is instance-owned: releasing the instance releases the
-	// wgpu-native instance underneath, so report nothing once either is gone
-	// rather than a stale pointer; hal_interop.go promises the zero Handles.
+	// wgpu-native's WGPUAdapterImpl owns its own Arc<Context>, so the adapter
+	// handle stays valid after the instance is released. The zero Handles after
+	// either release is the contract hal_interop.go promises, consistent with
+	// Instance.HAL(), not a lifetime requirement (ADR-070 §15.5).
 	if a == nil || a.released || a.r == nil || (a.instance != nil && a.instance.isReleased()) {
 		return hal.Handles{}
 	}

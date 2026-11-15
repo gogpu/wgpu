@@ -11,8 +11,10 @@ import (
 // TestHALRustReleasedAdapter pins the zero-Handles promise for the rust build:
 // hal_interop.go states it and ADR-070 §15.5 repeats it. The live check first
 // proves the guard is scoped; then the adapter-release and instance-release
-// paths each yield the zero Handles. A cached adapter is instance-owned, so
-// without the guard either path reports a stale wgpu-native pointer.
+// paths each yield the zero Handles. wgpu-native's WGPUAdapterImpl owns its
+// Arc<Context>, so the adapter handle would stay valid after the instance's
+// release; the zero Handles there is the chosen contract, consistent with
+// Instance.HAL() (ADR-070 §15.5).
 func TestHALRustReleasedAdapter(t *testing.T) {
 	t.Run("AdapterRelease", func(t *testing.T) {
 		instance, adapter := newRustTestAdapter(t)

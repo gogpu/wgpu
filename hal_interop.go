@@ -26,14 +26,18 @@ func (i *Instance) HAL() hal.Handles {
 // instance it was enumerated from. Handles that belong to a device are zero.
 //
 // The handles are borrowed and valid only while this adapter lives; see
-// package hal. HAL returns the zero Handles (Kind KindUnknown) after the
-// adapter is released.
+// package hal. HAL returns the zero Handles (Kind KindUnknown) after
+// Adapter.Release() on every build, and after the owning instance is released
+// on the native and rust builds. That is a contract choice consistent with
+// Instance.HAL(), not a lifetime requirement of the objects themselves.
 //
-// On js/wasm the adapter holds no instance link; releasing the instance does
-// not invalidate the adapter (WebGPU has no instance destroy), so a released
-// instance's adapter still reports its handles until Adapter.Release(). On the
-// native and rust builds, where a cached adapter is instance-owned, releasing
-// the instance also yields the zero Handles.
+// On the native build core destroys the HAL adapter and the instance, so a
+// destroyed VkInstance handle must not leak out of a released instance's
+// adapter. On the rust build wgpu-native's WGPUAdapterImpl owns its own
+// Arc<Context> and stays alive after the instance is released, so the zero
+// Handles there is the chosen contract only (ADR-070 §15.5). On js/wasm there
+// is no instance destroy: the adapter keeps reporting its handles until
+// Adapter.Release().
 func (a *Adapter) HAL() hal.Handles {
 	if a == nil {
 		return hal.Handles{}

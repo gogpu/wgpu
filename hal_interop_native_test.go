@@ -122,9 +122,10 @@ func TestHALNativeReleasedObjects(t *testing.T) {
 		}
 	})
 
-	// A cached adapter is instance-owned: releasing the wrapper and releasing
-	// the owning instance both make its native pointers stale, so both paths
-	// must yield the zero Handles. The live check proves the guard is scoped.
+	// A cached adapter is instance-owned. Releasing the wrapper yields the zero
+	// Handles as a contract choice, consistent with Instance.HAL(); releasing
+	// the owning instance destroys the HAL adapter and the instance behind the
+	// handles. The live check proves the guard is scoped.
 	t.Run("Adapter", func(t *testing.T) {
 		instance := newSoftwareSurfaceTestInstance(t)
 		adapter, err := instance.RequestAdapter(nil)

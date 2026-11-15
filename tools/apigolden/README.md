@@ -79,9 +79,11 @@ earlier pre-window snapshot at `4577b0e` is superseded.
 | `testdata/api_wasm.txt` | js/wasm | 8 | 5,834 |
 
 The files in `testdata/` are the post-A golden: 3 packages and 258 / 246 / 241 identifiers, the same numbers the
-Floors table pins. About 7,300 of the `a3705c2` windows identifiers were the generated binding packages
-`hal/vulkan/vk` (6,270 declaration lines) and `hal/dx12/d3d12` (1,017), which became internal in the layout change,
-so the first delta is large and expected.
+Floors table pins. Counting the same measure — exported package-scope identifiers per package, so methods and
+struct fields are not counted — 6,517 of the 9,109 identifiers in the `a3705c2` windows baseline sit in the two
+generated binding packages: `hal/vulkan/vk` holds 5,672 and `hal/dx12/d3d12` 845 (`git show
+a3705c2:tools/apigolden/testdata/api_windows.txt`, one `package` block per package). Both become internal in the
+layout change, so the first delta is large and expected.
 
 A hunk walk of `a3705c2` against the post-A files gives 11 / 8 / 8 hunks with default context and 40 / 32 / 27 with
 `-U0` (`-U0` splits adjacent blocks that the default context merges):
