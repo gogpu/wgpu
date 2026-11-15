@@ -22,16 +22,17 @@ const (
 	MapStateDestroyed
 )
 
-// PollType selects the blocking behavior of Device.Poll.
-type PollType uint8
-
-const (
-	PollPoll PollType = iota
-	PollWait
-)
+// PollType, PollPoll and PollWait live in poll_type.go, one definition for
+// every build.
 
 // Typed buffer mapping errors.
 var (
+	// ErrReleased is returned when operating on a released resource. This build
+	// has no internal/core, so the sentinel is declared with the buffer code it
+	// belongs to and the root re-exports the same value after the move, keeping
+	// errors.Is working through the public API.
+	ErrReleased = errors.New("wgpu: resource already released")
+
 	ErrMapAlreadyPending = errors.New("wgpu: buffer map already pending")
 	ErrMapAlreadyMapped  = errors.New("wgpu: buffer is already mapped")
 	ErrMapNotMapped      = errors.New("wgpu: buffer is not mapped")

@@ -9,8 +9,10 @@ import (
 
 // Public API sentinel errors.
 var (
-	// ErrReleased is returned when operating on a released resource.
-	ErrReleased = errors.New("wgpu: resource already released")
+	// ErrReleased is declared in map_types_browser.go, next to the buffer
+	// mapping sentinels: the browser buffer implementation returns it and the
+	// resource package keeps it, so its home travels with the buffers. Root
+	// re-exports the same value once the move lands.
 
 	// Adapter-selection sentinels (ADR-083 §2.2). internal/core has no files in
 	// the js/wasm build, and the browser's WebGPU reports its own errors, so they

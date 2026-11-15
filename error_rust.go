@@ -5,12 +5,16 @@ package wgpu
 import (
 	"errors"
 	"fmt"
+
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // Public API sentinel errors.
 var (
-	// ErrReleased is returned when operating on a released resource.
-	ErrReleased = errors.New("wgpu: resource already released")
+	// ErrReleased is returned when operating on a released resource. The value
+	// is internal/core's (this build links it), so errors.Is works through the
+	// public API (§15.1).
+	ErrReleased = core.ErrReleased
 
 	// Adapter-selection sentinels (ADR-083 §2.2). This build does not link
 	// internal/core, and the wgpu-native binding reports its own errors, so they

@@ -40,6 +40,13 @@ var (
 
 	// ErrResourceDestroyed is returned when operating on a destroyed resource.
 	ErrResourceDestroyed = errors.New("resource destroyed")
+
+	// ErrReleased is returned when operating on a released resource. It lives
+	// in the shared leaf because every extraction child returns it (buffer,
+	// queue, encoder, pipeline all report a released handle) and the root
+	// re-exports the same value, so errors.Is keeps working through the public
+	// API (ADR-070 §15.1). The message is the public one, unchanged.
+	ErrReleased = errors.New("wgpu: resource already released")
 )
 
 // ValidationError represents a validation failure with context.

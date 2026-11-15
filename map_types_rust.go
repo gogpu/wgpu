@@ -22,13 +22,8 @@ const (
 	MapStateDestroyed
 )
 
-// PollType selects the blocking behavior of Device.Poll.
-type PollType uint8
-
-const (
-	PollPoll PollType = iota
-	PollWait
-)
+// PollType, PollPoll and PollWait live in poll_type.go, one definition for
+// every build.
 
 // Typed buffer mapping errors.
 var (

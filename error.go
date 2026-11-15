@@ -38,8 +38,11 @@ var (
 
 // Public API sentinel errors.
 var (
-	// ErrReleased is returned when operating on a released resource.
-	ErrReleased = errors.New("wgpu: resource already released")
+	// ErrReleased is returned when operating on a released resource. The value
+	// is internal/core's: the extraction children return it too, and the same
+	// value on both sides is what keeps errors.Is working through the public
+	// API (§15.1).
+	ErrReleased = core.ErrReleased
 
 	// Adapter-selection sentinels (ADR-083 §2.2). The selection paths return them
 	// from internal/core; binding the same values here keeps errors.Is working

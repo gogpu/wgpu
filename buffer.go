@@ -110,7 +110,7 @@ func (b *Buffer) MapState() MapState {
 // polling themselves. If you need non-blocking behavior use MapAsync.
 func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) error {
 	if b == nil || b.core == nil {
-		return ErrReleased
+		return core.ErrReleased
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -163,7 +163,7 @@ func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) err
 // is destroyed or the map is canceled.
 func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error) {
 	if b == nil || b.core == nil {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 	cerr := b.core.BeginMap(mode.toInternal(), offset, size)
 	if cerr != nil {
@@ -192,7 +192,7 @@ func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error
 // The returned slice (via MappedRange.Bytes) is invalidated by Unmap.
 func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
 	if b == nil || b.core == nil {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 	if offset%8 != 0 || size%4 != 0 {
 		return nil, ErrMapAlignment
@@ -230,17 +230,17 @@ func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
 // with ErrMapCancelled).
 func (b *Buffer) Unmap() error {
 	if b == nil || b.core == nil {
-		return ErrReleased
+		return core.ErrReleased
 	}
 	if b.device == nil {
-		return ErrReleased
+		return core.ErrReleased
 	}
 	halDev := b.device.HALDevice()
 	// We do not require halDev != nil — Unmap on a device-destroyed
 	// buffer still clears the state machine; the HAL call is skipped.
 	sl := b.core.Device().SnatchLock()
 	if sl == nil {
-		return ErrReleased
+		return core.ErrReleased
 	}
 	guard := sl.Read()
 	defer guard.Release()
@@ -266,7 +266,7 @@ func (b *Buffer) halBuffer() hal.Buffer {
 	return b.core.Raw(guard)
 }
 
-// registerBufferCleanup registers a runtime.AddCleanup handler on the buffer.
+// armCleanup registers a runtime.AddCleanup handler on the buffer.
 // When GC collects the buffer without an explicit Release(), the cleanup
 // schedules deferred destruction via DestroyQueue — the same path as Release().
 //
@@ -274,8 +274,14 @@ func (b *Buffer) halBuffer() hal.Buffer {
 // and core destroy function — NOT the Buffer pointer itself. This is a Go 1.24
 // runtime.AddCleanup requirement: the callback argument must not reference the
 // object being cleaned up.
-func registerBufferCleanup(buf *Buffer, _ *Device, coreBuf *core.Buffer, label string) runtime.Cleanup {
-	return runtime.AddCleanup(buf, func(ref bufferCleanupRef) {
+//
+// A method rather than a package-level function: the device that builds the
+// buffer must be able to arm it without naming an unexported declaration of
+// this file across a package boundary (ADR-070 §11 grain note); the fields it
+// touches stay private to the buffer.
+func (b *Buffer) armCleanup() {
+	coreBuf := b.core
+	b.cleanup = runtime.AddCleanup(b, func(ref bufferCleanupRef) {
 		if !ref.released.CompareAndSwap(false, true) {
 			return
 		}
@@ -286,8 +292,8 @@ func registerBufferCleanup(buf *Buffer, _ *Device, coreBuf *core.Buffer, label s
 			ref.destroyFn()
 		}
 	}, bufferCleanupRef{
-		label:    label,
-		released: buf.released,
+		label:    coreBuf.Label(),
+		released: b.released,
 		ref:      coreBuf.Ref,
 		destroyFn: func() {
 			coreBuf.Destroy()

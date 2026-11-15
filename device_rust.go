@@ -60,7 +60,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		return nil, fmt.Errorf("wgpu: failed to create buffer: %w", err)
 	}
 
-	return &Buffer{r: rb, device: d}, nil
+	return &Buffer{r: rb}, nil
 }
 
 // CreateTexture creates a GPU texture.

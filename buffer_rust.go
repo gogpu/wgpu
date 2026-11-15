@@ -8,13 +8,13 @@ import (
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // Buffer represents a GPU buffer.
 // On Rust backend, this wraps go-webgpu/webgpu Buffer.
 type Buffer struct {
 	r        *rwgpu.Buffer
-	device   *Device
 	released bool
 }
 
@@ -70,7 +70,7 @@ func (b *Buffer) MapState() MapState {
 // byte range, or until ctx is canceled.
 func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) error {
 	if b == nil || b.r == nil {
-		return ErrReleased
+		return core.ErrReleased
 	}
 	if b.released {
 		return ErrBufferDestroyed
@@ -83,7 +83,7 @@ func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) err
 // MapAsync initiates a buffer map without blocking the caller.
 func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error) {
 	if b == nil || b.r == nil {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 	if b.released {
 		return nil, ErrBufferDestroyed
@@ -101,7 +101,7 @@ func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error
 // MappedRange returns a safe view over the mapped region [offset, offset+size).
 func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
 	if b == nil || b.r == nil {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 	if b.released {
 		return nil, ErrBufferDestroyed
@@ -121,7 +121,7 @@ func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
 // Unmap releases the current mapping.
 func (b *Buffer) Unmap() error {
 	if b == nil || b.r == nil {
-		return ErrReleased
+		return core.ErrReleased
 	}
 	if b.released {
 		return ErrBufferDestroyed

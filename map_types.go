@@ -72,19 +72,9 @@ func mapStateFromCore(s core.BufferMapState) MapState {
 	return MapStateUnmapped
 }
 
-// PollType selects the blocking behavior of Device.Poll.
-type PollType uint8
-
-const (
-	// PollPoll drains any already-completed submissions and returns
-	// immediately without blocking on the GPU. This is the fast path
-	// for game loops that call Poll every frame.
-	PollPoll PollType = iota
-	// PollWait blocks until every submission currently known to the
-	// device has completed, then drains. Used by Buffer.Map and by
-	// Device.Poll(PollWait) for shutdown drains.
-	PollWait
-)
+// PollType, PollPoll and PollWait live in poll_type.go: the public definition
+// stays in the root package, while internal/core declares the seam's own copy
+// (ADR-070 §15.3) and the device adapter converts between them.
 
 // Typed buffer mapping errors. Callers can use errors.Is to branch on
 // specific failure modes without matching strings.

@@ -111,7 +111,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 	// schedule deferred destruction via DestroyQueue. This prevents
 	// resource leaks when callers create per-frame buffers without
 	// explicit lifecycle management (BUG-WGPU-RESOURCE-LIFECYCLE-001).
-	buf.cleanup = registerBufferCleanup(buf, d, coreBuffer, desc.Label)
+	buf.armCleanup()
 
 	if d.test != nil {
 		d.test.BufferCreated(desc.Label, desc.Size, desc.Usage)
