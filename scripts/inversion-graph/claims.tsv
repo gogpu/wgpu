@@ -1,0 +1,11 @@
+# claims.tsv — machine-readable claim of every golden row by the step that creates it (ADR-070 §15.2).
+# Format: README.md § "claims.tsv". Columns are tab-separated:
+#   golden  target|inverted
+#   src     source package (destination path)
+#   dst     destination package (destination path)
+#   context all|native|native+rust|rust|wasm
+#   step    S1..S13
+# Each step's commit adds exactly its own rows; the S13 sweep sets the phase to final.
+# The golden files (target-edges.tsv, inverted-edges.tsv) stay hand-reviewed design intent.
+golden	src	dst	context	step
+phase: open
