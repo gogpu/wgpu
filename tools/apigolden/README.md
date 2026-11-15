@@ -17,6 +17,9 @@ baseline is a reviewed delta, not a surprise at v1.0.
   * functions — the full signature;
   * exported methods declared on exported receivers — the full signature.
 * Unexported identifiers, unexported fields and methods, doc comments and struct tags are **not** recorded.
+* The header's `identifiers` count counts **exported package-scope names only**. Exported methods are printed on
+  their receiver's block but not counted (`countIdentifiers` in `main.go`), so a floor derived from this number
+  pins the top-level surface, not every method — a declaration added as a method moves the text, not the count.
 
 ## Commands
 
