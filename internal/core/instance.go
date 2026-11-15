@@ -184,22 +184,13 @@ func (i *Instance) enumerateRealAdapters(halDesc *hal.InstanceDescriptor) {
 
 	// Try each backend provider
 	for _, provider := range providers {
-		// Skip the no-op backend — it is a test double. The software backend is
-		// a real renderer and reaches this loop only when its mask bit selects
-		// it (ADR-083 §2.3).
+		// Noop is the only BackendEmpty provider — a test double, never
+		// enumerable — and the software backend reports BackendSoftware since
+		// ADR-083, so this can only mean noop: skip it. The former
+		// temp-instance/noop probe can no longer fire, and skipping costs
+		// nothing.
 		if provider.Variant() == gputypes.BackendEmpty {
-			halInst, err := provider.CreateInstance(halDesc)
-			if err != nil {
-				continue
-			}
-			adapters := halInst.EnumerateAdapters(nil)
-			isNoop := len(adapters) > 0 && adapters[0].Info.DeviceType == gputypes.DeviceTypeOther
-			if isNoop {
-				halInst.Destroy()
-				continue
-			}
-			// Not noop (software backend) — destroy temp instance and fall through
-			halInst.Destroy()
+			continue
 		}
 
 		// Try to create HAL instance

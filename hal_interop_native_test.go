@@ -92,3 +92,33 @@ func TestHALNativeInstanceWithoutHAL(t *testing.T) {
 		t.Fatalf("instance without HAL HAL() = %+v, want zero Handles", got)
 	}
 }
+
+// TestHALNativeReleasedObjects pins the documented promise that a released
+// object yields the zero Handles (Kind KindUnknown, no pointers): hal/hal.go
+// and the accessor docs state it, and a signature golden cannot see it. Each
+// release path must keep nil-ing the HAL object its accessor reports.
+func TestHALNativeReleasedObjects(t *testing.T) {
+	t.Run("Surface", func(t *testing.T) {
+		surface := &Surface{core: core.NewSurface(&noop.Surface{}, "hal-test")}
+		surface.Release()
+		if got := surface.HAL(); got != (publichal.Handles{}) {
+			t.Fatalf("released surface HAL() = %+v, want zero Handles", got)
+		}
+	})
+
+	t.Run("Device", func(t *testing.T) {
+		device := &Device{core: core.NewDevice(&noop.Device{}, nil, 0, gputypes.DefaultLimits(), "hal-test")}
+		device.Release()
+		if got := device.HAL(); got != (publichal.Handles{}) {
+			t.Fatalf("released device HAL() = %+v, want zero Handles", got)
+		}
+	})
+
+	t.Run("SoftwareInstance", func(t *testing.T) {
+		instance := newSoftwareSurfaceTestInstance(t)
+		instance.Release()
+		if got := instance.HAL(); got != (publichal.Handles{}) {
+			t.Fatalf("released instance HAL() = %+v, want zero Handles", got)
+		}
+	})
+}
