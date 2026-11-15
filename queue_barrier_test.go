@@ -331,7 +331,7 @@ func TestInjectTextureBarriers_TextureWithoutCoreTexture(t *testing.T) {
 	q := device.Queue()
 
 	// Create a texture without coreTexture (simulates browser or test stub)
-	tex := &Texture{device: device}
+	tex := &Texture{device: device.seamView()}
 
 	coreEncoder, err := device.core.CreateCommandEncoder("test")
 	if err != nil {

@@ -23,8 +23,12 @@ func (p *RenderPipeline) TestRef() *core.ResourceRef { return p.ref }
 // TestRef returns the ResourceRef for a ComputePipeline (testing only).
 func (p *ComputePipeline) TestRef() *core.ResourceRef { return p.ref }
 
-// TestRef returns the ResourceRef for a BindGroup (testing only).
-func (g *BindGroup) TestRef() *core.ResourceRef { return g.ref }
+// BindGroupTestRef returns the ResourceRef for a BindGroup (testing only).
+// It is a free function rather than a method: a test-only method of a type that
+// moves to an extraction package cannot stay behind, while a function over the
+// type can (ADR-070 §11 grain note; the implementation's own white-box test
+// carries the same assertion once it moves).
+func BindGroupTestRef(g *BindGroup) *core.ResourceRef { return g.ref }
 
 // TestTrackedRefs returns the tracked refs of a CommandBuffer (testing only).
 func (cb *CommandBuffer) TestTrackedRefs() []*core.ResourceRef { return cb.trackedRefs }
@@ -75,8 +79,9 @@ func (d *Device) TestResourceCounts() map[string]uint64 {
 	return core.GetGlobal().Stats()
 }
 
-// TestBindGroupReleased returns true if the bind group has been released (testing only).
-func (g *BindGroup) TestBindGroupReleased() bool {
+// BindGroupTestReleased returns true if the bind group has been released
+// (testing only). A free function for the reason BindGroupTestRef is one.
+func BindGroupTestReleased(g *BindGroup) bool {
 	if g.released == nil {
 		return false
 	}
@@ -95,13 +100,15 @@ func (p *ComputePipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
 	p.bindGroupCount = uint32(len(layouts))
 }
 
-// SetTestEntries sets the entries field on a BindGroupLayout for testing.
-func (l *BindGroupLayout) SetTestEntries(entries []gputypes.BindGroupLayoutEntry) {
+// SetTestBindGroupLayoutEntries sets the entries field on a BindGroupLayout for
+// testing. A free function for the reason BindGroupTestRef is one.
+func SetTestBindGroupLayoutEntries(l *BindGroupLayout, entries []gputypes.BindGroupLayoutEntry) {
 	l.entries = entries
 }
 
-// SetTestLayout sets the layout field on a BindGroup for testing.
-func (g *BindGroup) SetTestLayout(layout *BindGroupLayout) {
+// SetTestBindGroupLayout sets the layout field on a BindGroup for testing.
+// A free function for the reason BindGroupTestRef is one.
+func SetTestBindGroupLayout(g *BindGroup, layout *BindGroupLayout) {
 	g.layout = layout
 }
 
@@ -171,17 +178,17 @@ func NewSurfaceFromHALForTest(halSurface hal.Surface, label string) *Surface {
 
 // NewTextureFromHALForTest wraps a HAL texture in a Texture.
 func NewTextureFromHALForTest(halTexture hal.Texture, device *Device, format gputypes.TextureFormat) *Texture {
-	return &Texture{hal: halTexture, device: device, format: format}
+	return &Texture{hal: halTexture, device: device.seamView(), format: format}
 }
 
 // NewTextureViewFromHALForTest wraps a HAL texture view in a TextureView.
 func NewTextureViewFromHALForTest(halView hal.TextureView, device *Device) *TextureView {
-	return &TextureView{hal: halView, device: device}
+	return &TextureView{hal: halView, device: device.seamView()}
 }
 
 // NewSamplerFromHALForTest wraps a HAL sampler in a Sampler.
 func NewSamplerFromHALForTest(halSampler hal.Sampler, device *Device) *Sampler {
-	return &Sampler{hal: halSampler, device: device}
+	return &Sampler{hal: halSampler, device: device.seamView()}
 }
 
 // DeviceHalDeviceForTest returns the HAL device behind d.

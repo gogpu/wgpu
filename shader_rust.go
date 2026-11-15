@@ -8,7 +8,6 @@ import rwgpu "github.com/go-webgpu/webgpu/wgpu"
 // On Rust backend, this wraps go-webgpu/webgpu ShaderModule.
 type ShaderModule struct {
 	r        *rwgpu.ShaderModule
-	device   *Device
 	released bool
 }
 

@@ -486,7 +486,7 @@ func TestBindGroupWithBufferResource(t *testing.T) {
 	}
 	defer bg.Release()
 
-	if bg.TestBindGroupReleased() {
+	if wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should not be released immediately after creation")
 	}
 }
@@ -514,13 +514,13 @@ func TestBindGroupReleaseTrackesReleasedFlag(t *testing.T) {
 		t.Fatalf("CreateBindGroup: %v", err)
 	}
 
-	if bg.TestBindGroupReleased() {
+	if wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should not be released before Release()")
 	}
 
 	bg.Release()
 
-	if !bg.TestBindGroupReleased() {
+	if !wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should be released after Release()")
 	}
 

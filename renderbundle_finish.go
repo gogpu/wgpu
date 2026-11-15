@@ -105,7 +105,7 @@ func (s *bundleState) setBindGroup(index uint32, group *BindGroup, offsets []uin
 	if group.released != nil && group.released.Load() {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, ErrReleased)
 	}
-	if group.device != s.device {
+	if group.device != s.device.seamView() {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, errBundleDevice)
 	}
 	if err := s.scope.MergeBindGroup(group.usages); err != nil {

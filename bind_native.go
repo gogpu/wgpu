@@ -9,7 +9,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
-	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
@@ -26,7 +25,7 @@ type bindGroupCleanupRef struct {
 // BindGroupLayout defines the structure of resource bindings for shaders.
 type BindGroupLayout struct {
 	hal      hal.BindGroupLayout
-	device   *Device
+	device   core.DeviceView
 	released bool
 	// entries stores the layout entries for entry-by-entry compatibility checks.
 	// This matches Rust wgpu-core's pattern where binder.check_compatibility()
@@ -100,18 +99,18 @@ func (l *BindGroupLayout) Release() {
 	}
 	l.released = true
 
-	halDevice := l.device.halDevice()
+	halDevice := l.device.HALDevice()
 	if halDevice == nil {
 		return
 	}
 
-	dq := l.device.destroyQueue()
+	dq := l.device.DestroyQueue()
 	if dq == nil {
 		halDevice.DestroyBindGroupLayout(l.hal)
 		return
 	}
 
-	subIdx := l.device.lastSubmissionIndex()
+	subIdx := l.device.LastSubmissionIndex()
 	halLayout := l.hal
 	dq.Defer(subIdx, "BindGroupLayout", func() {
 		halDevice.DestroyBindGroupLayout(halLayout)
@@ -121,7 +120,7 @@ func (l *BindGroupLayout) Release() {
 // PipelineLayout defines the bind group layout arrangement for a pipeline.
 type PipelineLayout struct {
 	hal      hal.PipelineLayout
-	device   *Device
+	device   core.DeviceView
 	released bool
 	// bindGroupCount is the number of bind group layouts in this layout.
 	// Used for validation in SetBindGroup.
@@ -142,14 +141,14 @@ type PipelineLayout struct {
 // in flight, as a sampler or a bind group is. The owners are the application
 // until Release and every pipeline created with the layout, which passes it to
 // vkCmdBindDescriptorSets on every bind (P2-CORE-022).
-func newPipelineLayoutRef(d *Device, halDevice hal.Device, halLayout hal.PipelineLayout, label string) *core.ResourceRef {
+func newPipelineLayoutRef(d core.DeviceView, halDevice hal.Device, halLayout hal.PipelineLayout, label string) *core.ResourceRef {
 	return core.NewResourceRef("PipelineLayout:"+label, func() {
-		dq := d.destroyQueue()
+		dq := d.DestroyQueue()
 		if dq == nil {
 			halDevice.DestroyPipelineLayout(halLayout)
 			return
 		}
-		dq.Defer(d.lastSubmissionIndex(), "PipelineLayout", func() {
+		dq.Defer(d.LastSubmissionIndex(), "PipelineLayout", func() {
 			halDevice.DestroyPipelineLayout(halLayout)
 		})
 	})
@@ -170,18 +169,18 @@ func (l *PipelineLayout) Release() {
 	}
 
 	// No reference count: destroy after the submissions in flight.
-	halDevice := l.device.halDevice()
+	halDevice := l.device.HALDevice()
 	if halDevice == nil {
 		return
 	}
 
-	dq := l.device.destroyQueue()
+	dq := l.device.DestroyQueue()
 	if dq == nil {
 		halDevice.DestroyPipelineLayout(l.hal)
 		return
 	}
 
-	subIdx := l.device.lastSubmissionIndex()
+	subIdx := l.device.LastSubmissionIndex()
 	halLayout := l.hal
 	dq.Defer(subIdx, "PipelineLayout", func() {
 		halDevice.DestroyPipelineLayout(halLayout)
@@ -203,7 +202,7 @@ type LateBufferBindingInfo struct {
 // BindGroup represents bound GPU resources for shader access.
 type BindGroup struct {
 	hal     hal.BindGroup
-	device  *Device
+	device  core.DeviceView
 	cleanup runtime.Cleanup
 	// released is heap-allocated separately so that the cleanup ref can share
 	// it without holding an interior pointer into the BindGroup struct. An interior
@@ -264,7 +263,7 @@ func (g *BindGroup) Release() {
 // registerBindGroupCleanup registers a runtime.AddCleanup handler on the bind group.
 // When GC collects the bind group without an explicit Release(), the cleanup
 // drops the ResourceRef — the same refcount-driven path as Release(). ADR-056.
-func registerBindGroupCleanup(bg *BindGroup, _ *Device, label string) runtime.Cleanup {
+func registerBindGroupCleanup(bg *BindGroup, label string) runtime.Cleanup {
 	return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
 		if !ref.released.CompareAndSwap(false, true) {
 			return
@@ -278,66 +277,4 @@ func registerBindGroupCleanup(bg *BindGroup, _ *Device, label string) runtime.Cl
 		released: bg.released,
 		ref:      bg.ref,
 	})
-}
-
-// buildBindGroupUsages derives the usage of every buffer and texture binding
-// from its layout entry: uniform, read-only storage, or storage for buffers;
-// sampled, or storage with the layout's access mode, for textures.
-//
-// Reference: wgpu-core device/resource.rs create_buffer_binding /
-// create_texture_binding (the usages recorded in BindGroup.used)
-func buildBindGroupUsages(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) *core.BindGroupUsages {
-	entryMap := buildBindGroupEntryMap(entries)
-	usages := &core.BindGroupUsages{}
-	for i := range layoutEntries {
-		layoutEntry := &layoutEntries[i]
-		entry, ok := entryMap[layoutEntry.Binding]
-		if !ok {
-			continue
-		}
-		switch {
-		case layoutEntry.Buffer != nil && entry.Buffer != nil && entry.Buffer.impl.CoreBuffer() != nil:
-			usages.Buffers = append(usages.Buffers, core.BindGroupBufferUse{
-				Buffer: entry.Buffer.impl.CoreBuffer(),
-				Usage:  bufferBindingUses(layoutEntry.Buffer.Type),
-			})
-		case layoutEntry.Texture != nil || layoutEntry.StorageTexture != nil:
-			if entry.TextureView == nil || entry.TextureView.texture == nil || entry.TextureView.texture.coreTexture == nil {
-				continue
-			}
-			texture := entry.TextureView.texture
-			usage := track.TextureUsesResource
-			if layoutEntry.StorageTexture != nil {
-				usage = storageTextureUses(layoutEntry.StorageTexture.Access)
-			}
-			usages.Textures = append(usages.Textures, core.BindGroupTextureUse{
-				Texture: texture.coreTexture,
-				Usage:   usage,
-				Resolve: texture.resolveHAL,
-			})
-		}
-	}
-	return usages
-}
-
-// bufferBindingUses maps a buffer binding type to its tracker usage.
-func bufferBindingUses(bindingType gputypes.BufferBindingType) track.BufferUses {
-	switch bindingType {
-	case gputypes.BufferBindingTypeStorage:
-		return track.BufferUsesStorageWrite
-	case gputypes.BufferBindingTypeReadOnlyStorage:
-		return track.BufferUsesStorageRead
-	default:
-		return track.BufferUsesUniform
-	}
-}
-
-// storageTextureUses maps a storage texture access mode to its tracker usage.
-// Read-write access uses the exclusive write state, like Rust's single
-// STORAGE_READ_WRITE flag.
-func storageTextureUses(access gputypes.StorageTextureAccess) track.TextureUses {
-	if access == gputypes.StorageTextureAccessReadOnly {
-		return track.TextureUsesStorageRead
-	}
-	return track.TextureUsesStorageWrite
 }

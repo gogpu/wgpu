@@ -161,7 +161,6 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		r: rst,
 		texture: &Texture{
 			r:      rst.Texture,
-			device: s.device,
 			format: s.configFormat,
 		},
 		surface: s,
@@ -275,7 +274,7 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	return &TextureView{r: rv, device: st.surface.device, texture: st.AsTexture()}, nil
+	return &TextureView{r: rv, texture: st.AsTexture()}, nil
 }
 
 // Texture returns the underlying Texture.

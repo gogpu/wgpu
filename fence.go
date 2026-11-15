@@ -2,7 +2,10 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/internal/hal"
+import (
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
+)
 
 // Fence is a GPU synchronization primitive.
 // Fences allow CPU-GPU synchronization by signaling when submitted work completes.
@@ -11,7 +14,7 @@ import "github.com/gogpu/wgpu/internal/hal"
 // when no longer needed.
 type Fence struct {
 	hal      hal.Fence
-	device   *Device
+	device   core.DeviceView
 	released bool
 }
 
@@ -22,7 +25,7 @@ func (f *Fence) Release() {
 		return
 	}
 	f.released = true
-	halDevice := f.device.halDevice()
+	halDevice := f.device.HALDevice()
 	if halDevice != nil {
 		halDevice.DestroyFence(f.hal)
 	}

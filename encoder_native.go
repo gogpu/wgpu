@@ -1233,8 +1233,8 @@ func (e *CommandEncoder) validateTextureToTextureCopies(src, dst *Texture, regio
 			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region %d: source or destination texture is nil", i))
 			return false
 		}
-		srcView, srcOK := src.copyView(r.Source.MipLevel, r.Source.Origin, r.Source.Aspect)
-		dstView, dstOK := dst.copyView(r.Destination.MipLevel, r.Destination.Origin, r.Destination.Aspect)
+		srcView, srcOK := src.coreTexture.CopyView(r.Source.MipLevel, gputypes.Origin3D(r.Source.Origin), r.Source.Aspect)
+		dstView, dstOK := dst.coreTexture.CopyView(r.Destination.MipLevel, gputypes.Origin3D(r.Destination.Origin), r.Destination.Aspect)
 		if !srcOK || !dstOK {
 			continue
 		}
@@ -1245,27 +1245,6 @@ func (e *CommandEncoder) validateTextureToTextureCopies(src, dst *Texture, regio
 		}
 	}
 	return true
-}
-
-// copyView describes the part of the texture a copy touches, for the core copy
-// validation. The texture properties come from its core texture; ok is false
-// for a texture without one (test stubs), which has nothing to validate
-// against.
-func (t *Texture) copyView(mipLevel uint32, origin Origin3D, aspect gputypes.TextureAspect) (view core.TextureCopyView, ok bool) {
-	if t.coreTexture == nil {
-		return core.TextureCopyView{}, false
-	}
-	return core.TextureCopyView{
-		Format:        t.coreTexture.Format(),
-		Usage:         t.coreTexture.Usage(),
-		SampleCount:   t.coreTexture.SampleCount(),
-		MipLevelCount: t.coreTexture.MipLevelCount(),
-		Dimension:     t.coreTexture.Dimension(),
-		MipLevel:      mipLevel,
-		Size:          t.coreTexture.Size(),
-		Origin:        gputypes.Origin3D(origin),
-		Aspect:        aspect,
-	}, true
 }
 
 // isEmptyExtent reports a copy extent with a zero dimension.
@@ -1328,7 +1307,7 @@ func (e *CommandEncoder) validateBufferTextureCopies(op string, side core.CopySi
 // checks.
 func validateBufferTextureRegion(side core.CopySide, texture *Texture, buffer *Buffer, region *BufferTextureCopy) error {
 	size := gputypes.Extent3D(region.Size)
-	view, haveView := texture.copyView(region.TextureBase.MipLevel, region.TextureBase.Origin, region.TextureBase.Aspect)
+	view, haveView := texture.coreTexture.CopyView(region.TextureBase.MipLevel, gputypes.Origin3D(region.TextureBase.Origin), region.TextureBase.Aspect)
 	if !haveView {
 		return core.ValidateTextureBufferCopy(texture.format, 1, region.BufferLayout.Offset, region.BufferLayout.BytesPerRow)
 	}

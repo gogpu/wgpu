@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/valid"
+	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
@@ -15,7 +16,7 @@ import (
 // ShaderModule represents a compiled shader module.
 type ShaderModule struct {
 	hal      hal.ShaderModule
-	device   *Device
+	device   core.DeviceView
 	released bool
 	// irModule stores the parsed naga IR for this shader module.
 	// Used for late buffer binding size validation at draw/dispatch time.
@@ -257,18 +258,18 @@ func (m *ShaderModule) Release() {
 	}
 	m.released = true
 
-	halDevice := m.device.halDevice()
+	halDevice := m.device.HALDevice()
 	if halDevice == nil {
 		return
 	}
 
-	dq := m.device.destroyQueue()
+	dq := m.device.DestroyQueue()
 	if dq == nil {
 		halDevice.DestroyShaderModule(m.hal)
 		return
 	}
 
-	subIdx := m.device.lastSubmissionIndex()
+	subIdx := m.device.LastSubmissionIndex()
 	halModule := m.hal
 	dq.Defer(subIdx, "ShaderModule", func() {
 		halDevice.DestroyShaderModule(halModule)

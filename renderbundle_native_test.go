@@ -82,7 +82,7 @@ func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*B
 }
 
 func (r *bundleTestRig) group(layout *BindGroupLayout) *BindGroup {
-	return &BindGroup{hal: &testHALResource{}, device: r.device, layout: layout, ref: core.NewResourceRef("BindGroup:test", nil)}
+	return &BindGroup{hal: &testHALResource{}, device: r.device.seamView(), layout: layout, ref: core.NewResourceRef("BindGroup:test", nil)}
 }
 
 func (r *bundleTestRig) buffer(t *testing.T, usage gputypes.BufferUsage) *Buffer {

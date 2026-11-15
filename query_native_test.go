@@ -18,7 +18,7 @@ func TestQuerySet_NilSafeAccessors(t *testing.T) {
 
 func TestQuerySet_ReleaseNilCore(t *testing.T) {
 	t.Parallel()
-	qs := &QuerySet{device: NewBareDeviceForTest()}
+	qs := &QuerySet{device: NewBareDeviceForTest().seamView()}
 	qs.Release()
 	if !qs.released {
 		t.Fatal("Release should mark query set released")

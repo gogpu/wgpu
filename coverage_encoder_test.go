@@ -262,7 +262,7 @@ func TestEncoderTrackBindGroupTransfer(t *testing.T) {
 	defer bg.Release()
 
 	// Verify bind group is not released.
-	if bg.TestBindGroupReleased() {
+	if wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should not be released after creation")
 	}
 }

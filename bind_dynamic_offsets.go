@@ -3,10 +3,8 @@
 package wgpu
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/gogpu/gputypes"
 )
@@ -24,41 +22,6 @@ type dynamicBinding struct {
 	// maxDynamicOffset is the largest dynamic offset that keeps the binding
 	// inside the buffer: bufferSize - bindingEnd.
 	maxDynamicOffset uint64
-}
-
-// buildDynamicBindings collects the dynamic buffer bindings of a bind group,
-// sorted by binding number (Rust wgpu-core Device::create_bind_group sorts
-// dynamic_binding_info by binding_idx).
-func buildDynamicBindings(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) []dynamicBinding {
-	entryMap := buildBindGroupEntryMap(entries)
-	var bindings []dynamicBinding
-	for _, layoutEntry := range layoutEntries {
-		if layoutEntry.Buffer == nil || !layoutEntry.Buffer.HasDynamicOffset {
-			continue
-		}
-		bgEntry, ok := entryMap[layoutEntry.Binding]
-		if !ok || bgEntry.Buffer == nil {
-			continue
-		}
-		bufSize := bgEntry.Buffer.Size()
-		end := bufSize
-		if bgEntry.Size != 0 {
-			end = bgEntry.Offset + bgEntry.Size
-		}
-		var maxOffset uint64
-		if end <= bufSize {
-			maxOffset = bufSize - end
-		}
-		bindings = append(bindings, dynamicBinding{
-			binding:          layoutEntry.Binding,
-			bindingType:      layoutEntry.Buffer.Type,
-			bufferSize:       bufSize,
-			bindingEnd:       end,
-			maxDynamicOffset: maxOffset,
-		})
-	}
-	slices.SortFunc(bindings, func(a, b dynamicBinding) int { return cmp.Compare(a.binding, b.binding) })
-	return bindings
 }
 
 // Unexported sentinel errors for dynamic offset validation, matching Rust

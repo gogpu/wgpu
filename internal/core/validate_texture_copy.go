@@ -22,6 +22,32 @@ type TextureCopyView struct {
 	Aspect   gputypes.TextureAspect
 }
 
+// CopyView describes the part of the texture a copy touches, for the copy
+// validation below. The texture properties come from the texture itself and
+// the rest from the copy's texel copy texture info; ok is false for a nil
+// texture (a texture without a core object, such as a test stub), which has
+// nothing to validate against.
+//
+// It lives here rather than on the frontend wrapper because it reads only the
+// core texture: the wrapper's own method could not move with the frontend type
+// without dragging a core conversion along (ADR-070 §11, S2).
+func (t *Texture) CopyView(mipLevel uint32, origin gputypes.Origin3D, aspect gputypes.TextureAspect) (TextureCopyView, bool) {
+	if t == nil {
+		return TextureCopyView{}, false
+	}
+	return TextureCopyView{
+		Format:        t.Format(),
+		Usage:         t.Usage(),
+		SampleCount:   t.SampleCount(),
+		MipLevelCount: t.MipLevelCount(),
+		Dimension:     t.Dimension(),
+		MipLevel:      mipLevel,
+		Size:          t.Size(),
+		Origin:        origin,
+		Aspect:        aspect,
+	}, true
+}
+
 // formatAspects is a set of texture aspects (Rust hal::FormatAspects).
 type formatAspects uint8
 

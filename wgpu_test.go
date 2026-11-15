@@ -2597,11 +2597,11 @@ func TestDrawIncompatibleBindGroupSentinel(t *testing.T) {
 	defer device.Release()
 
 	expectedLayout := &wgpu.BindGroupLayout{}
-	expectedLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(expectedLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageVertex},
 	})
 	wrongLayout := &wgpu.BindGroupLayout{}
-	wrongLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(wrongLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageFragment},
 	})
 
@@ -2612,7 +2612,7 @@ func TestDrawIncompatibleBindGroupSentinel(t *testing.T) {
 
 	// Set a bind group with incompatible layout.
 	group := &wgpu.BindGroup{}
-	group.SetTestLayout(wrongLayout)
+	wgpu.SetTestBindGroupLayout(group, wrongLayout)
 	pass.SetBindGroup(0, group, nil)
 
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
@@ -2752,11 +2752,11 @@ func TestDispatchIncompatibleBindGroupSentinel(t *testing.T) {
 	defer device.Release()
 
 	expectedLayout := &wgpu.BindGroupLayout{}
-	expectedLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(expectedLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageCompute},
 	})
 	wrongLayout := &wgpu.BindGroupLayout{}
-	wrongLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(wrongLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageFragment},
 	})
 
@@ -2765,7 +2765,7 @@ func TestDispatchIncompatibleBindGroupSentinel(t *testing.T) {
 	pass.SetPipeline(pipeline)
 
 	group := &wgpu.BindGroup{}
-	group.SetTestLayout(wrongLayout)
+	wgpu.SetTestBindGroupLayout(group, wrongLayout)
 	pass.SetBindGroup(0, group, nil)
 
 	pass.Dispatch(1, 1, 1)

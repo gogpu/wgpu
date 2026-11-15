@@ -14,7 +14,7 @@ import (
 // Texture represents a GPU texture.
 type Texture struct {
 	hal    hal.Texture
-	device *Device
+	device core.DeviceView
 	format gputypes.TextureFormat
 	// viewFormats is a copy of the TextureDescriptor.ViewFormats the texture
 	// was created with: the formats a view may reinterpret it as
@@ -62,7 +62,7 @@ func (t *Texture) resolveHAL() hal.Texture {
 // texture's acquisition has ended, or when a texture without a reference
 // count (wrapped from HAL) was released, since that queued its destruction.
 func (t *Texture) recordedHAL() hal.Texture {
-	if t == nil || t.hal == nil || t.device == nil || t.device.released.Load() {
+	if t == nil || t.hal == nil || t.device == nil || t.device.IsReleased() {
 		return nil
 	}
 	if t.surface != nil {
@@ -146,7 +146,7 @@ func (t *Texture) Release() {
 	if t.coreTexture != nil {
 		td = t.coreTexture.TrackingData()
 	}
-	t.device.destroyTextureDeferred(t.hal, td)
+	textureDestroyDeferred(t.device, t.hal, td)
 }
 
 // ref returns the texture's reference count, or nil for a texture that has
@@ -158,35 +158,46 @@ func (t *Texture) ref() *core.ResourceRef {
 	return t.coreTexture.Ref
 }
 
-// destroyTextureDeferred destroys a HAL texture once the GPU has completed
+// needsStencilBlit reports whether an upload into aspect of t must be lowered
+// to the stencil blit (core.Device.StencilUploadNeedsBlit).
+func (t *Texture) needsStencilBlit(aspect gputypes.TextureAspect) bool {
+	return t != nil && t.coreTexture != nil && t.coreTexture.Device().StencilUploadNeedsBlit(t.format, aspect)
+}
+
+// textureDestroyDeferred destroys a HAL texture once the GPU has completed
 // the last submission so far, and frees its tracker index with it.
+//
+// It takes the device view rather than the device: this type moves to an
+// extraction package, whose code cannot name the frontend device type
+// (ADR-070 §15.3). (*Device).destroyTextureDeferred in the device file
+// delegates here for the call sites that still hold a device.
 //
 // ADR-060: releasing the TrackerIndex prevents monotonic growth (#307);
 // surface textures handle this in Surface.destroySwapchainTexture. The index
 // is freed together with the HAL texture, after the GPU is done with it, as
 // Rust frees it in Drop for TrackingData once the last Arc (including
 // in-flight submissions) is gone (wgpu-core resource.rs).
-func (d *Device) destroyTextureDeferred(halTex hal.Texture, td *track.TrackingData) {
+func textureDestroyDeferred(d core.DeviceView, halTex hal.Texture, td *track.TrackingData) {
 	releaseIndex := func() {
 		if td != nil {
 			td.Release()
 		}
 	}
 
-	halDevice := d.halDevice()
+	halDevice := d.HALDevice()
 	if halDevice == nil {
 		releaseIndex()
 		return
 	}
 
-	dq := d.destroyQueue()
+	dq := d.DestroyQueue()
 	if dq == nil {
 		halDevice.DestroyTexture(halTex)
 		releaseIndex()
 		return
 	}
 
-	dq.Defer(d.lastSubmissionIndex(), "Texture", func() {
+	dq.Defer(d.LastSubmissionIndex(), "Texture", func() {
 		halDevice.DestroyTexture(halTex)
 		releaseIndex()
 	})
@@ -195,7 +206,7 @@ func (d *Device) destroyTextureDeferred(halTex hal.Texture, td *track.TrackingDa
 // TextureView represents a view into a texture.
 type TextureView struct {
 	hal          hal.TextureView
-	device       *Device
+	device       core.DeviceView
 	texture      *Texture
 	released     bool
 	surface      *core.Surface
@@ -297,7 +308,7 @@ func resolveViewDimension(texture *Texture, requested gputypes.TextureViewDimens
 // Like Texture.resolveHAL, callers may resolve repeatedly within one serialized
 // encoder operation without extending the surface acquisition lifetime.
 func (v *TextureView) resolveHAL() hal.TextureView {
-	if v == nil || v.released || v.hal == nil || v.device == nil || v.device.released.Load() {
+	if v == nil || v.released || v.hal == nil || v.device == nil || v.device.IsReleased() {
 		return nil
 	}
 	if v.surface != nil && !v.surface.AcquisitionValid(v.surfaceLease) {
@@ -335,25 +346,26 @@ func (v *TextureView) Release() {
 		return
 	}
 	if v.device != nil {
-		v.device.destroyTextureViewDeferred(v.hal)
+		textureViewDestroyDeferred(v.device, v.hal)
 	}
 }
 
-// destroyTextureViewDeferred destroys a HAL texture view once the GPU has
-// completed the last submission so far.
-func (d *Device) destroyTextureViewDeferred(halView hal.TextureView) {
-	halDevice := d.halDevice()
+// textureViewDestroyDeferred destroys a HAL texture view once the GPU has
+// completed the last submission so far. It takes the device view for the
+// reason textureDestroyDeferred does.
+func textureViewDestroyDeferred(d core.DeviceView, halView hal.TextureView) {
+	halDevice := d.HALDevice()
 	if halDevice == nil {
 		return
 	}
 
-	dq := d.destroyQueue()
+	dq := d.DestroyQueue()
 	if dq == nil {
 		halDevice.DestroyTextureView(halView)
 		return
 	}
 
-	dq.Defer(d.lastSubmissionIndex(), "TextureView", func() {
+	dq.Defer(d.LastSubmissionIndex(), "TextureView", func() {
 		halDevice.DestroyTextureView(halView)
 	})
 }

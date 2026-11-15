@@ -466,7 +466,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 // a valid upload of size zero, which Rust drops before any side effect. A
 // texture without a core texture (test stubs) is not validated.
 func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) (skip bool, err error) {
-	if view, ok := dst.Texture.copyView(dst.MipLevel, dst.Origin, dst.Aspect); ok {
+	if view, ok := dst.Texture.coreTexture.CopyView(dst.MipLevel, gputypes.Origin3D(dst.Origin), dst.Aspect); ok {
 		texelLayout := core.TexelCopyBufferLayout{
 			Offset:       layout.Offset,
 			BytesPerRow:  layout.BytesPerRow,

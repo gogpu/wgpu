@@ -364,9 +364,3 @@ func stencilBlitError(format gputypes.TextureFormat, err error) error {
 		Cause:  err,
 	}
 }
-
-// needsStencilBlit reports whether an upload into aspect of t must be lowered
-// to the stencil blit (core.Device.StencilUploadNeedsBlit).
-func (t *Texture) needsStencilBlit(aspect gputypes.TextureAspect) bool {
-	return t != nil && t.coreTexture != nil && t.coreTexture.Device().StencilUploadNeedsBlit(t.format, aspect)
-}

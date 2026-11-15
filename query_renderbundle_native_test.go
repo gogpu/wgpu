@@ -96,7 +96,7 @@ func newCaptureDevice(h *captureDevice) *Device {
 func newTestQuerySet(raw hal.QuerySet, device *Device) *QuerySet {
 	return &QuerySet{
 		core:   core.NewQuerySet(raw, device.core, hal.QueryTypeTimestamp, 4, "test query set"),
-		device: device,
+		device: device.seamView(),
 	}
 }
 
@@ -183,7 +183,7 @@ func TestBeginComputePassTimestampWrites(t *testing.T) {
 	released.released = true
 	occlusion := &QuerySet{
 		core:   core.NewQuerySet(resource, device.core, hal.QueryTypeOcclusion, 4, "occlusion"),
-		device: device,
+		device: device.seamView(),
 	}
 	other := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
 	foreign := newTestQuerySet(resource, other)

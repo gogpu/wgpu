@@ -3,8 +3,6 @@
 package wgpu
 
 import (
-	"fmt"
-
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 )
@@ -12,7 +10,7 @@ import (
 // QuerySet represents a set of GPU queries (occlusion, timestamp, etc.).
 type QuerySet struct {
 	core     *core.QuerySet
-	device   *Device
+	device   core.DeviceView
 	released bool
 }
 
@@ -35,11 +33,11 @@ func (qs *QuerySet) Count() uint32 {
 // halQuerySet returns the underlying HAL query set while holding the device
 // snatch lock, or nil after the query set or its device has been released.
 func (qs *QuerySet) halQuerySet() hal.QuerySet {
-	if qs == nil || qs.core == nil || qs.device == nil || qs.device.core == nil || qs.released {
+	if qs == nil || qs.core == nil || qs.device == nil || qs.device.Core() == nil || qs.released {
 		return nil
 	}
 
-	guard := qs.device.core.SnatchLock().Read()
+	guard := qs.device.Core().SnatchLock().Read()
 	defer guard.Release()
 
 	return qs.core.Raw(guard)
@@ -53,22 +51,6 @@ func (qs *QuerySet) liveCore() *core.QuerySet {
 		return nil
 	}
 	return qs.core
-}
-
-// newQuerySetRef returns the reference count of a HAL query set: when its last
-// owner drops it, the set is destroyed after the submissions in flight, as a
-// sampler or a bind group is. The owners are the application until Release and
-// every command buffer that recorded the set's timestamp writes or a resolve
-// of it (P1-CORE-021, Rust wgpu-core's QuerySet is held by an Arc).
-func newQuerySetRef(d *Device, coreQS *core.QuerySet, label string) *core.ResourceRef {
-	return core.NewResourceRef("QuerySet:"+label, func() {
-		dq := d.destroyQueue()
-		if dq == nil {
-			coreQS.Destroy()
-			return
-		}
-		dq.Defer(d.lastSubmissionIndex(), "QuerySet", coreQS.Destroy)
-	})
 }
 
 // Release drops the application's reference to the query set. The HAL query
@@ -90,50 +72,21 @@ func (qs *QuerySet) Release() {
 	}
 
 	// No reference count: destroy after the submissions in flight.
-	halDevice := qs.device.halDevice()
+	halDevice := qs.device.HALDevice()
 	if halDevice == nil {
 		qs.core.Destroy()
 		return
 	}
 
-	dq := qs.device.destroyQueue()
+	dq := qs.device.DestroyQueue()
 	if dq == nil {
 		qs.core.Destroy()
 		return
 	}
 
-	subIdx := qs.device.lastSubmissionIndex()
+	subIdx := qs.device.LastSubmissionIndex()
 	coreQS := qs.core
 	dq.Defer(subIdx, "QuerySet", func() {
 		coreQS.Destroy()
 	})
-}
-
-// CreateQuerySet creates a query set for occlusion or timestamp queries.
-func (d *Device) CreateQuerySet(desc *QuerySetDescriptor) (*QuerySet, error) {
-	if d.released.Load() {
-		return nil, ErrReleased
-	}
-	if desc == nil {
-		return nil, fmt.Errorf("wgpu: query set descriptor is nil")
-	}
-
-	halDevice := d.halDevice()
-	if halDevice == nil {
-		return nil, ErrReleased
-	}
-
-	halDesc := desc.toHAL()
-	if err := core.ValidateQuerySetDescriptor(halDesc, d.core.Features); err != nil {
-		return nil, err
-	}
-
-	halQS, err := halDevice.CreateQuerySet(halDesc)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create query set: %w", err)
-	}
-
-	coreQS := core.NewQuerySet(halQS, d.core, halDesc.Type, halDesc.Count, desc.Label)
-	coreQS.Ref = newQuerySetRef(d, coreQS, desc.Label)
-	return &QuerySet{core: coreQS, device: d}, nil
 }

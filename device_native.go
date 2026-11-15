@@ -3,14 +3,17 @@
 package wgpu
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
 )
@@ -183,7 +186,21 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	if d.test != nil {
 		d.test.TextureCreated(desc.Label)
 	}
-	return &Texture{hal: halTexture, device: d, format: desc.Format, viewFormats: copyViewFormats(desc.ViewFormats), coreTexture: coreTexture}, nil
+	return &Texture{hal: halTexture, device: d.seamView(), format: desc.Format, viewFormats: copyViewFormats(desc.ViewFormats), coreTexture: coreTexture}, nil
+}
+
+// destroyTextureDeferred destroys a HAL texture once the GPU has completed the
+// last submission so far. The body lives with the texture type, which moves to
+// an extraction package; this device method is the call site the device's own
+// reference closures keep (ADR-070 §11, S2).
+func (d *Device) destroyTextureDeferred(halTex hal.Texture, td *track.TrackingData) {
+	textureDestroyDeferred(d.seamView(), halTex, td)
+}
+
+// destroyTextureViewDeferred destroys a HAL texture view once the GPU has
+// completed the last submission so far.
+func (d *Device) destroyTextureViewDeferred(halView hal.TextureView) {
+	textureViewDestroyDeferred(d.seamView(), halView)
 }
 
 // CreateTextureView creates a view into a texture.
@@ -257,7 +274,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	}
 	return &TextureView{
 		hal:          halView,
-		device:       d,
+		device:       d.seamView(),
 		texture:      texture,
 		surface:      texture.surface,
 		surfaceLease: texture.surfaceLease,
@@ -306,8 +323,8 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 
 	return &Sampler{
 		hal:          halSampler,
-		device:       d,
-		ref:          newSamplerRef(d, halDevice, halSampler, desc.Label),
+		device:       d.seamView(),
+		ref:          newSamplerRef(d.seamView(), halDevice, halSampler, desc.Label),
 		magFilter:    halDesc.MagFilter,
 		minFilter:    halDesc.MinFilter,
 		mipmapFilter: halDesc.MipmapFilter,
@@ -348,7 +365,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	// Keep the IR core validated for pipeline introspection, as Rust
 	// wgpu-core keeps the naga module and its info on the ShaderModule for
 	// Interface::check_stage. SPIR-V modules have none.
-	module := &ShaderModule{hal: halModule, device: d, irModule: halDesc.IR}
+	module := &ShaderModule{hal: halModule, device: d.seamView(), irModule: halDesc.IR}
 	if halDesc.IR != nil {
 		info := halDesc.Info
 		module.irInfo = &info
@@ -391,7 +408,7 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 	entriesCopy := make([]gputypes.BindGroupLayoutEntry, len(desc.Entries))
 	copy(entriesCopy, desc.Entries)
 
-	return &BindGroupLayout{hal: halLayout, device: d, entries: entriesCopy}, nil
+	return &BindGroupLayout{hal: halLayout, device: d.seamView(), entries: entriesCopy}, nil
 }
 
 // CreatePipelineLayout creates a pipeline layout.
@@ -441,10 +458,10 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 
 	return &PipelineLayout{
 		hal:              halLayout,
-		device:           d,
+		device:           d.seamView(),
 		bindGroupCount:   uint32(len(desc.BindGroupLayouts)), //nolint:gosec // layout count fits uint32
 		bindGroupLayouts: bgLayouts,
-		ref:              newPipelineLayoutRef(d, halDevice, halLayout, desc.Label),
+		ref:              newPipelineLayoutRef(d.seamView(), halDevice, halLayout, desc.Label),
 	}, nil
 }
 
@@ -551,7 +568,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 
 	bg := &BindGroup{
 		hal:                    halGroup,
-		device:                 d,
+		device:                 d.seamView(),
 		released:               new(atomic.Bool),
 		layout:                 desc.Layout,
 		lateBufferBindingInfos: lateInfos,
@@ -564,7 +581,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 
 	// Safety net: if the bind group is garbage collected without Release(),
 	// schedule deferred destruction via DestroyQueue (BUG-WGPU-RESOURCE-LIFECYCLE-001).
-	bg.cleanup = registerBindGroupCleanup(bg, d, desc.Label)
+	bg.cleanup = registerBindGroupCleanup(bg, desc.Label)
 
 	return bg, nil
 }
@@ -680,6 +697,108 @@ func buildBindGroupEntryMap(entries []BindGroupEntry) map[uint32]*BindGroupEntry
 		m[entries[i].Binding] = &entries[i]
 	}
 	return m
+}
+
+// The bind-group derivation helpers below live with the device, not with the
+// bind group: they read the public creation descriptor, which stays in the root
+// package, while the bind group type moves to an extraction package
+// (ADR-070 §11, S2).
+
+// buildBindGroupUsages derives the usage of every buffer and texture binding
+// from its layout entry: uniform, read-only storage, or storage for buffers;
+// sampled, or storage with the layout's access mode, for textures.
+//
+// Reference: wgpu-core device/resource.rs create_buffer_binding /
+// create_texture_binding (the usages recorded in BindGroup.used)
+func buildBindGroupUsages(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) *core.BindGroupUsages {
+	entryMap := buildBindGroupEntryMap(entries)
+	usages := &core.BindGroupUsages{}
+	for i := range layoutEntries {
+		layoutEntry := &layoutEntries[i]
+		entry, ok := entryMap[layoutEntry.Binding]
+		if !ok {
+			continue
+		}
+		switch {
+		case layoutEntry.Buffer != nil && entry.Buffer != nil && entry.Buffer.impl.CoreBuffer() != nil:
+			usages.Buffers = append(usages.Buffers, core.BindGroupBufferUse{
+				Buffer: entry.Buffer.impl.CoreBuffer(),
+				Usage:  bufferBindingUses(layoutEntry.Buffer.Type),
+			})
+		case layoutEntry.Texture != nil || layoutEntry.StorageTexture != nil:
+			if entry.TextureView == nil || entry.TextureView.texture == nil || entry.TextureView.texture.coreTexture == nil {
+				continue
+			}
+			texture := entry.TextureView.texture
+			usage := track.TextureUsesResource
+			if layoutEntry.StorageTexture != nil {
+				usage = storageTextureUses(layoutEntry.StorageTexture.Access)
+			}
+			usages.Textures = append(usages.Textures, core.BindGroupTextureUse{
+				Texture: texture.coreTexture,
+				Usage:   usage,
+				Resolve: texture.resolveHAL,
+			})
+		}
+	}
+	return usages
+}
+
+// bufferBindingUses maps a buffer binding type to its tracker usage.
+func bufferBindingUses(bindingType gputypes.BufferBindingType) track.BufferUses {
+	switch bindingType {
+	case gputypes.BufferBindingTypeStorage:
+		return track.BufferUsesStorageWrite
+	case gputypes.BufferBindingTypeReadOnlyStorage:
+		return track.BufferUsesStorageRead
+	default:
+		return track.BufferUsesUniform
+	}
+}
+
+// storageTextureUses maps a storage texture access mode to its tracker usage.
+// Read-write access uses the exclusive write state, like Rust's single
+// STORAGE_READ_WRITE flag.
+func storageTextureUses(access gputypes.StorageTextureAccess) track.TextureUses {
+	if access == gputypes.StorageTextureAccessReadOnly {
+		return track.TextureUsesStorageRead
+	}
+	return track.TextureUsesStorageWrite
+}
+
+// buildDynamicBindings collects the dynamic buffer bindings of a bind group,
+// sorted by binding number (Rust wgpu-core Device::create_bind_group sorts
+// dynamic_binding_info by binding_idx).
+func buildDynamicBindings(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) []dynamicBinding {
+	entryMap := buildBindGroupEntryMap(entries)
+	var bindings []dynamicBinding
+	for _, layoutEntry := range layoutEntries {
+		if layoutEntry.Buffer == nil || !layoutEntry.Buffer.HasDynamicOffset {
+			continue
+		}
+		bgEntry, ok := entryMap[layoutEntry.Binding]
+		if !ok || bgEntry.Buffer == nil {
+			continue
+		}
+		bufSize := bgEntry.Buffer.Size()
+		end := bufSize
+		if bgEntry.Size != 0 {
+			end = bgEntry.Offset + bgEntry.Size
+		}
+		var maxOffset uint64
+		if end <= bufSize {
+			maxOffset = bufSize - end
+		}
+		bindings = append(bindings, dynamicBinding{
+			binding:          layoutEntry.Binding,
+			bindingType:      layoutEntry.Buffer.Type,
+			bufferSize:       bufSize,
+			bindingEnd:       end,
+			maxDynamicOffset: maxOffset,
+		})
+	}
+	slices.SortFunc(bindings, func(a, b dynamicBinding) int { return cmp.Compare(a.binding, b.binding) })
+	return bindings
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -1130,7 +1249,52 @@ func (d *Device) CreateFence() (*Fence, error) {
 		return nil, fmt.Errorf("wgpu: failed to create fence: %w", err)
 	}
 
-	return &Fence{hal: halFence, device: d}, nil
+	return &Fence{hal: halFence, device: d.seamView()}, nil
+}
+
+// CreateQuerySet creates a query set for occlusion or timestamp queries.
+func (d *Device) CreateQuerySet(desc *QuerySetDescriptor) (*QuerySet, error) {
+	if d.released.Load() {
+		return nil, ErrReleased
+	}
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: query set descriptor is nil")
+	}
+
+	halDevice := d.halDevice()
+	if halDevice == nil {
+		return nil, ErrReleased
+	}
+
+	halDesc := desc.toHAL()
+	if err := core.ValidateQuerySetDescriptor(halDesc, d.core.Features); err != nil {
+		return nil, err
+	}
+
+	halQS, err := halDevice.CreateQuerySet(halDesc)
+	if err != nil {
+		return nil, fmt.Errorf("wgpu: failed to create query set: %w", err)
+	}
+
+	coreQS := core.NewQuerySet(halQS, d.core, halDesc.Type, halDesc.Count, desc.Label)
+	coreQS.Ref = newQuerySetRef(d, coreQS, desc.Label)
+	return &QuerySet{core: coreQS, device: d.seamView()}, nil
+}
+
+// newQuerySetRef returns the reference count of a HAL query set: when its last
+// owner drops it, the set is destroyed after the submissions in flight, as a
+// sampler or a bind group is. The owners are the application until Release and
+// every command buffer that recorded the set's timestamp writes or a resolve
+// of it (P1-CORE-021, Rust wgpu-core's QuerySet is held by an Arc).
+func newQuerySetRef(d *Device, coreQS *core.QuerySet, label string) *core.ResourceRef {
+	return core.NewResourceRef("QuerySet:"+label, func() {
+		dq := d.destroyQueue()
+		if dq == nil {
+			coreQS.Destroy()
+			return
+		}
+		dq.Defer(d.lastSubmissionIndex(), "QuerySet", coreQS.Destroy)
+	})
 }
 
 // DestroyFence destroys a fence.

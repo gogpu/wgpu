@@ -11,7 +11,6 @@ import (
 // On Rust backend, this wraps go-webgpu/webgpu Texture.
 type Texture struct {
 	r        *rwgpu.Texture
-	device   *Device
 	format   gputypes.TextureFormat
 	released bool
 }
@@ -45,7 +44,6 @@ func (t *Texture) Release() {
 // On Rust backend, this wraps go-webgpu/webgpu TextureView.
 type TextureView struct {
 	r        *rwgpu.TextureView
-	device   *Device
 	texture  *Texture
 	released bool
 }

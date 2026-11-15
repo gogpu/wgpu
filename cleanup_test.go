@@ -203,7 +203,7 @@ func TestBindGroup_ExplicitRelease_CancelsCleanup(t *testing.T) {
 
 	bg.Release()
 
-	if !bg.TestBindGroupReleased() {
+	if !wgpu.BindGroupTestReleased(bg) {
 		t.Fatal("bind group should be marked as released after Release()")
 	}
 

@@ -380,7 +380,7 @@ func TestImageCopyTextureToHAL(t *testing.T) {
 	tex := ImageCopyTexture{
 		Texture: &Texture{
 			hal:      nil,
-			device:   &Device{},
+			device:   (&Device{}).seamView(),
 			format:   TextureFormatBGRA8Unorm,
 			released: false,
 		},

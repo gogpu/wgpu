@@ -8,7 +8,6 @@ import rwgpu "github.com/go-webgpu/webgpu/wgpu"
 // On Rust backend, this wraps go-webgpu/webgpu BindGroupLayout.
 type BindGroupLayout struct {
 	r        *rwgpu.BindGroupLayout
-	device   *Device
 	released bool
 }
 
@@ -27,7 +26,6 @@ func (l *BindGroupLayout) Release() {
 // On Rust backend, this wraps go-webgpu/webgpu PipelineLayout.
 type PipelineLayout struct {
 	r        *rwgpu.PipelineLayout
-	device   *Device
 	released bool
 }
 
@@ -53,7 +51,6 @@ type LateBufferBindingInfo struct {
 // On Rust backend, this wraps go-webgpu/webgpu BindGroup.
 type BindGroup struct {
 	r        *rwgpu.BindGroup
-	device   *Device
 	released bool
 }
 

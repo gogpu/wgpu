@@ -8,7 +8,6 @@ import rwgpu "github.com/go-webgpu/webgpu/wgpu"
 // On Rust backend, this wraps go-webgpu/webgpu Sampler.
 type Sampler struct {
 	r        *rwgpu.Sampler
-	device   *Device
 	released bool
 }
 

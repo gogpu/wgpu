@@ -11,7 +11,7 @@ import (
 // Sampler represents a texture sampler.
 type Sampler struct {
 	hal      hal.Sampler
-	device   *Device
+	device   core.DeviceView
 	released bool
 	// ref counts the sampler's owners: the application until Release, and
 	// every bind group that binds it until that bind group is destroyed, as
@@ -27,14 +27,14 @@ type Sampler struct {
 // newSamplerRef returns the reference count of a HAL sampler: when its last
 // owner drops it, the sampler is destroyed after the submissions in flight,
 // as a bind group is.
-func newSamplerRef(d *Device, halDevice hal.Device, halSampler hal.Sampler, label string) *core.ResourceRef {
+func newSamplerRef(d core.DeviceView, halDevice hal.Device, halSampler hal.Sampler, label string) *core.ResourceRef {
 	return core.NewResourceRef("Sampler:"+label, func() {
-		dq := d.destroyQueue()
+		dq := d.DestroyQueue()
 		if dq == nil {
 			halDevice.DestroySampler(halSampler)
 			return
 		}
-		dq.Defer(d.lastSubmissionIndex(), "Sampler", func() {
+		dq.Defer(d.LastSubmissionIndex(), "Sampler", func() {
 			halDevice.DestroySampler(halSampler)
 		})
 	})
@@ -55,16 +55,16 @@ func (s *Sampler) Release() {
 	}
 
 	// No reference count: destroy after the submissions in flight.
-	halDevice := s.device.halDevice()
+	halDevice := s.device.HALDevice()
 	if halDevice == nil {
 		return
 	}
-	dq := s.device.destroyQueue()
+	dq := s.device.DestroyQueue()
 	if dq == nil {
 		halDevice.DestroySampler(s.hal)
 		return
 	}
-	subIdx := s.device.lastSubmissionIndex()
+	subIdx := s.device.LastSubmissionIndex()
 	halSampler := s.hal
 	dq.Defer(subIdx, "Sampler", func() {
 		halDevice.DestroySampler(halSampler)

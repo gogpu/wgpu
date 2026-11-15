@@ -390,7 +390,7 @@ func writeTrackedTexture(t *testing.T, pw *pendingWrites, coreDevice *core.Devic
 	)
 	idx := coreTexture.TrackingData().Index()
 	coreDevice.Tracker().InsertTexture(idx, prior)
-	texture := &Texture{hal: halTexture, device: &Device{core: coreDevice}, coreTexture: coreTexture}
+	texture := &Texture{hal: halTexture, device: (&Device{core: coreDevice}).seamView(), coreTexture: coreTexture}
 	dst := &hal.ImageCopyTexture{Texture: halTexture, Origin: hal.Origin3D{Z: 1}, Aspect: gputypes.TextureAspectAll}
 	size := hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}
 	layout := &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}
@@ -645,7 +645,7 @@ func TestPendingWrites_DestinationRefsOutliveEncoding(t *testing.T) {
 		gputypes.TextureDimension2D, gputypes.TextureUsageCopyDst,
 		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}, 1, 1, "texture")
 	coreTexture.Ref = core.NewResourceRef("texture", dropped("texture-drop"))
-	texture := &Texture{hal: halTexture, device: &Device{core: coreDevice}, coreTexture: coreTexture}
+	texture := &Texture{hal: halTexture, device: (&Device{core: coreDevice}).seamView(), coreTexture: coreTexture}
 	if err := pw.writeTextureFor(texture, &hal.ImageCopyTexture{Texture: halTexture, Aspect: gputypes.TextureAspectAll},
 		make([]byte, 4), &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1},
 		&hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}); err != nil {

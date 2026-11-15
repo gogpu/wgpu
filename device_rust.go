@@ -78,7 +78,7 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		return nil, fmt.Errorf("wgpu: failed to create texture: %w", err)
 	}
 
-	return &Texture{r: rt, device: d, format: desc.Format}, nil
+	return &Texture{r: rt, format: desc.Format}, nil
 }
 
 // convertTextureDesc converts a texture descriptor for wgpu-native, with the
@@ -126,7 +126,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
 	}
 
-	return &TextureView{r: rv, device: d, texture: texture}, nil
+	return &TextureView{r: rv, texture: texture}, nil
 }
 
 // CreateSampler creates a texture sampler.
@@ -140,7 +140,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		return nil, fmt.Errorf("wgpu: failed to create sampler: %w", err)
 	}
 
-	return &Sampler{r: rs, device: d}, nil
+	return &Sampler{r: rs}, nil
 }
 
 // samplerDescriptorToRust converts a SamplerDescriptor for wgpu-native. A nil
@@ -191,7 +191,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
 	}
 
-	return &ShaderModule{r: rm, device: d}, nil
+	return &ShaderModule{r: rm}, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -216,7 +216,7 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 		return nil, fmt.Errorf("wgpu: failed to create bind group layout: %w", err)
 	}
 
-	return &BindGroupLayout{r: rl, device: d}, nil
+	return &BindGroupLayout{r: rl}, nil
 }
 
 // CreatePipelineLayout creates a pipeline layout.
@@ -243,7 +243,7 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		return nil, fmt.Errorf("wgpu: failed to create pipeline layout: %w", err)
 	}
 
-	return &PipelineLayout{r: rl, device: d}, nil
+	return &PipelineLayout{r: rl}, nil
 }
 
 // CreateBindGroup creates a bind group.
@@ -274,7 +274,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
 	}
 
-	return &BindGroup{r: rg, device: d}, nil
+	return &BindGroup{r: rg}, nil
 }
 
 // CreateRenderPipeline creates a render pipeline.

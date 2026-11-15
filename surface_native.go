@@ -746,7 +746,7 @@ func (st *SurfaceTexture) borrowedTexture() *Texture {
 	}
 	return &Texture{
 		hal:          st.hal,
-		device:       st.device,
+		device:       st.device.seamView(),
 		format:       format,
 		surface:      st.surface.core,
 		surfaceLease: st.lease,
@@ -784,7 +784,7 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 	}
 
 	// A surface texture is a single-layer 2D texture with one mip level.
-	view := &TextureView{hal: halView, device: st.device, texture: st.borrowedTexture(), surface: st.surface.core, surfaceLease: st.lease,
+	view := &TextureView{hal: halView, device: st.device.seamView(), texture: st.borrowedTexture(), surface: st.surface.core, surfaceLease: st.lease,
 		dimension: gputypes.TextureViewDimension2D}
 	if halDesc != nil {
 		view.dimension = resolveViewDimension(nil, halDesc.Dimension)

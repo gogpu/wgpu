@@ -351,7 +351,7 @@ func TestBindGroupHasRef(t *testing.T) {
 	}
 	defer bg.Release()
 
-	if bg.TestRef() == nil {
+	if wgpu.BindGroupTestRef(bg) == nil {
 		t.Error("BindGroup should have a non-nil ResourceRef")
 	}
 }
