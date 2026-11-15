@@ -28,7 +28,7 @@ type bufferCleanupRef struct {
 // Buffer represents a GPU buffer.
 type Buffer struct {
 	core    *core.Buffer
-	device  *Device
+	device  core.DeviceView
 	cleanup runtime.Cleanup
 	// released is heap-allocated separately so that the cleanup ref can share
 	// it without holding an interior pointer into the Buffer struct. An interior
@@ -128,7 +128,7 @@ func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) err
 	// buffer has no in-flight submission this returns immediately with
 	// the map already resolved.
 	if b.device != nil {
-		b.device.Poll(PollPoll)
+		b.device.Poll(core.PollPoll)
 	}
 	if done, werr := pending.Status(); done {
 		pending.Release()
@@ -142,7 +142,7 @@ func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) err
 		// as soon as the fence advances. Allocation is a single channel
 		// inside MapPending.Wait; the zero-alloc path is Status-driven.
 		go func() {
-			b.device.Poll(PollWait)
+			b.device.Poll(core.PollWait)
 		}()
 	}
 	werr := pending.Wait(ctx)
@@ -175,7 +175,7 @@ func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error
 	// yet the index is 0 and a subsequent Poll resolves immediately.
 	subIdx := uint64(0)
 	if b.device != nil {
-		subIdx = b.device.lastSubmissionIndex()
+		subIdx = b.device.LastSubmissionIndex()
 	}
 	b.core.Device().RegisterPendingMap(subIdx, b.core)
 	return acquireMapPending(b, b.core.Waiter()), nil
@@ -235,7 +235,7 @@ func (b *Buffer) Unmap() error {
 	if b.device == nil {
 		return ErrReleased
 	}
-	halDev := b.device.halDevice()
+	halDev := b.device.HALDevice()
 	// We do not require halDev != nil — Unmap on a device-destroyed
 	// buffer still clears the state machine; the HAL call is skipped.
 	sl := b.core.Device().SnatchLock()
@@ -261,7 +261,7 @@ func (b *Buffer) halBuffer() hal.Buffer {
 	if !b.core.HasHAL() {
 		return nil
 	}
-	guard := b.device.core.SnatchLock().Read()
+	guard := b.device.Core().SnatchLock().Read()
 	defer guard.Release()
 	return b.core.Raw(guard)
 }

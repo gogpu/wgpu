@@ -65,7 +65,7 @@ func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 	}
 	indirectCore := core.NewBuffer(&noop.Buffer{}, device.core, BufferUsageIndirect|BufferUsageStorage, 64, "indirect")
 	indirectCore.Ref = core.NewResourceRef("Buffer:indirect", nil)
-	indirect := &Buffer{core: indirectCore}
+	indirect := NewTestBufferFromCore(indirectCore)
 	encoder, err := device.CreateCommandEncoder(nil)
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder() error = %v", err)

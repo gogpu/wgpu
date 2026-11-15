@@ -123,18 +123,18 @@ func TestBufferReleaseTrackesReleasedFlag(t *testing.T) {
 		t.Fatalf("CreateBuffer: %v", err)
 	}
 
-	if buf.TestReleased() {
+	if wgpu.BufferTestReleased(buf) {
 		t.Error("buffer should not be released before Release()")
 	}
 
 	buf.Release()
-	if !buf.TestReleased() {
+	if !wgpu.BufferTestReleased(buf) {
 		t.Error("buffer should be released after Release()")
 	}
 
 	// Double release should not change state or panic.
 	buf.Release()
-	if !buf.TestReleased() {
+	if !wgpu.BufferTestReleased(buf) {
 		t.Error("buffer should remain released after double Release()")
 	}
 }

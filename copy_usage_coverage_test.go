@@ -63,9 +63,9 @@ func TestCopyUsageHelpersSkipUntrackedResources(t *testing.T) {
 	t.Cleanup(invalidCoreBuffer.Destroy)
 	buffers, err := prepareCopyBufferUsages([]copyBufferUsage{
 		{buffer: nil, usage: track.BufferUsesCopySrc},
-		{buffer: &Buffer{}, usage: track.BufferUsesCopySrc},
-		{buffer: &Buffer{core: &core.Buffer{}}, usage: track.BufferUsesCopySrc},
-		{buffer: &Buffer{core: invalidCoreBuffer}, usage: track.BufferUsesCopySrc},
+		{buffer: NewTestBufferFromCore(nil), usage: track.BufferUsesCopySrc},
+		{buffer: NewTestBufferFromCore(&core.Buffer{}), usage: track.BufferUsesCopySrc},
+		{buffer: NewTestBufferFromCore(invalidCoreBuffer), usage: track.BufferUsesCopySrc},
 	})
 	if err != nil {
 		t.Fatalf("prepareCopyBufferUsages: %v", err)

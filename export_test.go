@@ -45,13 +45,22 @@ func (d *Device) TestCmdEncoderPoolSize() int {
 	return len(d.cmdEncoderPool.free)
 }
 
-// TestReleased returns true if the buffer has been released (testing only).
-func (b *Buffer) TestReleased() bool {
-	if b.released == nil {
+// BufferTestReleased reports whether the buffer has been released (testing
+// only). It is a free function rather than a Buffer method: a test-only method
+// of a type that moves to an extraction package cannot stay behind, while a
+// function over the type can (ADR-070 §11 grain note; the implementation's own
+// white-box test carries the same assertion once it moves).
+func BufferTestReleased(b *Buffer) bool {
+	if b == nil || b.released == nil {
 		return false
 	}
 	return b.released.Load()
 }
+
+// NewTestBufferFromCore wraps an existing core buffer in a Buffer (testing only).
+// HAL is whatever the core buffer carries; sufficient for validation unit tests
+// that read Size/Usage/Label or inspect the core state.
+func NewTestBufferFromCore(coreBuf *core.Buffer) *Buffer { return &Buffer{core: coreBuf} }
 
 // TestDestroyQueue returns the device's DestroyQueue (testing only).
 func (d *Device) TestDestroyQueue() *core.DestroyQueue {
@@ -111,7 +120,7 @@ func NewBareDeviceForTest() *Device { return &Device{} }
 func NewTestBuffer(size uint64, usage gputypes.BufferUsage, label string) *Buffer {
 	coreBuf := core.NewBuffer(nil, nil, usage, size, label)
 	coreBuf.Ref = core.NewResourceRef("Buffer:"+label, nil)
-	return &Buffer{core: coreBuf}
+	return NewTestBufferFromCore(coreBuf)
 }
 
 // NewTestDeviceWithFeatures returns a Device with core state only (testing only).

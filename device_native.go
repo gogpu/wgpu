@@ -48,6 +48,14 @@ type Device struct {
 	//
 	// nil when no HAL device (e.g., core-only path).
 	cmdEncoderPool *encoderPool
+
+	// view is the cached core.DeviceView this device hands to extraction
+	// children (ADR-070 §15.3). It is created on first use and stored as a
+	// pointer, so a child receives it without boxing anything new per
+	// resource. An atomic pointer is what makes the lazy creation safe for
+	// the white-box fixtures that build a Device as a bare literal instead of
+	// going through a constructor.
+	view atomic.Pointer[deviceView]
 }
 
 // Queue returns the device's command queue.
@@ -97,7 +105,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		coreBuffer.Destroy()
 	})
 
-	buf := &Buffer{core: coreBuffer, device: d, released: new(atomic.Bool)}
+	buf := &Buffer{core: coreBuffer, device: d.seamView(), released: new(atomic.Bool)}
 
 	// Safety net: if the buffer is garbage collected without Release(),
 	// schedule deferred destruction via DestroyQueue. This prevents

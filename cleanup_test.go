@@ -79,7 +79,7 @@ func TestBuffer_ExplicitRelease_CancelsCleanup(t *testing.T) {
 	// Explicit Release should cancel the GC cleanup.
 	buf.Release()
 
-	if !buf.TestReleased() {
+	if !wgpu.BufferTestReleased(buf) {
 		t.Fatal("buffer should be marked as released after Release()")
 	}
 

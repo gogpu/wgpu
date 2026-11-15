@@ -124,7 +124,9 @@ func (s *bundleState) checkBuffer(method string, buffer *Buffer, usage gputypes.
 	if buffer.core == nil || (buffer.released != nil && buffer.released.Load()) {
 		return fmt.Errorf("%s: buffer: %w", method, ErrReleased)
 	}
-	if buffer.device != s.device {
+	// The buffer's host is the shared device view; the device's cached adapter
+	// is one pointer per Device, so interface equality is device identity.
+	if buffer.device != s.device.seamView() {
 		return fmt.Errorf("%s: buffer: %w", method, errBundleDevice)
 	}
 	if buffer.Usage()&usage == 0 {
