@@ -51,3 +51,25 @@ internal/pendingwrites	internal/hal	all	N	domain baseline (pending_writes.go:33-
 internal/pendingwrites	internal/core	native	N	pending_writes.go:111 coreDevice.Tracker()
 internal/stencilblit	internal/hal	all	N	domain baseline (the payload holds hal handles; the encoder records the commands)
 internal/staging	internal/hal	all	N	staging_belt.go:34-35 halDevice, halQueue
+# --- the browser WebGPU path (wasm only): the extraction domains' _browser variants import internal/browser; the
+# --- golden was built from pre-A root paths, where these were root files, so the class had zero rows (2026-11-15).
+internal/resource	internal/browser	wasm	N	buffer_browser.go:10 *browser.Buffer field; bind_browser.go:5, sampler_browser.go:5, shader_browser.go:5, texture_browser.go:7
+internal/pipeline	internal/browser	wasm	N	pipeline_browser.go:5
+internal/encoder	internal/browser	wasm	N	computepass_browser.go:5, encoder_browser.go:8, renderpass_browser.go:7
+internal/queue	internal/browser	wasm	N	queue_browser.go:8
+internal/surface	internal/browser	wasm	N	surface_browser.go:12
+internal/device	internal/browser	wasm	N	device_browser.go:11
+internal/instance	internal/browser	wasm	N	adapter_browser.go:9, instance_browser.go:9
+# --- the core trackers (native): the resource, encoder, pendingwrites and queue code registers with core/track.
+internal/resource	internal/core/track	native	N	bind_native.go:12, texture_native.go:10
+internal/encoder	internal/core/track	native	N	computepass_native.go:11, encoder_native.go:10, renderbundle_finish.go:11
+internal/pendingwrites	internal/core/track	native	N	pending_writes.go:10
+internal/queue	internal/core/track	native	N	queue_native.go:12
+# --- the indirect draw helpers the encoder's pass encoder declares state for.
+internal/encoder	internal/indirect	rust	N	renderpass_rust.go:10
+internal/encoder	internal/indirect	wasm	N	renderpass_browser.go:8
+# --- the pipeline constants the device's rust and browser variants derive state from.
+internal/device	internal/pipeconst	rust	N	device_rust.go:15
+internal/device	internal/pipeconst	wasm	N	device_browser.go:12
+# --- the shader IR the resource shader module lowers through.
+internal/resource	internal/shaderir	native	N	shader_native.go:12
