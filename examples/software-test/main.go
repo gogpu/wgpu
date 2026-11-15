@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Command software-test verifies the SPIR-V interpreter on the software backend.
 // Tests: vertex shader (triangle), fragment shader (solid color), compute shader (scaled copy).
 //

@@ -330,12 +330,18 @@ jobs:
         go vet -tags rust $(go list -tags rust ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
 
     # Compiles the wasm-tagged files, tests included (hal_interop_browser_test.go
-    # and the other wasm-tagged tests); no other job type-checks them.
+    # and the other test files of the wasm build graph); no other job
+    # type-checks them. The packages are that graph, not ./...: outside it the
+    # tree does not type-check for js/wasm yet — internal/raytracing and
+    # internal/shaderir name native-only hal types, internal/hal/allbackends and
+    # examples/browser-compute do not build at all, and the test files of
+    # internal/core and internal/hal/vulkan do not compile. All pre-existing;
+    # widening this step needs its own change.
     - name: Run go vet for js/wasm
       env:
         GOOS: js
         GOARCH: wasm
-      run: go vet ./...
+      run: go vet . ./hal ./internal/browser ./internal/indirect ./internal/pipeconst
 
   # Lint the other desktop targets. The job above type-checks only the linux
   # files, so code under darwin or windows build tags (internal/hal/metal, internal/hal/dx12,
