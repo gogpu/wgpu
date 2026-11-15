@@ -40,12 +40,12 @@ func TestBrowserDrawIndexedIndirectInvalidSpanDelegatesOneFailingCall(t *testing
 			rawBuffer := js.Global().Get("Object").New()
 			rawBuffer.Set("size", float64(test.bufferSize))
 			rawBuffer.Set("usage", 0)
-			buffer := resource.NewBufferBrowser(
+			buffer := &Buffer{impl: resource.NewBufferBrowser(
 				browser.NewBuffer(rawBuffer),
 				uint64(test.bufferSize),
 				0,
-				MapStateUnmapped,
-			)
+				resource.MapStateUnmapped,
+			)}
 
 			pass.MultiDrawIndexedIndirect(buffer, test.offset, test.drawCount)
 

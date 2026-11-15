@@ -1,3 +1,5 @@
+//go:build rust
+
 // Copyright 2026 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
@@ -14,7 +16,9 @@ import (
 //
 // The implementation lives in internal/resource (ADR-070). This declaration is
 // the public surface: every method is one delegation, and nil/released
-// behaviour matches the implementation's guards.
+// behavior matches the implementation's guards. The file is per context, like
+// the implementation it fronts; its two siblings (browser, rust) declare the
+// same surface, so a later step can let them diverge without moving the type.
 type Buffer struct {
 	impl *resource.Buffer
 }
@@ -30,7 +34,12 @@ func (b *Buffer) Label() string { return b.impl.Label() }
 
 // Release drops the application's ownership reference to the buffer; see the
 // implementation's documentation for the refcount-driven destruction contract.
-func (b *Buffer) Release() { b.impl.Release() }
+func (b *Buffer) Release() {
+	if b.impl == nil {
+		return
+	}
+	b.impl.Release()
+}
 
 // MapState returns the current mapping state of the buffer.
 func (b *Buffer) MapState() MapState {
