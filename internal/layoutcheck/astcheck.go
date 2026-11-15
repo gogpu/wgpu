@@ -6,12 +6,15 @@
 package layoutcheck
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -191,36 +194,87 @@ func checkWhiteBoxChildTest(rep *Report, dir, rel string, f *ast.File, fset *tok
 		"a white-box test of %s imports internal/device; drive the seam with a fake (§15.10)", dir)
 }
 
-// loadAllowlist reads the explicit public-layer allowlist (`path<TAB>reason` lines). A missing file is an
-// empty allowlist: the list is optional, and its absence fails closed (more findings, never fewer).
-func loadAllowlist(root string) map[string]string {
+// allowlistFile is the explicit public-layer allowlist, relative to internal/layoutcheck.
+const allowlistFile = "publiclayer_allow.txt"
+
+// loadAllowlist reads the explicit public-layer allowlist: `path:line<TAB>reason` lines. The rule is
+// exact-site, so an entry exempts the one finding at that file and line and nothing else; the retired
+// file-wide form (`path<TAB>reason`) is a format error, never an exemption. A missing file is an empty
+// allowlist: the list is optional, and its absence fails closed (more findings, never fewer). A malformed
+// line is returned as an error while the well-formed entries stay in the map, so a typo neither exempts
+// anything by accident nor costs the entries that are right.
+func loadAllowlist(root string) (map[string]string, error) {
 	out := map[string]string{}
-	data, err := readTreeFile(filepath.Join(root, dirInternal, "layoutcheck", "publiclayer_allow.txt"))
+	data, err := readTreeFile(filepath.Join(root, dirInternal, "layoutcheck", allowlistFile))
 	if err != nil {
-		return out
+		if errors.Is(err, fs.ErrNotExist) {
+			return out, nil
+		}
+		return out, fmt.Errorf("%s/%s: %w", dirInternal, allowlistFile, err)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for i, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		fields := strings.SplitN(line, "\t", 2)
-		reason := ""
-		if len(fields) > 1 {
-			reason = fields[1]
+		key, reason, err := parseAllowEntry(line)
+		if err != nil {
+			return out, fmt.Errorf("%s/%s:%d: %w", dirInternal, allowlistFile, i+1, err)
 		}
-		out[strings.TrimSpace(fields[0])] = reason
+		out[key] = reason
 	}
-	return out
+	return out, nil
+}
+
+// parseAllowEntry splits one allowlist line into its exact-site key and its reason.
+func parseAllowEntry(line string) (key, reason string, err error) {
+	fields := strings.SplitN(line, "\t", 2)
+	key = strings.TrimSpace(fields[0])
+	if len(fields) < 2 || strings.TrimSpace(fields[1]) == "" {
+		return "", "", fmt.Errorf("%q: want `path:line<TAB>reason`", key)
+	}
+	colon := strings.LastIndexByte(key, ':')
+	if colon <= 0 {
+		return "", "", fmt.Errorf("%q: want `path:line<TAB>reason`; a file-wide entry exempts nothing", key)
+	}
+	n, convErr := strconv.Atoi(key[colon+1:])
+	if convErr != nil || n < 1 {
+		return "", "", fmt.Errorf("%q: %q is not a 1-based line number", key, key[colon+1:])
+	}
+	return key, strings.TrimSpace(fields[1]), nil
 }
 
 // checkPublicLayer applies the public-layer rule of the layout report §2: a public package holds
 // declarations and pure projections only. The conservative first form fails on the constructs that can
 // never be a projection — a loop, a switch, defer/go, a closure, a map literal — and on a package-scope
-// map. Generated files (*_gen.go) are projections by construction and are skipped, as is every file on the
-// explicit allowlist. The rule is a note until the claims phase turns final, when it fails (§15.2).
+// map. Generated files (*_gen.go) are projections by construction and are skipped. The rule is a note
+// until the claims phase turns final, when it fails (§15.2).
+//
+// An allowlist entry is one exact site, `path:line<TAB>reason`: it exempts the finding reported at that
+// file and that line, and no other. A second finding in the same file still fails at phase final, and a
+// new site — even on another line of a listed file — reds the gate, which is the point of the form: the
+// exemption names a line somebody reviewed, never a file that becomes a no-go area.
+//
+// The six current entries all name wgputest/wgputest.go, and they exist for one reason: Option is
+// func(*config). The facade's With* must build closures over config, and Trace/Counts must guard their
+// mutex (the clone deep-copies the variable-length records). Those sites predate this window; the
+// API-level cleanup that removes them from the facade is carded before v1.0.
+//
+// The rule is a construct ban, not a proof that a public package's code is thin. Its known bypass is logic
+// written with none of the flagged constructs: a Lock/append/Unlock helper, or a method value where a
+// closure used to be. A method value is not a closure, so rewriting closures as method values removes the
+// findings without moving the code out of the package (wgputest/observer.go's eleven record callbacks took
+// that shape). What the rule does read is unexported declarations as well as exported ones: a loop or a
+// closure inside an unexported method reds the same as in an exported one (pinned by
+// TestPublicLayerUnexportedMethodLogic). The flat-body bypass is the limit of this conservative form,
+// stated here rather than discovered later.
 func checkPublicLayer(rep *Report, root string, final bool) {
-	allow := loadAllowlist(root)
+	allow, err := loadAllowlist(root)
+	if err != nil {
+		// The allowlist is part of the gate's configuration, so a malformed entry fails in every phase.
+		// The well-formed entries still apply: the list never exempts more than it says.
+		rep.addFailf(publicLayerAllowCheck, "", "", 0, "%v", err)
+	}
 	for _, dir := range publicPackages {
 		for _, path := range goFiles(filepath.Join(root, dir), false) {
 			checkPublicLayerFile(rep, root, allow, final, path)
@@ -231,7 +285,7 @@ func checkPublicLayer(rep *Report, root string, final bool) {
 // checkPublicLayerFile applies the rule to one file of a public package.
 func checkPublicLayerFile(rep *Report, root string, allow map[string]string, final bool, path string) {
 	rel := relPath(root, path)
-	if strings.HasSuffix(path, "_gen.go") || allow[rel] != "" {
+	if strings.HasSuffix(path, "_gen.go") {
 		return
 	}
 	f, fset, err := parseFile(path)
@@ -242,11 +296,19 @@ func checkPublicLayerFile(rep *Report, root string, allow map[string]string, fin
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
-			checkLayerGenDecl(rep, final, rel, d, fset)
+			checkLayerGenDecl(rep, allow, final, rel, d, fset)
 		case *ast.FuncDecl:
-			checkLayerFunc(rep, final, rel, d, fset)
+			checkLayerFunc(rep, allow, final, rel, d, fset)
 		}
 	}
+}
+
+// reportLayerSitef records one public-layer finding unless the allowlist names this exact file and line.
+func reportLayerSitef(rep *Report, allow map[string]string, final bool, rel string, line int, format string, args ...any) {
+	if allow[fmt.Sprintf("%s:%d", rel, line)] != "" {
+		return
+	}
+	reportLayerf(rep, final, publicLayerCheck, rel, line, format, args...)
 }
 
 // reportLayerf records one public-layer finding: a note while the phase is open, a failure at final.
@@ -259,7 +321,7 @@ func reportLayerf(rep *Report, final bool, check, file string, line int, format 
 }
 
 // checkLayerGenDecl reports a package-scope map, which a public package never holds.
-func checkLayerGenDecl(rep *Report, final bool, rel string, d *ast.GenDecl, fset *token.FileSet) {
+func checkLayerGenDecl(rep *Report, allow map[string]string, final bool, rel string, d *ast.GenDecl, fset *token.FileSet) {
 	if d.Tok != token.VAR {
 		return
 	}
@@ -269,20 +331,20 @@ func checkLayerGenDecl(rep *Report, final bool, rel string, d *ast.GenDecl, fset
 			continue
 		}
 		if _, isMap := vs.Type.(*ast.MapType); isMap {
-			reportLayerf(rep, final, publicLayerCheck, rel, fset.Position(vs.Pos()).Line,
+			reportLayerSitef(rep, allow, final, rel, fset.Position(vs.Pos()).Line,
 				"package-scope map in a public package; maps and registries belong to internal/**")
 		}
 	}
 }
 
 // checkLayerFunc reports every construct of a public method that is logic rather than a projection.
-func checkLayerFunc(rep *Report, final bool, rel string, d *ast.FuncDecl, fset *token.FileSet) {
+func checkLayerFunc(rep *Report, allow map[string]string, final bool, rel string, d *ast.FuncDecl, fset *token.FileSet) {
 	if d.Body == nil {
 		return
 	}
 	ast.Inspect(d.Body, func(n ast.Node) bool {
 		if msg := layerViolation(n, d.Name.Name); msg != "" {
-			reportLayerf(rep, final, publicLayerCheck, rel, fset.Position(n.Pos()).Line, "%s", msg)
+			reportLayerSitef(rep, allow, final, rel, fset.Position(n.Pos()).Line, "%s", msg)
 		}
 		return true
 	})
@@ -290,6 +352,9 @@ func checkLayerFunc(rep *Report, final bool, rel string, d *ast.FuncDecl, fset *
 
 // publicLayerCheck is the check name of the public-layer rule.
 const publicLayerCheck = "public-layer"
+
+// publicLayerAllowCheck is the check name of the allowlist format rule.
+const publicLayerAllowCheck = "public-layer-allow"
 
 // layerViolation describes the construct if it may not appear in a public method, and "" otherwise.
 func layerViolation(n ast.Node, funcName string) string {

@@ -61,6 +61,69 @@ The hand-written B side uses the explicit tokens `all`, `native`, `rust`, `wasm`
 before any expression rule, so `native` never leaks into rust. wasm is admitted only by a constraint that positively
 requires `js`.
 
+### The constraint grammar (the gate's contract)
+
+`scc.awk` decides a context with a string heuristic (`ctxmask`), which is enough to run Tarjan over the tree it
+reads, but it is not a contract. The layout check (`internal/layoutcheck`) evaluates the build constraint of every
+generated B-side edge exactly, as a boolean expression. This is the grammar it accepts:
+
+```
+expr   := or
+or     := and ( '||' and )*
+and    := unary ( '&&' unary )*
+unary  := '!' unary | '(' expr ')' | atom
+atom   := one identifier
+```
+
+Space and tab separate tokens; an optional `//go:build ` prefix is accepted. An empty constraint, or the token
+`all`, admits every context. An atom is one of:
+
+- `js`, `wasm` — the wasm context only;
+- `rust` — the rust context only;
+- `integration` — the native context only;
+- any other identifier — a GOOS token (`windows`, `linux`, `darwin`, `android`, …), an architecture token (`386`,
+  `amd64`, `arm64`, …) or any other plain tag (`wgpu_nosoftware`, `wgpu_novulkan`, `swinstrcount`, …): native +
+  rust, never wasm.
+
+`||` is set union and `&&` is set intersection over the three contexts. Negation is where the abstraction shows:
+
+| Expression | Contexts |
+|---|---|
+| `!js`, `!wasm` | native + rust — the complement of the wasm context |
+| `!rust` | native + wasm — the complement of the rust context |
+| `!integration` | rust + wasm — the complement of the native context |
+| `!<GOOS>`, `!<arch>`, `!<plain tag>` | native + rust — **not** the complement: the abstraction cannot decide a GOOS, because the native and rust builds target an unspecified platform, so the negation holds there as well |
+| `!(group)` built only from `js`, `wasm`, `rust`, `integration` | the complement of the group's set |
+| `!(group)` that names a GOOS, an architecture or any other plain tag | native + rust |
+| `!!x` | `x` — a boolean identity |
+
+**The hard rule.** An expression outside this grammar — a missing parenthesis, a trailing token, a dangling `&&` or
+`||` — or one that evaluates to the empty context set (`wasm && rust`, `rust && !rust`) is a **hard failure that
+quotes the expression**. It is never a guess and never a silent pass: an empty set must not be able to satisfy "this
+edge is covered by the golden" vacuously, and a constraint no one can read must not be allowed to pick a bucket.
+`ctxmask`'s heuristic is not a fallback: where the tool and the evaluator could disagree, the gate fails instead.
+
+**The proof.** These are the tests, not a claim in prose:
+
+- `TestConstraintContexts` pins the grammar and the closure table above, error cases included;
+  `TestConstraintEmptySetIsAnError` pins the empty-set rule.
+- `TestConstraintTreeExpressions` pins all 42 real build constraints of the tool's own `tags.tsv` against
+  `scc.awk`'s `ctxmask`: the evaluator and the tool agree on every one. (`tags.tsv` holds 43 distinct values; the
+  43rd is the source line in `cmd/vk-gen/main.go` that writes a `//go:build` string for generated code, not a
+  constraint of this graph.)
+- `TestConstraintTreeZeroFixes` pins the 14 tree constraints that the earlier atom-complement model collapsed to
+  an empty set. The two `wgputest/internal/backend` cases show why the closure rules matter:
+
+| Constraint | Earlier model | This evaluator | `ctxmask` |
+|---|---|---|---|
+| `opensoftware.go`: `((windows && (386 \|\| amd64 \|\| arm64)) \|\| …) && !rust && !(js && wasm) && !wgpu_nosoftware` | empty, rejected | native | native |
+| `opensoftware_off.go`: `!rust && !(js && wasm) && !(((windows && …) \|\| …) && !wgpu_nosoftware)` | native — but only by complementing an empty negated group | native | native |
+
+The off expression is the one that shows the shape of the defect rather than a wrong number: its negated group names
+a plain tag, so under the atom-complement model the inner `… && !wgpu_nosoftware` came out empty and `!(empty)` came
+out as everything. The final value matched by accident. An empty set is now an error, so the same expression can
+only pass through the rule that a negation naming a plain atom is native + rust.
+
 ## Outputs
 
 | File | Content |

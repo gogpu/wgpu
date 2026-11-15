@@ -1,0 +1,16 @@
+# Public-layer allowlist. One exact site per line: `path:line<TAB>reason`.
+#
+# Exact means exact. An entry exempts the finding reported at that file and line and nothing else: a second
+# finding in the same file still fails at phase final, and a new site, even on another line of a listed
+# file, reds the gate. The retired file-wide form (`path<TAB>reason`) is a format error, never an exemption.
+#
+# The six entries are the wgputest facade sites that predate this window; all six carry the same cause.
+# Option is func(*config): the facade's With* must build closures over config, and Trace/Counts must guard
+# their mutex. The clone deep-copies the variable-length records. The API-level cleanup that removes these
+# from the facade is carded before v1.0.
+wgputest/wgputest.go:74	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
+wgputest/wgputest.go:79	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
+wgputest/wgputest.go:95	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
+wgputest/wgputest.go:119	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
+wgputest/wgputest.go:281	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
+wgputest/wgputest.go:286	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0

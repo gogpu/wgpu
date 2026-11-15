@@ -124,19 +124,22 @@ func checkSCCAfter(rep *Report, outDir string) {
 	}
 }
 
-// checkContextAcyclic reports a context whose next non-empty line is not the acyclic marker. A context
-// with zero edges is `(none)`: scc.awk prints it instead of the acyclic marker, and it is acyclic by
-// construction — no edge, no SCC — not a cycle.
+// checkContextAcyclic reports a context whose next non-empty line is not the acyclic marker, and a context
+// that lost every edge. The two are different findings. `(none)` is scc.awk's marker for a context with zero
+// edges: it is not a cycle — no edge, no SCC — but it is a failed scan. The floors in summary.txt are totals,
+// so one context collapsing to zero still passes them while the graph silently loses a leg; ADR-070 §15.2
+// says a stage that produced nothing fails, and a context is a stage of the same run.
 func checkContextAcyclic(rep *Report, contextLine string, rest []string) {
 	for _, line := range rest {
 		next := strings.TrimSpace(line)
 		if next == "" {
 			continue
 		}
-		if next == "(none)" {
-			return
-		}
-		if !strings.Contains(next, "acyclic") {
+		switch {
+		case next == sccNoneContext:
+			rep.addFailf("graph-context-empty", "", "scripts/inversion-graph/scc-after.txt", 0,
+				"%s: context has no edges — the scan is broken (the floors are totals, a whole context can be lost under them)", contextLine)
+		case !strings.Contains(next, "acyclic"):
 			rep.addFailf("graph-scc", "", "scripts/inversion-graph/scc-after.txt", 0, "%s: not acyclic (%s)", contextLine, next)
 		}
 		return

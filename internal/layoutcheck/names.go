@@ -21,6 +21,9 @@ const (
 	// atomIntegration is the `integration` build tag: true only in the native build.
 	atomIntegration = "integration"
 
+	// sccNoneContext is scc.awk's marker for a context with zero edges: a failed scan, not a cycle.
+	sccNoneContext = "(none)"
+
 	phaseOpen  = "open"
 	phaseFinal = "final"
 
