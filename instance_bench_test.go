@@ -13,7 +13,7 @@ import (
 )
 
 // BenchmarkCreateInstanceDefault measures the startup cost of a default
-// instance: the platform hardware backends of the build are initialised and
+// instance: the platform hardware backends of the build are initialized and
 // their adapters enumerated.
 func BenchmarkCreateInstanceDefault(b *testing.B) {
 	b.ReportAllocs()

@@ -140,8 +140,8 @@ audit_source_selection() {
 		env_args+=("CC=$clang_path")
 	fi
 
-	vulkan_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./hal/vulkan)
-	backend_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./hal/allbackends)
+	vulkan_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./internal/hal/vulkan)
+	backend_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./internal/hal/allbackends)
 	for file in api_android.go init_android.go platform_android.go; do
 		grep -q "$file" <<<"$vulkan_files"
 	done

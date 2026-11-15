@@ -38,6 +38,7 @@ func TestRootSentinelsAreTheInternalValues(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			//nolint:errorlint // the assertion IS the identity check; errors.Is is the tested equivalence, lines below
 			if tt.public != tt.internal {
 				t.Fatalf("%s is not the internal value: %v != %v", tt.name, tt.public, tt.internal)
 			}
