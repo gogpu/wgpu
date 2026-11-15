@@ -149,7 +149,7 @@ func checkImportRecords(rep *Report, recs []importRec) {
 		blackBox := rec.kind == kindExtTest
 		checkThinHalImport(rep, src, rec)
 		checkWgpuTestImport(rep, src, rec, blackBox)
-		checkRootWgpuTestImport(rep, src, rec)
+		checkRootWgpuTestImport(rep, src, rec, blackBox)
 		checkInternalImport(rep, src, rec, blackBox)
 		checkHALCoreImport(rep, src, rec, blackBox)
 		checkCoreExtractionImport(rep, src, rec)
@@ -183,9 +183,17 @@ func checkWgpuTestImport(rep *Report, src string, rec importRec, blackBox bool) 
 		"wgputest/internal imports %q; allowed: root, gputypes, internal/hal, internal/wgputestbridge", rec.dst)
 }
 
-// checkRootWgpuTestImport applies R4: the root never imports wgputest.
-func checkRootWgpuTestImport(rep *Report, src string, rec importRec) {
+// checkRootWgpuTestImport applies R4-ext (the layout report's R4, lead-approved 2026-11-15): a root
+// non-test file never imports wgputest; a white-box test in package wgpu never imports it either (Go's
+// import-cycle rule forbids it, and the rule states it); an external test package in the root directory
+// may — it is a separate test-only package — and the gate reports it as a note.
+func checkRootWgpuTestImport(rep *Report, src string, rec importRec, blackBox bool) {
 	if src != pkgRoot || !inTree(rec.dst, pkgWgpuTest) {
+		return
+	}
+	if blackBox {
+		rep.addNotef("R4-ext", rec.file, rec.line,
+			"external test package of the root imports %q (test-only; a white-box package wgpu cannot)", rec.dst)
 		return
 	}
 	rep.addFailf("R4", "", rec.file, rec.line, "the root imports %q; the wgputest bridge is the only seam", rec.dst)
@@ -200,7 +208,7 @@ func checkInternalImport(rep *Report, src string, rec importRec, blackBox bool) 
 		return
 	}
 	if blackBox {
-		rep.addNotef("R5-ext", "", rec.file, rec.line,
+		rep.addNotef("R5-ext", rec.file, rec.line,
 			"external test package of %s imports %q (test-only; §15.10 fails white-box only)", src, rec.dst)
 		return
 	}
@@ -219,7 +227,7 @@ func checkHALCoreImport(rep *Report, src string, rec importRec, blackBox bool) {
 		return
 	}
 	if blackBox {
-		rep.addNotef("R6-ext", "", rec.file, rec.line, "external test package of %s imports internal/core", src)
+		rep.addNotef("R6-ext", rec.file, rec.line, "external test package of %s imports internal/core", src)
 		return
 	}
 	rep.addFailf("R6", "", rec.file, rec.line, "%s imports internal/core", src)

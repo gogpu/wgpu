@@ -124,12 +124,17 @@ func checkSCCAfter(rep *Report, outDir string) {
 	}
 }
 
-// checkContextAcyclic reports a context whose next non-empty line is not the acyclic marker.
+// checkContextAcyclic reports a context whose next non-empty line is not the acyclic marker. A context
+// with zero edges is `(none)`: scc.awk prints it instead of the acyclic marker, and it is acyclic by
+// construction — no edge, no SCC — not a cycle.
 func checkContextAcyclic(rep *Report, contextLine string, rest []string) {
 	for _, line := range rest {
 		next := strings.TrimSpace(line)
 		if next == "" {
 			continue
+		}
+		if next == "(none)" {
+			return
 		}
 		if !strings.Contains(next, "acyclic") {
 			rep.addFailf("graph-scc", "", "scripts/inversion-graph/scc-after.txt", 0, "%s: not acyclic (%s)", contextLine, next)

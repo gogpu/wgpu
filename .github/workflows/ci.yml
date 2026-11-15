@@ -147,6 +147,10 @@ jobs:
   test:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A required gate must fail closed. TestRunGate skips itself when `sh` is
+    # not in PATH; layoutcheck in WGPU_REQUIRE turns that skip into a failure.
+    env:
+      WGPU_REQUIRE: "layoutcheck"
     # Codecov uploads with OIDC; no other job needs an id token.
     permissions:
       contents: read
@@ -174,9 +178,13 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      # Skip internal/hal/vulkan/vk and internal/hal/gles due to intentional unsafe.Pointer FFI usage
+      # Skip internal/hal/vulkan/vk and internal/hal/gles due to intentional unsafe.Pointer FFI usage.
+      # The list is captured first: a failed `go list` inside `$(...)` does not abort under `set -e`,
+      # and a failed substitution would degrade the command to bare `go vet` (the current package only).
       run: |
-        go vet $(go list ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
+        set -euo pipefail
+        pkgs=$(go list ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
+        go vet $pkgs
 
     # The build users ship: CGO_ENABLED=0, so goffi runs its fakecgo path.
     - name: Run tests
@@ -327,7 +335,9 @@ jobs:
     # unsafe.Pointer FFI use in internal/hal/vulkan/vk and internal/hal/gles.
     - name: Run go vet with the rust build tag
       run: |
-        go vet -tags rust $(go list -tags rust ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
+        set -euo pipefail
+        pkgs=$(go list -tags rust ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
+        go vet -tags rust $pkgs
 
     # Compiles the wasm-tagged files, tests included (hal_interop_browser_test.go
     # and the other test files of the wasm build graph); no other job
@@ -341,7 +351,9 @@ jobs:
       env:
         GOOS: js
         GOARCH: wasm
-      run: go vet . ./hal ./internal/browser ./internal/indirect ./internal/pipeconst
+      run: |
+        set -euo pipefail
+        go vet . ./hal ./internal/browser ./internal/indirect ./internal/pipeconst
 
   # Lint the other desktop targets. The job above type-checks only the linux
   # files, so code under darwin or windows build tags (internal/hal/metal, internal/hal/dx12,

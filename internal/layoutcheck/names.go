@@ -18,6 +18,9 @@ const (
 	tokenWasm       = "wasm"
 	tokenNativeRust = "native+rust"
 
+	// atomIntegration is the `integration` build tag: true only in the native build.
+	atomIntegration = "integration"
+
 	phaseOpen  = "open"
 	phaseFinal = "final"
 
@@ -25,6 +28,7 @@ const (
 	kindInverted = "inverted"
 
 	kindNonTest = "N"
+	kindIntTest = "INT"
 	kindExtTest = "EXT"
 
 	pkgRoot     = "wgpu"

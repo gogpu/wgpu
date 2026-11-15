@@ -41,6 +41,16 @@ func TestConstraintContexts(t *testing.T) {
 		{"or of goos", "(windows || linux) && !(js && wasm)", ctxNative | ctxRust, ""},
 		{"integration on linux", "integration && linux && !(js && wasm)", ctxNative, ""},
 		{"de morgan", "!js || !wasm", ctxNative | ctxRust, ""},
+		{"negated goos", "!android", ctxNative | ctxRust, ""},
+		{"negated plain tag", "!swinstrcount", ctxNative | ctxRust, ""},
+		{"negated rust", "!rust", ctxNative | ctxWasm, ""},
+		{"negated js", "!js", ctxNative | ctxRust, ""},
+		{"negated wasm", "!wasm", ctxNative | ctxRust, ""},
+		{"negated integration", "!integration", ctxRust | ctxWasm, ""},
+		{"negated group of known atoms", "!(js && wasm)", ctxNative | ctxRust, ""},
+		{"negated group naming a goos is undecidable", "!(windows && !wgpu_nosoftware)", ctxNative | ctxRust, ""},
+		{"double negation", "!!rust", ctxRust, ""},
+		{"empty set", "wasm && rust", 0, "admits no configured context"},
 		{"build line prefix", "//go:build windows", ctxNative | ctxRust, ""},
 		{"missing paren", "(windows", 0, "missing )"},
 		{"trailing token", "windows )", 0, "unexpected"},
@@ -66,6 +76,130 @@ func TestConstraintContexts(t *testing.T) {
 				t.Fatalf("parseConstraint(%q) = %q, want %q", tc.expr, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestConstraintTreeExpressions proves parseConstraint agrees with the graph tool's own per-context
+// inclusion (scc.awk's ctxmask) on every distinct build constraint in the tree, taken from the tool's
+// own tags.tsv. tags.tsv holds 43 distinct values; 42 are build constraints, and the 43rd is a source
+// line in cmd/vk-gen/main.go that writes a "//go:build" string for generated code ("tags" records it as
+// the empty string because the line begins with tabs). That file imports no module package, so it never
+// becomes a record or an edge (records.tsv has no cmd/vk-gen row) and is not a constraint of the graph.
+func TestConstraintTreeExpressions(t *testing.T) {
+	cases := []struct {
+		expr string
+		want contextMask // the tool's ctxmask result
+	}{
+		{`!android && !(js && wasm) && !rust`, ctxNative},
+		{`!rust && !(js && wasm)`, ctxNative},
+		{`!rust && !(js && wasm) && !(((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !wgpu_nosoftware)`, ctxNative},
+		{`!rust && !(js && wasm) && !android`, ctxNative},
+		{`!rust && !(js && wasm) && wgpu_nosoftware`, ctxNative},
+		{`((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware`, ctxNative},
+		{`((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && wgpu_nosoftware`, ctxNative},
+		{`((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nogles`, ctxNative},
+		{`((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_novulkan`, ctxNative},
+		{`darwin && (amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nometal`, ctxNative},
+		{`darwin && (amd64 || arm64) && wgpu_moltenvk && !rust && !(js && wasm) && !wgpu_novulkan`, ctxNative},
+		{`integration && !(js && wasm)`, ctxNative},
+		{`integration && !rust && !(js && wasm)`, ctxNative},
+		{`integration && darwin && !rust && !(js && wasm)`, ctxNative},
+		{`integration && linux && !(js && wasm)`, ctxNative},
+		{`integration && linux && !(js && wasm) && wgpu_gles_force_es`, ctxNative},
+		{`linux && !rust`, ctxNative},
+		{`windows && (386 || amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nodx12`, ctxNative},
+		{`rust`, ctxRust},
+		{`rust && android`, ctxRust},
+		{`rust && darwin`, ctxRust},
+		{`rust && linux && !android`, ctxRust},
+		{`rust && windows`, ctxRust},
+		{`!(js && wasm)`, ctxNative | ctxRust},
+		{`!android && !(js && wasm)`, ctxNative | ctxRust},
+		{`!android && !js && !(js && wasm)`, ctxNative | ctxRust},
+		{`!swinstrcount`, ctxNative | ctxRust},
+		{`!windows && !linux && !darwin && !(js && wasm)`, ctxNative | ctxRust},
+		{`(linux || windows) && !(js && wasm)`, ctxNative | ctxRust},
+		{`(windows || linux) && !(js && wasm)`, ctxNative | ctxRust},
+		{`android && arm64`, ctxNative | ctxRust},
+		{`darwin && !(js && wasm)`, ctxNative | ctxRust},
+		{`linux`, ctxNative | ctxRust},
+		{`linux && !(js && wasm)`, ctxNative | ctxRust},
+		{`linux && !(js && wasm) && !wgpu_gles_force_es`, ctxNative | ctxRust},
+		{`linux && !(js && wasm) && wgpu_gles_force_es`, ctxNative | ctxRust},
+		{`linux && !android && !(js && wasm)`, ctxNative | ctxRust},
+		{`swinstrcount`, ctxNative | ctxRust},
+		{`windows`, ctxNative | ctxRust},
+		{`windows && !(js && wasm)`, ctxNative | ctxRust},
+		{`js && wasm`, ctxWasm},
+		{`rust || (js && wasm)`, ctxRust | ctxWasm},
+	}
+	if len(cases) != 42 {
+		t.Fatalf("the tree table holds %d rows, want the 42 real constraints of tags.tsv", len(cases))
+	}
+	for _, tc := range cases {
+		t.Run(tc.expr, func(t *testing.T) {
+			got, err := parseConstraint(tc.expr)
+			if err != nil {
+				t.Fatalf("parseConstraint(%q): %v", tc.expr, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseConstraint(%q) = %q, want the tool's %q", tc.expr, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestConstraintTreeZeroFixes pins the 14 tree constraints that evaluated to mask 0 under the old
+// atom-complement model (validator BLOCKER 2). Each now yields a non-zero set that matches the graph
+// tool, so no generated edge of these files is silently accepted by the subset predicate.
+func TestConstraintTreeZeroFixes(t *testing.T) {
+	cases := []struct {
+		expr string
+		want contextMask
+	}{
+		{`!android && !(js && wasm)`, ctxNative | ctxRust},
+		{`!android && !(js && wasm) && !rust`, ctxNative},
+		{`!android && !js && !(js && wasm)`, ctxNative | ctxRust},
+		{`!rust && !(js && wasm) && !android`, ctxNative},
+		{`!windows && !linux && !darwin && !(js && wasm)`, ctxNative | ctxRust},
+		{`((windows && (386 || amd64 || arm64)) || (((linux && !android) || darwin) && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nosoftware`, ctxNative},
+		{`((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_nogles`, ctxNative},
+		{`((windows && (386 || amd64 || arm64)) || (linux && !android && (amd64 || arm64)) || (android && arm64)) && !rust && !(js && wasm) && !wgpu_novulkan`, ctxNative},
+		{`darwin && (amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nometal`, ctxNative},
+		{`darwin && (amd64 || arm64) && wgpu_moltenvk && !rust && !(js && wasm) && !wgpu_novulkan`, ctxNative},
+		{`linux && !(js && wasm) && !wgpu_gles_force_es`, ctxNative | ctxRust},
+		{`linux && !android && !(js && wasm)`, ctxNative | ctxRust},
+		{`rust && linux && !android`, ctxRust},
+		{`windows && (386 || amd64 || arm64) && !rust && !(js && wasm) && !wgpu_nodx12`, ctxNative},
+	}
+	if len(cases) != 14 {
+		t.Fatalf("the zero-fix table holds %d rows, want the 14 the validator named", len(cases))
+	}
+	for _, tc := range cases {
+		got, err := parseConstraint(tc.expr)
+		if err != nil {
+			t.Fatalf("parseConstraint(%q): %v", tc.expr, err)
+		}
+		if got == 0 {
+			t.Fatalf("parseConstraint(%q) still yields an empty mask", tc.expr)
+		}
+		if got != tc.want {
+			t.Fatalf("parseConstraint(%q) = %q, want the tool's %q", tc.expr, got, tc.want)
+		}
+	}
+}
+
+// TestConstraintEmptySetIsAnError proves an expression that admits no configured context is a hard error
+// quoting the expression, never a mask 0 that a golden row would vacuously cover.
+func TestConstraintEmptySetIsAnError(t *testing.T) {
+	for _, expr := range []string{"wasm && rust", "rust && !rust", "js && (386 || amd64)"} {
+		got, err := parseConstraint(expr)
+		if err == nil {
+			t.Fatalf("parseConstraint(%q) = %q, want an error for an empty context set", expr, got)
+		}
+		if !strings.Contains(err.Error(), expr) {
+			t.Fatalf("parseConstraint(%q) error = %q, want it to quote the expression", expr, err)
+		}
 	}
 }
 
@@ -414,6 +548,128 @@ func runImportRuleCase(t *testing.T, file, dst, kind string, want []string) {
 		if !failureContains(rep.Failures, sub) {
 			t.Fatalf("no failure contains %q; got %v", sub, rep.Failures)
 		}
+	}
+}
+
+// TestRootWgpuTestImportExt proves R4-ext both ways: an external test package in the root directory may
+// import wgputest and is reported as a note, while a root non-test file and a white-box (INT) test in
+// package wgpu still fail. The white-box import is impossible in Go (it would be an import cycle); the
+// rule states it anyway.
+func TestRootWgpuTestImportExt(t *testing.T) {
+	ext := &Report{Summary: map[string]int{}}
+	checkImportRecords(ext, []importRec{{file: "queue_bench_test.go", dst: pkgWgpuTest, cls: "module", kind: kindExtTest}})
+	if len(ext.Failures) != 0 {
+		t.Fatalf("an external root test importing wgputest produced failures: %v", ext.Failures)
+	}
+	if !failureContains(ext.Notes, "R4-ext") {
+		t.Fatalf("no R4-ext note for the external root test: %v", ext.Notes)
+	}
+
+	for _, tc := range []struct {
+		name string
+		kind string
+	}{
+		{"non-test root file", kindNonTest},
+		{"white-box root test", kindIntTest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := &Report{Summary: map[string]int{}}
+			checkImportRecords(rep, []importRec{{file: "queue_bench_test.go", dst: pkgWgpuTest, cls: "module", kind: tc.kind}})
+			if len(rep.Failures) != 1 || !failureContains(rep.Failures, "R4") {
+				t.Fatalf("%s importing wgputest: failures = %v, want one R4 finding", tc.name, rep.Failures)
+			}
+		})
+	}
+}
+
+// TestStencilblitChildRules proves internal/stencilblit is a child: a planted stencilblit→internal/device
+// import produces child-imports-device. It also pins that the package is deliberately not an extraction
+// package (its stencilblit→shaderir edge is A-side, absent from the golden; the subset predicate covers
+// extraction packages only).
+func TestStencilblitChildRules(t *testing.T) {
+	if extractionPackages["internal/stencilblit"] {
+		t.Fatal("internal/stencilblit must stay out of extractionPackages")
+	}
+	src := "//go:build !(js && wasm)\n\npackage stencilblit\n\nimport _ \"" + modulePath + "/" + dirInternalDevice + "\"\n"
+	root := writeTree(t, map[string]string{"internal/stencilblit/zz_probe.go": src})
+	rep := &Report{Summary: map[string]int{}}
+	checkChildren(rep, root)
+	if !failureContains(rep.Failures, "child-imports-device") {
+		t.Fatalf("a stencilblit→internal/device import produced no child-imports-device finding: %v", rep.Failures)
+	}
+}
+
+// TestCoversEmptyMask proves the vacuous pass is gone: the old predicate `row.mask&0 == 0` matched every
+// row, so covers(...,0) was true for any pair. An empty mask now covers nothing.
+func TestCoversEmptyMask(t *testing.T) {
+	golden := &goldenSet{byPair: map[pairKey][]goldenRow{
+		{src: "internal/device", dst: "internal/surface"}: {
+			{kind: kindTarget, src: "internal/device", dst: "internal/surface", mask: ctxAll},
+		},
+	}}
+	if golden.covers("internal/device", "internal/surface", 0) {
+		t.Fatal("covers(...,0) = true; an empty mask must not cover any row")
+	}
+	if !golden.covers("internal/device", "internal/surface", ctxNative) {
+		t.Fatal("covers(...,native) = false for an all-context row")
+	}
+}
+
+// TestSubsetEmptyMaskFailsClosed proves the same at the gate: a generated edge whose expression admits no
+// configured context is a hard failure naming the expression, not a silent cover. Under the old code the
+// mask 0 made covers true and the edge passed; it is red now.
+func TestSubsetEmptyMaskFailsClosed(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		goldenTargetFile:   "internal/device\tinternal/surface\tnative\tN\tprobe.go:9\n",
+		goldenInvertedFile: "# none\n",
+	})
+	golden, err := loadGolden(root)
+	if err != nil {
+		t.Fatalf("loadGolden: %v", err)
+	}
+	out := writeTree(t, map[string]string{
+		"edges-a.tsv": "internal/device\tinternal/surface\t//go:build wasm && rust\tN\n",
+	})
+	rep := &Report{Summary: map[string]int{}}
+	checkSubset(rep, out, golden)
+	if !failureContains(rep.Failures, "admits no configured context") {
+		t.Fatalf("an edge with an empty context set was not rejected: %v", rep.Failures)
+	}
+}
+
+// TestGoldenRowUnparseable proves a golden row whose context is not in the vocabulary is a hard failure,
+// not a row with the zero mask.
+func TestGoldenRowUnparseable(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		goldenTargetFile:   "internal/device\tinternal/surface\tbogus\tN\tprobe.go:9\n",
+		goldenInvertedFile: "# none\n",
+	})
+	if _, err := loadGolden(root); err == nil || !strings.Contains(err.Error(), "unknown context") {
+		t.Fatalf("loadGolden on an unparseable context = %v, want an unknown-context error", err)
+	}
+}
+
+// TestSCCNoneContextIsAcyclic proves a context with zero edges (`(none)`, scc.awk's output when the
+// context has no edges) is acyclic, not a cycle, while a real cycle still fails.
+func TestSCCNoneContextIsAcyclic(t *testing.T) {
+	ok := writeTree(t, map[string]string{"scc-after.txt": "== context native — 3 edges ==\n" +
+		"  acyclic (no SCC > 1)\n" +
+		"== context rust — 0 edges ==\n" +
+		"  (none)\n" +
+		"== total cycles: 0 ==\n"})
+	rep := &Report{Summary: map[string]int{}}
+	checkSCCAfter(rep, ok)
+	if len(rep.Failures) != 0 {
+		t.Fatalf("a (none) context was reported as a failure: %v", rep.Failures)
+	}
+
+	bad := writeTree(t, map[string]string{"scc-after.txt": "== context native — 3 edges ==\n" +
+		"  CYCLE (2 packages): a <-> b\n" +
+		"== total cycles: 1 ==\n"})
+	rep = &Report{Summary: map[string]int{}}
+	checkSCCAfter(rep, bad)
+	if len(rep.Failures) == 0 {
+		t.Fatal("a real cycle produced no failure")
 	}
 }
 

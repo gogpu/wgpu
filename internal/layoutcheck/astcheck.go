@@ -19,7 +19,11 @@ import (
 var publicPackages = []string{"", pkgHal, pkgWgpuTest}
 
 // childDirectories are the extraction packages. A check that needs a child skips a directory that does not
-// exist yet: before its step creates the package the rule is vacuous, not failing.
+// exist yet: before its step creates the package the rule is vacuous, not failing. internal/stencilblit is
+// a child of §15.1/§15.4 but not an extraction package: its existing stencilblit→shaderir edge is A-side
+// (present in the tree, absent from the golden), and the golden's three stencilblit rows are B-side
+// additions. It therefore takes the child rules (var _, child→device, white-box test) but not the subset
+// predicate, which covers extraction packages only (see extractionPackages).
 var childDirectories = []string{
 	"internal/instance",
 	"internal/device",
@@ -31,6 +35,7 @@ var childDirectories = []string{
 	"internal/queue",
 	"internal/surface",
 	"internal/logging",
+	"internal/stencilblit",
 }
 
 // checkAST applies the syntax-tree checks: the public alias ban, the child rules and the public-layer rule
@@ -250,7 +255,7 @@ func reportLayerf(rep *Report, final bool, check, file string, line int, format 
 		rep.addFailf(check, "", file, line, format, args...)
 		return
 	}
-	rep.addNotef(check, "", file, line, format, args...)
+	rep.addNotef(check, file, line, format, args...)
 }
 
 // checkLayerGenDecl reports a package-scope map, which a public package never holds.

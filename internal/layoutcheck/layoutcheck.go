@@ -74,9 +74,10 @@ func (r *Report) addFailf(check, golden, file string, line int, format string, a
 	r.Failures = append(r.Failures, Finding{Check: check, Golden: golden, File: file, Line: line, Message: fmt.Sprintf(format, args...)})
 }
 
-// addNotef records a tolerated finding.
-func (r *Report) addNotef(check, golden, file string, line int, format string, args ...any) {
-	r.Notes = append(r.Notes, Finding{Check: check, Golden: golden, File: file, Line: line, Message: fmt.Sprintf(format, args...)})
+// addNotef records a tolerated finding. A note names no golden row: every current note is a layering or
+// public-layer observation, not a claim on a design row.
+func (r *Report) addNotef(check, file string, line int, format string, args ...any) {
+	r.Notes = append(r.Notes, Finding{Check: check, File: file, Line: line, Message: fmt.Sprintf(format, args...)})
 }
 
 // Run checks the tree and returns the report. A returned error means the check could not run at all
@@ -133,6 +134,13 @@ func Run(cfg Config) (*Report, error) {
 
 // extractionPackages are the destination packages of the root extraction. A generated edge whose source
 // is one of these is a B-side edge and must exist in the golden (ADR-070 §15.2).
+//
+// internal/stencilblit is a child of §15.1/§15.4 but is deliberately absent: its existing
+// stencilblit→shaderir edge is A-side (in the tree, not in the golden — the golden holds only the planned
+// B-side edges), so requiring the golden to cover every generated stencilblit edge would fail on an edge
+// the inversion does not create. The golden's three stencilblit rows (queue→stencilblit,
+// encoder→stencilblit, stencilblit→hal) are B-side additions, checked as rows by the claims side, not as a
+// source subset. The package still takes the child rules (astcheck.go's childDirectories).
 var extractionPackages = map[string]bool{
 	"internal/instance":      true,
 	"internal/device":        true,

@@ -98,6 +98,9 @@ func readGoldenFile(path, kind string) ([]goldenRow, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s:%d: unknown context %q", path, lineNo, fields[2])
 		}
+		if mask == 0 {
+			return nil, fmt.Errorf("%s:%d: context %q admits no configured context", path, lineNo, fields[2])
+		}
 		rows = append(rows, goldenRow{
 			kind:    kind,
 			src:     strings.TrimSpace(fields[0]),
@@ -111,8 +114,14 @@ func readGoldenFile(path, kind string) ([]goldenRow, error) {
 }
 
 // covers reports whether some golden target row covers (src, dst) in every context of mask. The golden
-// may declare an edge more broadly than the tree generates it; the reverse is the failure.
+// may declare an edge more broadly than the tree generates it; the reverse is the failure. An empty mask
+// covers nothing: `row.mask&0 == 0` would make every row a match, the vacuous pass the context model must
+// never allow (parseConstraint reports an empty set as an error, and this guard keeps the predicate honest
+// even if a caller passes 0).
 func (g *goldenSet) covers(src, dst string, mask contextMask) bool {
+	if mask == 0 {
+		return false
+	}
 	for _, row := range g.byPair[pairKey{src: src, dst: dst}] {
 		if row.kind == kindTarget && row.mask&mask == mask {
 			return true
