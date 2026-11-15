@@ -197,6 +197,10 @@ func checkWhiteBoxChildTest(rep *Report, dir, rel string, f *ast.File, fset *tok
 // allowlistFile is the explicit public-layer allowlist, relative to internal/layoutcheck.
 const allowlistFile = "publiclayer_allow.txt"
 
+// allowlistRel is the allowlist's module-relative path, used in every error message so a reader chasing a
+// CI annotation opens the file that exists.
+const allowlistRel = dirInternal + "/layoutcheck/" + allowlistFile
+
 // loadAllowlist reads the explicit public-layer allowlist: `path:line<TAB>reason` lines. The rule is
 // exact-site, so an entry exempts the one finding at that file and line and nothing else; the retired
 // file-wide form (`path<TAB>reason`) is a format error, never an exemption. A missing file is an empty
@@ -210,7 +214,7 @@ func loadAllowlist(root string) (map[string]string, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return out, nil
 		}
-		return out, fmt.Errorf("%s/%s: %w", dirInternal, allowlistFile, err)
+		return out, fmt.Errorf("%s: %w", allowlistRel, err)
 	}
 	for i, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -219,7 +223,7 @@ func loadAllowlist(root string) (map[string]string, error) {
 		}
 		key, reason, err := parseAllowEntry(line)
 		if err != nil {
-			return out, fmt.Errorf("%s/%s:%d: %w", dirInternal, allowlistFile, i+1, err)
+			return out, fmt.Errorf("%s:%d: %w", allowlistRel, i+1, err)
 		}
 		out[key] = reason
 	}
