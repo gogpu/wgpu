@@ -162,7 +162,7 @@ Measured at the commit this directory was added; the pinned output in `reference
 | pairs, A+B | 168 |
 | packages, A+B | 63 |
 | edges per context, A+B | native 156, rust 125, wasm 52 |
-| planned B-side edges | 45 rows in `target-edges.tsv` (172 + 45 = 217, the A+B total) |
+| planned B-side edges | 54 rows in `target-edges.tsv` (the reviewed intent; the generated totals are reported by `graph.sh` at run time) |
 | inverted edges | 7 rows in `inverted-edges.tsv` |
 | cycles, A+B | native: 1 SCC of 8 packages; rust: 1 SCC of 6; wasm: none |
 | cycles, A+B minus the inversion | 0 in every context |
@@ -228,6 +228,16 @@ next to the goldens and is part of the pinned tool set: a change to it is a clai
   `Migrates: <src>→<dst> (<context>)` trailer as the human record. Never add another step's rows.
 - **The gate** (`internal/layoutcheck`) fails on a duplicated row, a row that names no golden row, a malformed line,
   and — once `phase: final` — an unclaimed golden row.
+- **2026-11-15 — inverted rows are claims-only; the twin rule.** The seven child→device pairs no longer exist as
+  `target` rows: a target row may never legitimize an edge an `inverted` row forbids, because `covers()` matches
+  generated edges against `target` rows only — a target twin would let the inversion's edge pass unnoticed. The six
+  inverted contexts are narrowed to the field sites' own build tags (queue native; encoder/resource/pipeline
+  native+rust; surface→device all; surface→instance native; device→instance native+rust), and S1's claim follows.
+  Enforcement: the subset predicate fails on any generated edge not covered by a `target` row (the SCC runs on the
+  post-inversion graph, so it cannot prove absence); `TestNoTargetInvertedTwins` in `internal/layoutcheck` fails on
+  any remaining pair. Proof both ways, 2026-11-15: a planted native `internal/resource → internal/device` import and
+  a planted native `internal/resource → internal/browser` import each red the gate in a scratch copy of the tree,
+  while the same copy clean runs green. Row history: 45 (draft) → 61 (the class enumeration) → 54 (this correction).
 
 ## Notes
 

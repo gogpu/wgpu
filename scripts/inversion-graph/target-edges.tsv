@@ -5,20 +5,12 @@
 # src	dst	context	class	reason
 # --- device -> children (construction, top-down; these are the legal direction) ---
 internal/device	internal/queue	all	N	device_native.go:24 queue *Queue (device_rust.go:23, device_browser.go:19)
-internal/device	internal/instance	native+rust	N	device_native.go:25 instance *Instance (device_rust.go:22; device_browser has no instance field)
 internal/device	internal/encoder	all	N	device_native.go:1034 CreateCommandEncoder; device_rust.go:368; device_browser.go:288
 internal/device	internal/resource	all	N	device_native.go:69 CreateBuffer; device_browser.go:41; rust device CreateBuffer
 internal/device	internal/pipeline	all	N	device_native.go:308 CreateShaderModule; device_browser.go:156
 internal/device	internal/surface	native	N	device_native.go:1284 d.instance.surfacesForDevice -> []*Surface, :1288 surface.discardForDevice
 internal/device	internal/hal	all	N	domain baseline: every extracted package keeps its hal imports (today root -> hal)
 internal/device	internal/core	all	N	domain baseline: device holds *core.Device (device_native.go:21)
-# --- child -> device back-pointers that exist BEFORE the Q12 inversion (F14) ---
-internal/queue	internal/device	native	N	queue_native.go:27 device *Device (queue_rust.go and queue_browser.go hold no device)
-internal/encoder	internal/device	native+rust	N	encoder_native.go:22, :1089; encoder_rust.go:16 (encoder_browser.go holds *browser.CommandEncoder only)
-internal/resource	internal/device	native+rust	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206; buffer_rust.go:17, bind_rust.go:11,30,56
-internal/pipeline	internal/device	native+rust	N	pipeline_native.go:62,167; shader_native.go:18; pipeline_rust.go:17,36, shader_rust.go:11
-internal/surface	internal/device	all	N	surface_native.go:47; surface_rust.go:34; surface_browser.go:38
-internal/surface	internal/instance	native	N	surface_native.go:46 instance *Instance (no instance field in the rust or browser surface)
 internal/instance	internal/device	all	N	adapter_native.go:46 RequestDevice() (*Device, error), :63 adoptDevice(device); every variant has an adapter
 internal/instance	internal/surface	all	N	Instance.CreateSurface() (*Surface, error) (surface_browser.go:60, native path same signature)
 # --- the rest of the extraction graph (no cycle candidate, listed for completeness) ---

@@ -2,11 +2,14 @@
 # The four columns match the graph format; the last one names the field that goes.
 # Removing these from edges-all.tsv must make the native bucket acyclic — that is the
 # whole point of the plan, and graph.sh checks it in scc-after.txt.
+# Context = the field site's own build tag. Inverted rows are claims-only: the subset predicate
+# enforces the inversion (README § claims.tsv; ADR-070 §15.2). A target row may never legitimize
+# an edge an inverted row forbids.
 # src	dst	context	class	reason
-internal/queue	internal/device	all	N	queue_native.go:27 device *Device -> deviceHost interface
-internal/encoder	internal/device	all	N	encoder_native.go:22, :1089 device *Device -> deviceHost interface
-internal/resource	internal/device	all	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206 -> deviceHost
-internal/pipeline	internal/device	all	N	pipeline_native.go:62,167 (dead fields, deleted); shader_native.go:18 -> deviceHost
+internal/queue	internal/device	native	N	queue_native.go:27 device *Device -> deviceHost interface
+internal/encoder	internal/device	native+rust	N	encoder_native.go:22, :1089 device *Device -> deviceHost interface
+internal/resource	internal/device	native+rust	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206 -> deviceHost
+internal/pipeline	internal/device	native+rust	N	pipeline_native.go:62,167 (dead fields, deleted); shader_native.go:18 -> deviceHost
 internal/surface	internal/device	all	N	surface_native.go:47 -> deviceHost with HALQueue()
-internal/surface	internal/instance	all	N	surface_native.go:46 -> instanceHost interface
-internal/device	internal/instance	all	N	device_native.go:25 -> instanceHost interface (the cut is this side, not instance -> device)
+internal/surface	internal/instance	native	N	surface_native.go:46 -> instanceHost interface
+internal/device	internal/instance	native+rust	N	device_native.go:25 -> instanceHost interface (the cut is this side, not instance -> device)
