@@ -1,5 +1,8 @@
 //go:build !rust && !(js && wasm)
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgputest
 
 import (
@@ -8,7 +11,8 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/internal/wgputestbridge"
+	"github.com/gogpu/wgpu/wgputest/internal/backend"
+	"github.com/gogpu/wgpu/wgputest/internal/device"
 )
 
 // NewSoftwareDevice returns a device and queue on the Pure Go software
@@ -20,7 +24,7 @@ import (
 // amd64/arm64, and android arm64. Elsewhere, under -tags rust, or under
 // wgpu_nosoftware, the constructor returns ErrUnavailable.
 func NewSoftwareDevice(opts ...Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
-	return newDevice("software", openSoftware, opts)
+	return newDevice("software", backend.OpenSoftware, opts)
 }
 
 // NewNoopDevice returns a device and queue on the noop backend, headless.
@@ -28,64 +32,43 @@ func NewSoftwareDevice(opts ...Option) (*wgpu.Device, *wgpu.Queue, func(), error
 // The noop backend builds on every native platform; under -tags rust the
 // constructor returns ErrUnavailable.
 func NewNoopDevice(opts ...Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
-	return newDevice("noop", openNoop, opts)
+	return newDevice("noop", backend.OpenNoop, opts)
 }
 
-func newDevice(name string, open opener, opts []Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
+// newDevice collects the options and delegates to the internal device package,
+// which opens the backend and wraps it. Only the unavailable sentinel is
+// mapped here: it is this package's public value.
+func newDevice(name string, open backend.Opener, opts []Option) (*wgpu.Device, *wgpu.Queue, func(), error) {
 	var cfg config
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	opened, err := open()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("wgputest: %s backend: %w", name, err)
-	}
-	bridgeOpts := wgputestbridge.Options{
-		Device:   opened.device,
-		Queue:    opened.queue,
-		Features: opened.features,
-		Limits:   opened.limits,
-		Label:    "wgputest-" + name,
-		Faults: wgputestbridge.Faults{
+	dev, queue, cleanup, err := device.New(device.Config{
+		Name: name,
+		Open: open,
+		Faults: device.Faults{
 			CreateCommandEncoder: cfg.faults.CreateCommandEncoder,
 			WriteBuffer:          cfg.faults.WriteBuffer,
 		},
+		Observer: observerFor(cfg.recorder),
+	})
+	if errors.Is(err, backend.ErrUnavailable) || errors.Is(err, device.ErrNoFactory) {
+		return nil, nil, nil, fmt.Errorf("wgputest: %s backend: %w", name, ErrUnavailable)
 	}
-	if cfg.recorder != nil {
-		bridgeOpts.Observer = cfg.recorder.observer()
-	}
-
-	deviceValue, queueValue, wgpuCleanup, err := wgputestbridge.New(&bridgeOpts)
-	if err != nil {
-		// No wgpu device exists to own the HAL device, so destroy it here.
-		opened.device.Destroy()
-		opened.cleanup()
-		if errors.Is(err, wgputestbridge.ErrNoFactory) {
-			return nil, nil, nil, fmt.Errorf("wgputest: %s backend: %w", name, ErrUnavailable)
-		}
-		return nil, nil, nil, fmt.Errorf("wgputest: %s device: %w", name, err)
-	}
-	device, ok := deviceValue.(*wgpu.Device)
-	if !ok {
-		wgpuCleanup()
-		opened.cleanup()
-		return nil, nil, nil, fmt.Errorf("wgputest: %s device: internal error: factory returned %T", name, deviceValue)
-	}
-	queue, ok := queueValue.(*wgpu.Queue)
-	if !ok {
-		wgpuCleanup()
-		opened.cleanup()
-		return nil, nil, nil, fmt.Errorf("wgputest: %s queue: internal error: factory returned %T", name, queueValue)
-	}
-	cleanup := func() {
-		wgpuCleanup()
-		opened.cleanup()
-	}
-	return device, queue, cleanup, nil
+	return dev, queue, cleanup, err
 }
 
-func (r *Recorder) observer() wgputestbridge.Observer {
-	return wgputestbridge.Observer{
+// observerFor returns the bridge callbacks of r, or the zero value when the
+// device is not recorded.
+func observerFor(r *Recorder) device.Observer {
+	if r == nil {
+		return device.Observer{}
+	}
+	return r.observer()
+}
+
+func (r *Recorder) observer() device.Observer {
+	return device.Observer{
 		EncoderCreated: func(seq uint64, encoder int, label string) {
 			r.record(func(t *Trace) {
 				t.Encoders = append(t.Encoders, EncoderCreate{Seq: seq, Index: encoder, Label: label})

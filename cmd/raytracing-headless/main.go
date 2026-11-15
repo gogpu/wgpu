@@ -10,9 +10,13 @@
 //
 // No GPU required — runs entirely on CPU via software BVH.
 //
+// It lives in cmd/ rather than examples/ because it drives the HAL directly:
+// examples construct through the public path only (ADR-070 R10), and the public
+// API has no acceleration-structure surface yet (P2-RT-002).
+//
 // Usage:
 //
-//	go run ./examples/raytracing-headless/
+//	go run ./cmd/raytracing-headless/
 package main
 
 import (

@@ -99,8 +99,9 @@ wgpu/
 │   ├── raytracing/     # RT build orchestration, compaction, validation
 │   └── ...             # indirect, pipelinecache, shaderir, thread
 ├── cmd/                # CLI tools and test apps
-├── examples/           # Example applications
 │   ├── raytracing-headless/  # software HAL BLAS build, rays traced on the CPU
+│   └── ...
+├── examples/           # Example applications
 │   ├── compute-sum/          # Compute shader example
 │   └── ...
 └── docs/               # Public documentation
@@ -143,7 +144,7 @@ Backend-specific verification:
 
 ```bash
 go run ./examples/compute-sum/           # runs on the best available backend
-go run ./examples/raytracing-headless/   # software HAL BLAS build (no GPU needed)
+go run ./cmd/raytracing-headless/        # software HAL BLAS build (no GPU needed)
 go test ./internal/hal/allbackends/       # cross-backend readback tests on every adapter found
 ```
 

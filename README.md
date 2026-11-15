@@ -231,9 +231,9 @@ wgpu/
 │   │   └── dx12/         # DirectX 12
 ├── examples/
 │   ├── compute-copy/          # GPU buffer copy with compute shader
-│   ├── compute-sum/           # Parallel reduction on GPU
-│   └── raytracing-headless/   # HAL acceleration structure build, rays traced on the CPU
+│   └── compute-sum/           # Parallel reduction on GPU
 └── cmd/
+    ├── raytracing-headless/   # HAL acceleration structure build, rays traced on the CPU
     ├── vk-gen/         # Vulkan bindings generator
     └── ...             # Backend integration tests
 ```

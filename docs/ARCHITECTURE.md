@@ -261,7 +261,8 @@ Ray tracing build orchestration, compaction state machine, and validation — is
 
 HAL RT interface in `internal/hal/raytracing.go`: AccelerationStructure, 12 descriptor types, TlasInstance. Vulkan (VK_KHR), DX12 (DXR) and Metal have code for it, but no GPU adapter advertises `FeatureRayQuery` and none of it has run on a GPU. Software builds a CPU BVH; its SPIR-V interpreter does not execute ray queries. GLES and Noop return an error. Nothing in `internal/core/` or the root package uses this yet: the public API is planned (#369). Status: [RAY-TRACING.md](RAY-TRACING.md).
 
-Example: `examples/raytracing-headless/` (software HAL build, rays traced on the CPU).
+Example: `cmd/raytracing-headless/` (software HAL build, rays traced on the CPU; it drives the HAL directly, so it
+is a `cmd/` tool rather than an `examples/` program).
 
 ## DownlevelCapabilities (ADR-071)
 

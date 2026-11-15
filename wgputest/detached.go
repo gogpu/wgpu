@@ -1,10 +1,13 @@
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgputest
 
 import (
 	"fmt"
 
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/internal/wgputestbridge"
+	"github.com/gogpu/wgpu/wgputest/internal/device"
 )
 
 // NewDetachedTexture returns a *wgpu.Texture that carries the descriptor's
@@ -17,15 +20,11 @@ import (
 //
 // desc may be nil: the handle then carries zero metadata.
 func NewDetachedTexture(desc *wgpu.TextureDescriptor) *wgpu.Texture {
-	value, err := wgputestbridge.NewTexture(desc)
+	t, err := device.NewDetachedTexture(desc)
 	if err != nil {
 		// The root package registers the factory from init, so a missing one
 		// is a broken build, not a runtime condition a test can act on.
 		panic(fmt.Sprintf("wgputest: NewDetachedTexture: %v", err))
-	}
-	t, ok := value.(*wgpu.Texture)
-	if !ok {
-		panic(fmt.Sprintf("wgputest: NewDetachedTexture: internal error: factory returned %T", value))
 	}
 	return t
 }

@@ -32,7 +32,7 @@
 //
 // Importing this package registers the Pure Go software backend in the global
 // HAL registry, even for a test that only calls NewNoopDevice: the software
-// file imports hal/software, which registers itself. Since v0.35.0 a normal
+// backend file imports the software HAL backend, which registers itself. Since v0.35.0 a normal
 // binary registers it by default too, and it is selected only through the
 // BackendsSoftware mask (ADR-083 §2.3) — a hardware-only request never falls
 // back to it. The noop device itself is private and does not register anything.

@@ -73,7 +73,9 @@ The HAL has acceleration structure code for Vulkan, DX12, Metal and software, bu
 interpreter does not execute ray queries. Do not suggest ray queries to users yet. The plan (public API following
 Rust wgpu's `EXPERIMENTAL_RAY_QUERY`, Vulkan first) is in #369 and `docs/RAY-TRACING.md`.
 
-Example: `examples/raytracing-headless/` builds a BLAS through the software HAL and traces rays in Go on the CPU.
+Example: `cmd/raytracing-headless/` builds a BLAS through the software HAL and traces rays in Go on the CPU. It
+drives the HAL directly, so it is a `cmd/` tool rather than an `examples/` program (examples construct through the
+public path only).
 
 ## Current Version
 

@@ -18,7 +18,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	_ "github.com/gogpu/wgpu/internal/hal/software"
 )
 
 func main() {
@@ -30,7 +29,10 @@ func main() {
 }
 
 func run() error {
-	instance, err := wgpu.CreateInstance(nil)
+	// The software backend registers by default in a normal binary (ADR-083
+	// §2.3); selecting it is explicit, through BackendsSoftware, so no other
+	// backend and no default mask can satisfy this example.
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		return fmt.Errorf("create instance: %w", err)
 	}
@@ -45,7 +47,7 @@ func run() error {
 	info := adapter.Info()
 	fmt.Printf("Adapter: %s (%s)\n\n", info.Name, info.DeviceType)
 	if info.Name != "Software Renderer" {
-		return fmt.Errorf("expected Software Renderer, got %s — run with only software backend imported", info.Name)
+		return fmt.Errorf("expected Software Renderer, got %s — the explicit BackendsSoftware selection must pick it", info.Name)
 	}
 
 	device, err := adapter.RequestDevice(nil)

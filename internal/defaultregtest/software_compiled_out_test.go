@@ -3,7 +3,10 @@
 // Copyright 2026 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-package defaultregtest
+// Package defaultregtest_test: an external test package, so this binary holds
+// the package under test and the public wgpu API and nothing else (ADR-070
+// §15.10).
+package defaultregtest_test
 
 import (
 	"errors"
