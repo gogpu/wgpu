@@ -24,11 +24,26 @@ import (
 // MapPending is not safe to share between goroutines without external
 // synchronization; the typical pattern is "create on one goroutine,
 // wait on another".
+//
+// The public wrapper (wgpu.MapPending) is cached on the object itself (Pub),
+// so a steady-state MapAsync cycle allocates neither the handle nor its
+// wrapper.
 type MapPending struct {
 	buf      *Buffer
 	waiter   *core.MapWaiter
 	resolved bool
 	err      error
+
+	// Pub caches the public wrapper built over this pooled object, so
+	// steady-state MapAsync reuses one wrapper instead of allocating one per
+	// call (ADR-070 S1 F1).
+	//
+	// Synchronization: sync.Pool's Get/Put is the happens-before edge. The
+	// slot is written once per pooled object, by the goroutine that acquires
+	// it, and read back by the next owner after the pool handover; an object
+	// has exactly one owner between Get and Put, so a plain field is enough
+	// and no atomic is needed. release leaves it set — see the note there.
+	Pub any
 }
 
 var mapPendingPool = sync.Pool{
@@ -48,6 +63,10 @@ func (p *MapPending) release() {
 	if p == nil {
 		return
 	}
+	// Only the per-mapping fields are cleared. Pub is deliberately left set:
+	// the pooled object and its cached public wrapper are reused together, so
+	// zeroing the struct on the Put path would drop the wrapper and bring the
+	// per-call allocation back (ADR-070 S1 F1).
 	p.buf = nil
 	p.waiter = nil
 	p.resolved = false
@@ -63,9 +82,9 @@ func (p *MapPending) release() {
 //   - (true, err)    — mapping failed; the buffer is back in the Unmapped
 //     state and err describes why.
 //
-// After Status returns ready=true the MapPending is automatically
-// returned to the pool; subsequent calls are safe but always return the
-// cached (true, err) pair.
+// Status never returns the object to the pool. The handle returns to the
+// pool only via Release; until then subsequent Status calls are safe and
+// return the cached (true, err) pair once the mapping has resolved.
 func (p *MapPending) Status() (ready bool, err error) {
 	if p == nil || p.waiter == nil {
 		return true, ErrMapCanceled

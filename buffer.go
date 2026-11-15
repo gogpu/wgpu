@@ -67,7 +67,14 @@ func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error
 	if err != nil {
 		return nil, err
 	}
-	return &MapPending{impl: pending}, nil
+	// The implementation handle is pooled; cache the public wrapper on it so
+	// steady-state MapAsync allocates nothing (ADR-070 S1 F1).
+	if cached, ok := pending.Pub.(*MapPending); ok {
+		return cached, nil
+	}
+	wrapper := &MapPending{impl: pending}
+	pending.Pub = wrapper
+	return wrapper, nil
 }
 
 // MappedRange returns a safe view over the mapped region [offset, offset+size).
@@ -79,7 +86,15 @@ func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &MappedRange{impl: mapped}, nil
+	// Same contract as MapAsync: the wrapper is cached per pooled object, so
+	// two simultaneous live ranges (two pooled objects) still get two
+	// wrappers (ADR-070 S1 F1).
+	if cached, ok := mapped.Pub.(*MappedRange); ok {
+		return cached, nil
+	}
+	wrapper := &MappedRange{impl: mapped}
+	mapped.Pub = wrapper
+	return wrapper, nil
 }
 
 // Unmap releases the current mapping and invalidates all outstanding

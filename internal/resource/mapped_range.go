@@ -35,19 +35,33 @@ import (
 // MappedRange instances are pooled via sync.Pool for zero-allocation
 // steady-state use. Callers that care about allocation counts should
 // call Release() after consuming Bytes().
+//
+// The public wrapper (wgpu.MappedRange) is cached on the object itself (Pub),
+// so a steady-state map/range cycle allocates neither the handle nor its
+// wrapper.
 type MappedRange struct {
 	buf    *Buffer
 	offset uint64         // user-visible offset within the buffer
 	size   uint64         // length of this range
 	gen    uint64         // buffer generation captured at creation
 	data   unsafe.Pointer // pointer to byte 0 of this range
+
+	// Pub caches the public wrapper built over this pooled object; see
+	// MapPending.Pub for the synchronization argument. It is per pooled
+	// object, never per buffer: two simultaneous live ranges are two pooled
+	// objects and therefore two wrappers. It is never cleared on Release, so
+	// a release/acquire cycle reuses one wrapper (ADR-070 S1 F1).
+	Pub any
 }
 
 var mappedRangePool = sync.Pool{
 	New: func() any { return &MappedRange{} },
 }
 
-// acquireMappedRange fetches a zeroed MappedRange from the pool.
+// acquireMappedRange fetches a MappedRange from the pool. The caller sets
+// only the mapping fields; Pub (the cached public wrapper) is retained across
+// reuse — zeroing the struct here, as in `*m = MappedRange{}`, would discard
+// the wrapper and bring the per-call allocation back (ADR-070 S1 F1).
 func acquireMappedRange() *MappedRange {
 	return mappedRangePool.Get().(*MappedRange)
 }
@@ -116,6 +130,8 @@ func (m *MappedRange) Release() {
 	if m == nil {
 		return
 	}
+	// Pub is deliberately left set: the pooled object and its cached public
+	// wrapper are reused together (ADR-070 S1 F1). See acquireMappedRange.
 	m.buf = nil
 	m.data = nil
 	m.offset = 0
