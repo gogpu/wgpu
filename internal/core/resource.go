@@ -109,10 +109,13 @@ type Device struct {
 	destroyQueue *DestroyQueue
 
 	// pendingMapTrackerSlot holds a lazily-allocated deviceMapTracker
-	// (FEAT-WGPU-MAPPING-001) through an indirection so that the outer
-	// Device struct remains copyable (the legacy ID-based Hub API still
-	// passes Device by value). The slot wraps an atomic.Pointer.
-	pendingMapTrackerSlot *mapTrackerSlot
+	// (FEAT-WGPU-MAPPING-001) as an unsafe.Pointer updated only through
+	// atomic load/CAS. The indirection keeps the outer Device struct copyable
+	// (the legacy ID-based Hub API still passes Device by value), and the
+	// atomic access makes the lazy first use race-free: concurrent first
+	// registrations must all observe one tracker, or a registration can land
+	// in a tracker nobody polls and its map never resolves.
+	pendingMapTrackerSlot unsafe.Pointer // *deviceMapTracker
 
 	// === Common fields ===
 

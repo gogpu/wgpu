@@ -8,6 +8,7 @@ package core
 import (
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/gogpu/wgpu/internal/hal"
 )
@@ -40,13 +41,6 @@ type deviceMapTracker struct {
 	maxKnownSub uint64               // highest submission index seen via Register
 }
 
-// mapTrackerSlot holds an atomic.Pointer[deviceMapTracker]. The outer
-// Device holds *mapTrackerSlot (copyable), and the atomic lives inside
-// the slot for lock-free lazy initialization.
-type mapTrackerSlot struct {
-	ptr atomic.Pointer[deviceMapTracker]
-}
-
 func newDeviceMapTracker() *deviceMapTracker {
 	return &deviceMapTracker{
 		buckets: make(map[uint64][]*Buffer, 8),
@@ -57,19 +51,15 @@ func newDeviceMapTracker() *deviceMapTracker {
 // first use via compare-and-swap. Called from RegisterPendingMap;
 // PollMaps can then observe the already-initialized pointer.
 func (d *Device) mapTracker() *deviceMapTracker {
-	slot := d.pendingMapTrackerSlot
-	if slot == nil {
-		slot = &mapTrackerSlot{}
-		d.pendingMapTrackerSlot = slot
-	}
-	if t := slot.ptr.Load(); t != nil {
-		return t
+	if p := atomic.LoadPointer(&d.pendingMapTrackerSlot); p != nil {
+		return (*deviceMapTracker)(p)
 	}
 	fresh := newDeviceMapTracker()
-	if slot.ptr.CompareAndSwap(nil, fresh) {
+	//nolint:gosec // deliberate: the slot stays a plain word so Device remains copyable for RegisterDevice's value semantics; it only ever holds a *deviceMapTracker
+	if atomic.CompareAndSwapPointer(&d.pendingMapTrackerSlot, nil, unsafe.Pointer(fresh)) {
 		return fresh
 	}
-	return slot.ptr.Load()
+	return (*deviceMapTracker)(atomic.LoadPointer(&d.pendingMapTrackerSlot))
 }
 
 // RegisterPendingMap queues a Buffer for map resolution after the GPU
@@ -105,10 +95,10 @@ func (d *Device) RegisterPendingMap(submissionIndex uint64, buf *Buffer) {
 // otherwise. Read-only accessor used by PollMaps / HasPendingMaps /
 // MaxKnownSubmissionIndex.
 func (d *Device) loadMapTracker() *deviceMapTracker {
-	if d.pendingMapTrackerSlot == nil {
-		return nil
+	if p := atomic.LoadPointer(&d.pendingMapTrackerSlot); p != nil {
+		return (*deviceMapTracker)(p)
 	}
-	return d.pendingMapTrackerSlot.ptr.Load()
+	return nil
 }
 
 // PollMaps resolves every pending map whose submission index is <=
