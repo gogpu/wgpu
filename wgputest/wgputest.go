@@ -15,6 +15,11 @@
 // pooled command encoders, pending-write flushes — never appears. Validation
 // is unchanged.
 //
+// Counts reports the totals per record kind in constant time, for a test that
+// only compares numbers. NewDetachedTexture builds a texture handle that
+// carries its descriptor's metadata and no backend object, for logic that only
+// inspects the handle.
+//
 // Only accepted calls are recorded: a call the public method rejects with a
 // validation error changes no state and leaves no record, while every action
 // the call actually applied (including a bind whose usage merge reports an
@@ -97,6 +102,23 @@ func (r *Recorder) Reset() {
 	r.mu.Lock()
 	r.trace = Trace{}
 	r.mu.Unlock()
+}
+
+// Counts is the number of records of each kind collected so far. The zero
+// value is all zeros. A test that only compares totals — a submit counter, a
+// benchmark's encoders per frame — uses Counts instead of cloning the whole
+// Trace on every call.
+type Counts struct {
+	Encoders, Buffers, Textures, TextureViews int
+	VertexBuffers, IndexBuffers, BindGroups   int
+	Passes, Draws, DrawsIndexed, Submits      int
+}
+
+// Counts returns the number of records of each kind without copying them.
+func (r *Recorder) Counts() Counts {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.trace.counts()
 }
 
 func (r *Recorder) record(fn func(*Trace)) {
@@ -225,6 +247,24 @@ type Submit struct {
 	Seq             uint64
 	SubmissionIndex uint64
 	CommandBuffers  int
+}
+
+// counts derives the totals from the slices' lengths, which is constant time:
+// Counts must stay cheap enough for a benchmark's timed loop.
+func (t *Trace) counts() Counts {
+	return Counts{
+		Encoders:      len(t.Encoders),
+		Buffers:       len(t.Buffers),
+		Textures:      len(t.Textures),
+		TextureViews:  len(t.TextureViews),
+		VertexBuffers: len(t.VertexBuffers),
+		IndexBuffers:  len(t.IndexBuffers),
+		BindGroups:    len(t.BindGroups),
+		Passes:        len(t.Passes),
+		Draws:         len(t.Draws),
+		DrawsIndexed:  len(t.DrawsIndexed),
+		Submits:       len(t.Submits),
+	}
 }
 
 func (t *Trace) clone() Trace {

@@ -19,6 +19,17 @@ type Texture struct {
 // Format returns the texture format.
 func (t *Texture) Format() gputypes.TextureFormat { return t.format }
 
+// newDetachedTexture returns a texture that carries the descriptor's format
+// and no backend object. It backs the public wgputest.NewDetachedTexture; see
+// newDetachedTextureFactory. desc may be nil.
+func newDetachedTexture(desc *TextureDescriptor) *Texture {
+	t := &Texture{}
+	if desc != nil {
+		t.format = desc.Format
+	}
+	return t
+}
+
 // Release destroys the texture.
 func (t *Texture) Release() {
 	if t.released {
