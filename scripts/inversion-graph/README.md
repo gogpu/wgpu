@@ -146,6 +146,12 @@ in the same commit as the change that caused it.
 dated HEAD `84e547f` snapshot, a re-run at a later head is expected to differ, and the pin is refreshed only as a
 deliberate re-baseline, never as a gate.
 
+**Note (2026-11-15, S0.7d):** `map.awk` now maps the public thin `hal` to `hal`; before the fix it mapped it to
+`internal/hal`, merging the declarations-only leaf with the backend tree. `internal/hal/**` maps to itself, and the
+legacy pre-A `hal/**` paths still map under `internal/hal/**`, so older rows resolve. The table above and the pinned
+`reference/` tree were produced before the fix and stay as the dated snapshot (ADR-070 §14.1, §15.2); a run at the
+current head reports the corrected numbers.
+
 ## claims.tsv
 
 `claims.tsv` is the machine-readable claim of every golden row by the B step that creates it (ADR-070 §15.2). It sits
