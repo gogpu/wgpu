@@ -1,3 +1,5 @@
+//go:build !(js && wasm)
+
 // Command sw-test validates the software rasterizer backend.
 // Headless — no window needed. Creates instance, adapter, device,
 // compiles a shader, and creates a render pipeline to verify the

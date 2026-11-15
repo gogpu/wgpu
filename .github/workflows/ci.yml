@@ -329,8 +329,13 @@ jobs:
       run: |
         go vet -tags rust $(go list -tags rust ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
 
-    # js/wasm is not wired here yet: `GOOS=js GOARCH=wasm go vet ./...` stops on
-    # cmd/sw-test, which imports internal/hal/software (no js/wasm files).
+    # Compiles the wasm-tagged files, tests included (hal_interop_browser_test.go
+    # and the other wasm-tagged tests); no other job type-checks them.
+    - name: Run go vet for js/wasm
+      env:
+        GOOS: js
+        GOARCH: wasm
+      run: go vet ./...
 
   # Lint the other desktop targets. The job above type-checks only the linux
   # files, so code under darwin or windows build tags (internal/hal/metal, internal/hal/dx12,
