@@ -12,11 +12,20 @@ var (
 	// ErrReleased is returned when operating on a released resource.
 	ErrReleased = errors.New("wgpu: resource already released")
 
-	// ErrNoAdapters is returned when no GPU adapters are found.
-	ErrNoAdapters = errors.New("wgpu: no GPU adapters available")
+	// Adapter-selection sentinels (ADR-083 §2.2). This build does not link
+	// internal/core, and the wgpu-native binding reports its own errors, so they
+	// are declared here with the messages of the native build. This build never
+	// returns them; they exist for source compatibility.
+	//
+	// ErrNoBackendRegistered: the requested backend mask selects no registered
+	// backend (compiled out or excluded).
+	ErrNoBackendRegistered = errors.New("wgpu: no backend registered for the requested mask (compiled out or excluded)")
 
-	// ErrNoBackends is returned when no backends are registered.
-	ErrNoBackends = errors.New("wgpu: no backends registered (import a backend package)")
+	// ErrNoHardwareAdapter: backends are registered but none produced an adapter.
+	ErrNoHardwareAdapter = errors.New("wgpu: no hardware adapter available")
+
+	// ErrNoFallbackAdapter: ForceFallbackAdapter requested, no CPU adapter exists.
+	ErrNoFallbackAdapter = errors.New("wgpu: no fallback adapter available")
 
 	// ErrDeviceLost is returned when the GPU device is lost.
 	ErrDeviceLost = errors.New("wgpu: device lost")

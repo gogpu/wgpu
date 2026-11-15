@@ -68,6 +68,14 @@ type Instance struct {
 	// useMock indicates whether this instance was explicitly created with mock
 	// adapters through NewInstanceWithMock.
 	useMock bool
+
+	// maskSelectedBackend records whether the descriptor's backend mask admitted
+	// at least one registered backend provider during enumeration. It separates
+	// ADR-083 §2.2's two no-adapter sentinels: a mask that admitted nothing means
+	// the requested backend is compiled out or excluded (ErrNoBackendRegistered),
+	// while an admitted backend that produced no adapter means this machine has
+	// none (ErrNoHardwareAdapter).
+	maskSelectedBackend bool
 }
 
 // HALInstanceEntry associates an enabled backend with its HAL instance.
@@ -164,6 +172,13 @@ func (i *Instance) enumerateRealAdapters(halDesc *hal.InstanceDescriptor) {
 
 	// Get backend providers filtered by the enabled backends mask
 	providers := FilterBackendsByMask(halDesc.Backends)
+
+	// Remember whether the mask admitted any registered backend: RequestAdapter
+	// needs it to tell "compiled out or excluded" from "no adapter on this
+	// machine" (ADR-083 §2.2).
+	i.mu.Lock()
+	i.maskSelectedBackend = len(providers) > 0
+	i.mu.Unlock()
 
 	hub := GetGlobal().Hub()
 
@@ -306,6 +321,10 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 	adapterIDs := append([]AdapterID(nil), i.adapters...)
 	i.mu.RUnlock()
 
+	if len(adapterIDs) == 0 {
+		return AdapterID{}, i.noAdapterError("")
+	}
+
 	return selectAdapterIDs(options, adapterIDs)
 }
 
@@ -328,7 +347,10 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 // Ties keep the candidate order.
 func selectAdapterIDs(options *gputypes.RequestAdapterOptions, adapterIDs []AdapterID) (AdapterID, error) {
 	if len(adapterIDs) == 0 {
-		return AdapterID{}, fmt.Errorf("no adapters available")
+		// RequestAdapter maps an empty adapter list to ErrNoBackendRegistered
+		// first when the mask admitted no backend; a direct call has no mask to
+		// consult, so it reports the registered-backend-without-adapter case.
+		return AdapterID{}, ErrNoHardwareAdapter
 	}
 
 	rank := func(info *gputypes.AdapterInfo) int { return autoAdapterRank(info, gputypes.PowerPreferenceNone) }
@@ -357,9 +379,9 @@ func selectAdapterIDs(options *gputypes.RequestAdapterOptions, adapterIDs []Adap
 		return best, nil
 	}
 	if options != nil && options.ForceFallbackAdapter {
-		return AdapterID{}, fmt.Errorf("no software/fallback adapter available")
+		return AdapterID{}, ErrNoFallbackAdapter
 	}
-	return AdapterID{}, fmt.Errorf("no adapter matches the requested options")
+	return AdapterID{}, fmt.Errorf("%w: no adapter matches the requested options", ErrNoHardwareAdapter)
 }
 
 // Adapter ranks for selectAdapterIDs; a lower rank wins.
@@ -521,7 +543,7 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 	}
 
 	if len(candidates) == 0 {
-		return AdapterID{}, fmt.Errorf("no adapters compatible with surface")
+		return AdapterID{}, i.noAdapterError("no adapters compatible with surface")
 	}
 	selectedID, err := selectAdapterIDs(options, candidates)
 	for _, qualifiedID := range qualifiedIDs {

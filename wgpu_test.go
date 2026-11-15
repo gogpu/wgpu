@@ -1068,14 +1068,15 @@ func TestSurfacePresentNilTexture(t *testing.T) {
 }
 
 func TestErrorSentinels(t *testing.T) {
-	// All three sentinel errors must be distinct.
+	// The public sentinel errors must be pairwise distinct.
 	sentinels := []struct {
 		name string
 		err  error
 	}{
 		{"ErrReleased", wgpu.ErrReleased},
-		{"ErrNoAdapters", wgpu.ErrNoAdapters},
-		{"ErrNoBackends", wgpu.ErrNoBackends},
+		{"ErrNoBackendRegistered", wgpu.ErrNoBackendRegistered},
+		{"ErrNoHardwareAdapter", wgpu.ErrNoHardwareAdapter},
+		{"ErrNoFallbackAdapter", wgpu.ErrNoFallbackAdapter},
 	}
 
 	for i, a := range sentinels {
@@ -1101,8 +1102,9 @@ func TestErrorSentinelMessages(t *testing.T) {
 		wantSub string
 	}{
 		{"ErrReleased", wgpu.ErrReleased, "released"},
-		{"ErrNoAdapters", wgpu.ErrNoAdapters, "adapter"},
-		{"ErrNoBackends", wgpu.ErrNoBackends, "backend"},
+		{"ErrNoBackendRegistered", wgpu.ErrNoBackendRegistered, "backend"},
+		{"ErrNoHardwareAdapter", wgpu.ErrNoHardwareAdapter, "adapter"},
+		{"ErrNoFallbackAdapter", wgpu.ErrNoFallbackAdapter, "fallback"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -40,11 +40,24 @@ var (
 	// ErrReleased is returned when operating on a released resource.
 	ErrReleased = errors.New("wgpu: resource already released")
 
-	// ErrNoAdapters is returned when no GPU adapters are found.
-	ErrNoAdapters = errors.New("wgpu: no GPU adapters available")
+	// Adapter-selection sentinels (ADR-083 §2.2). The selection paths return them
+	// from internal/core; binding the same values here keeps errors.Is working
+	// through the public API. Each condition names exactly one of them:
+	//
+	// ErrNoBackendRegistered is returned by Instance.RequestAdapter when the
+	// requested backend mask selects no registered backend: the backend is
+	// compiled out of the build or excluded from the mask.
+	ErrNoBackendRegistered = core.ErrNoBackendRegistered
 
-	// ErrNoBackends is returned when no backends are registered.
-	ErrNoBackends = errors.New("wgpu: no backends registered (import a backend package)")
+	// ErrNoHardwareAdapter is returned by Instance.RequestAdapter when backends
+	// are registered for the requested mask but none produced an adapter on this
+	// machine, an adapter not compatible with the requested surface included.
+	ErrNoHardwareAdapter = core.ErrNoHardwareAdapter
+
+	// ErrNoFallbackAdapter is returned by Instance.RequestAdapter with
+	// ForceFallbackAdapter set when no CPU adapter is available, the software
+	// backend included.
+	ErrNoFallbackAdapter = core.ErrNoFallbackAdapter
 )
 
 // Draw-time validation sentinel errors.
