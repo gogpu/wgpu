@@ -174,9 +174,9 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      # Skip hal/vulkan/vk and hal/gles due to intentional unsafe.Pointer FFI usage
+      # Skip internal/hal/vulkan/vk and internal/hal/gles due to intentional unsafe.Pointer FFI usage
       run: |
-        go vet $(go list ./... | grep -v '/hal/vulkan/vk$' | grep -v '/hal/gles')
+        go vet $(go list ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
 
     # The build users ship: CGO_ENABLED=0, so goffi runs its fakecgo path.
     - name: Run tests
@@ -253,7 +253,7 @@ jobs:
       run: go mod download
 
     - name: Build GLES backend
-      run: go build -v ./hal/gles/...
+      run: go build -v ./internal/hal/gles/...
 
     - name: Run GLES integration test (surfaceless)
       env:
@@ -269,7 +269,7 @@ jobs:
         echo "WAYLAND_DISPLAY='$WAYLAND_DISPLAY'"
         echo "LIBGL_ALWAYS_SOFTWARE='$LIBGL_ALWAYS_SOFTWARE'"
         echo ""
-        go test -v -tags integration ./hal/gles/...
+        go test -v -tags integration ./internal/hal/gles/...
 
     - name: Run GLES integration test on an OpenGL ES context (surfaceless)
       # Mesa offers desktop GL, so the backend never takes its ES paths here
@@ -281,7 +281,7 @@ jobs:
         LIBGL_ALWAYS_SOFTWARE: "1"
         MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
         WGPU_REQUIRE: "gles"
-      run: go test -v -tags "integration wgpu_gles_force_es" ./hal/gles/...
+      run: go test -v -tags "integration wgpu_gles_force_es" ./internal/hal/gles/...
 
     - name: Test EGL library loading
       run: |
@@ -321,8 +321,8 @@ jobs:
         args: --timeout=5m
 
   # Lint the other desktop targets. The job above type-checks only the linux
-  # files, so code under darwin or windows build tags (hal/metal, hal/dx12,
-  # hal/gles/wgl) is never linted otherwise. The code is pure Go
+  # files, so code under darwin or windows build tags (internal/hal/metal, internal/hal/dx12,
+  # internal/hal/gles/wgl) is never linted otherwise. The code is pure Go
   # (CGO_ENABLED=0), so GOOS/GOARCH on a linux runner load exactly that
   # target's files; a target that fails to type-check exits non-zero, never
   # "0 issues". One GOARCH per GOOS is enough: the module has no arch-specific

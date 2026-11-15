@@ -16,9 +16,9 @@ coverage:
 
 # Ignore paths from coverage calculation.
 # HAL backends need real GPU hardware and cannot be unit-tested meaningfully.
-# Use ** globs so nested packages (hal/vulkan/..., etc.) are excluded from patch.
+# Use ** globs so nested packages (internal/hal/vulkan/..., etc.) are excluded from patch.
 ignore:
-  - "hal/**"
+  - "internal/hal/**"
   - "examples/**"
   - "cmd/**"
   - "tmp/**"

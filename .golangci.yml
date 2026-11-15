@@ -145,7 +145,7 @@ linters:
       # maintidx excluded: HAL entry points (BeginRenderPass, Submit, present)
       # aggregate platform-specific logic that is clearer as a single flow
       # than split across multiple indirection layers.
-      - path: hal/.*\.go
+      - path: internal/hal/.*\.go
         linters:
           - gocyclo
           - gocognit
@@ -158,13 +158,13 @@ linters:
       # Metal queue (//go:build darwin): nolintlint false positive on
       # //nolint:unparam — unparam doesn't trigger on cross-GOOS lint without
       # full darwin type info (golangci-lint#3833).
-      - path: hal/metal/queue\.go
+      - path: internal/hal/metal/queue\.go
         linters:
           - nolintlint
         text: "unparam"
 
       # GL context - requires unsafe for C interop
-      - path: hal/gles/gl/context\.go
+      - path: internal/hal/gles/gl/context\.go
         linters:
           - govet
         text: "possible misuse of unsafe.Pointer"
@@ -173,14 +173,14 @@ linters:
       # argument (glTexSubImage2D pixels with a pixel unpack buffer bound),
       # so the offset is passed as unsafe.Pointer(uintptr(offset)). It is never
       # dereferenced on the Go side.
-      - path: hal/gles/command\.go
+      - path: internal/hal/gles/command\.go
         linters:
           - govet
         text: "possible misuse of unsafe.Pointer"
 
       # GL context - syscall returns are intentionally unchecked
       # (GL errors are checked via glGetError, not syscall return values)
-      - path: hal/gles/gl/context\.go
+      - path: internal/hal/gles/gl/context\.go
         linters:
           - errcheck
 
@@ -218,13 +218,13 @@ linters:
       # DX12 PSO cache - createGraphicsPSO/createComputePSO are structurally
       # similar but handle different COM types (ID3D12GraphicsPipelineState vs
       # ID3D12ComputePipelineState). Duplication is inherent to the D3D12 API.
-      - path: hal/dx12/pso_cache\.go
+      - path: internal/hal/dx12/pso_cache\.go
         linters:
           - dupl
 
       # DX12 COM bindings - Windows API naming conventions preserved
       # D3D12_* types match the Windows SDK headers exactly for documentation cross-reference
-      - path: hal/dx12/d3d12/.*\.go
+      - path: internal/hal/dx12/d3d12/.*\.go
         linters:
           - revive
           - errname
@@ -235,7 +235,7 @@ linters:
           - dupl
 
       # DXGI bindings - Windows API naming conventions
-      - path: hal/dx12/dxgi/.*\.go
+      - path: internal/hal/dx12/dxgi/.*\.go
         linters:
           - revive
           - errname
@@ -246,7 +246,7 @@ linters:
           - dupl
 
       # DXC (shader compiler) bindings
-      - path: hal/dx12/dxc/.*\.go
+      - path: internal/hal/dx12/dxc/.*\.go
         linters:
           - revive
           - errname
@@ -260,7 +260,7 @@ linters:
       # empty on other platforms. The `unused` linter on Linux sees it as unused.
       # macOS software blit — self-contained ObjC/CoreGraphics/Metal bindings
       # (contributor @k-chimi, PR #187). Same exclusion pattern as DX12 COM bindings.
-      - path: hal/software/blit_darwin\.go
+      - path: internal/hal/software/blit_darwin\.go
         linters:
           - errcheck
           - govet
@@ -270,11 +270,11 @@ linters:
           - unconvert
           - unused
 
-      - path: hal/software/blit_other\.go
+      - path: internal/hal/software/blit_other\.go
         linters:
           - unused
         text: "platformBlit"
-      - path: hal/software/resource\.go
+      - path: internal/hal/software/resource\.go
         linters:
           - unused
         text: "platformBlit"
