@@ -125,7 +125,7 @@ func TestInstanceReleaseDestroysDevicesBeforeSurfaces(t *testing.T) {
 	if !slices.Equal(events, want) {
 		t.Fatalf("release events = %v, want %v", events, want)
 	}
-	if surface.HAL() != nil {
+	if surface.core.RawSurface() != nil {
 		t.Fatal("retained surface exposed HAL after instance release")
 	}
 

@@ -172,7 +172,7 @@ func TestEnsureHALSurfaceSwitchesToRetainedBackendSurface(t *testing.T) {
 	if err := surface.ensureHALSurface(gputypes.BackendGL); err != nil {
 		t.Fatalf("ensureHALSurface: %v", err)
 	}
-	if got := surface.HAL(); got != second {
+	if got := surface.core.RawSurface(); got != second {
 		t.Fatalf("active HAL surface = %v, want retained GL surface %v", got, second)
 	}
 	if surface.currentBackend != gputypes.BackendGL {
@@ -287,7 +287,7 @@ func TestTypedSurfaceCreationPathsUseBackendMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSurface: %v", err)
 	}
-	if legacy.HAL() == nil {
+	if legacy.core.RawSurface() == nil {
 		t.Fatal("legacy surface has no HAL surface")
 	}
 	legacy.Release()

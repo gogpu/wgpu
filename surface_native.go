@@ -641,15 +641,6 @@ func (s *Surface) ensureHALSurface(backend gputypes.Backend) error {
 	return nil
 }
 
-// HAL returns the underlying HAL surface for backward compatibility.
-// Prefer using Surface methods instead of direct HAL access.
-func (s *Surface) HAL() hal.Surface {
-	if s == nil || s.released || s.core == nil {
-		return nil
-	}
-	return s.core.RawSurface()
-}
-
 // halSurfaceForBackend returns the retained surface that belongs to an
 // adapter's backend. Legacy surfaces wrapped from one HAL handle have no
 // backend map, so they retain the historical active-surface fallback.

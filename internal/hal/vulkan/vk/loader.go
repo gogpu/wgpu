@@ -193,6 +193,19 @@ func GetDeviceProcAddr(device Device, name string) unsafe.Pointer {
 	return result
 }
 
+// InstanceProcAddr returns the loader's PFN_vkGetInstanceProcAddr as a
+// uintptr, for the public HAL interop surface. It is 0 before Init.
+func InstanceProcAddr() uintptr {
+	return uintptr(vkGetInstanceProcAddr)
+}
+
+// DeviceProcAddr returns the loader's PFN_vkGetDeviceProcAddr as a uintptr. It
+// is set by SetDeviceProcAddr after vkCreateInstance (some drivers, Intel's
+// among them, do not resolve it with a null instance) and is 0 before that.
+func DeviceProcAddr() uintptr {
+	return uintptr(vkGetDeviceProcAddr)
+}
+
 // Close releases the Vulkan library.
 func Close() error {
 	if vulkanLib != nil {
