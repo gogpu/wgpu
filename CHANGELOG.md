@@ -44,6 +44,14 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   byte-identical against v0.22.0 — and this branch's full suite; the release tag adds only the release-prep docs
   over the gated candidate.
 
+### Removed
+
+- **`(*Surface).SetPrepareFrame`** leaves the public API with the internal-layout change (ADR-070). No consumer
+  used it — a grep over the ecosystem with wgpu excluded found zero hits (2026-11-15) — and with the setter gone
+  there was no production path to register the hook, so the internal mechanism went with it: `internal/core`'s
+  `SetPrepareFrame`, `PrepareFrameFunc`, the `prepareFrame` field and `applyPrepareFrame`, and the two core tests
+  that covered them.
+
 ## [0.34.15] - 2026-11-14
 
 A Vulkan present and device-loss patch: the present barrier is tracked like every other submission, every acquired

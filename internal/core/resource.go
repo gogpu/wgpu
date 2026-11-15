@@ -1765,11 +1765,6 @@ const (
 	SurfaceStateAcquired
 )
 
-// PrepareFrameFunc is a platform hook called before acquiring a surface texture.
-// It returns the current surface dimensions and whether they changed since the last call.
-// If changed is true, the surface will be reconfigured with the new dimensions before acquiring.
-type PrepareFrameFunc func() (width, height uint32, changed bool)
-
 // Surface represents a rendering surface with HAL integration.
 //
 // Surface wraps a HAL surface handle. Unlike other resources, surfaces are
@@ -1803,9 +1798,6 @@ type Surface struct {
 	// wrapper from becoming valid after a later acquire.
 	acquisition     uint64
 	nextAcquisition uint64
-
-	// prepareFrame is an optional platform hook called before acquiring a texture.
-	prepareFrame PrepareFrameFunc
 
 	// mu protects state transitions.
 	mu sync.Mutex

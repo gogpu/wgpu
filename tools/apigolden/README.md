@@ -69,17 +69,27 @@ layoutcheck gate then uses them.
 
 ## Baselines
 
-Generated at `main` **4577b0e**.
+The comparison point for the v0.35.0 window is `a3705c2` — the A1 re-take after the seam patch (PR #410); the
+earlier pre-window snapshot at `4577b0e` is superseded.
 
-| File | Context | Packages | Identifiers | Bytes | Lines |
-|---|---|---:|---:|---:|---:|
-| `testdata/api_windows.txt` | windows/amd64 | 23 | 9,107 | 1,037,893 | 31,666 |
-| `testdata/api_rust.txt` | windows/amd64 `-tags rust` | 23 | 9,095 | 1,034,922 | 31,602 |
-| `testdata/api_wasm.txt` | js/wasm | 8 | 5,832 | 589,610 | 20,414 |
+| File | Context | Packages | Identifiers |
+|---|---|---:|---:|
+| `testdata/api_windows.txt` | windows/amd64 | 23 | 9,109 |
+| `testdata/api_rust.txt` | windows/amd64 `-tags rust` | 23 | 9,097 |
+| `testdata/api_wasm.txt` | js/wasm | 8 | 5,834 |
 
-About 7,300 of the windows identifiers are the generated binding packages `hal/vulkan/vk` (6,270 declaration lines)
-and `hal/dx12/d3d12` (1,017). They are public today and become internal in the layout change, so the first delta is
-large and expected: after it the golden describes the root package, the thin `hal` and `wgputest`.
+The files in `testdata/` are the post-A golden: 3 packages and 258 / 246 / 241 identifiers, the same numbers the
+Floors table pins. About 7,300 of the `a3705c2` windows identifiers were the generated binding packages
+`hal/vulkan/vk` (6,270 declaration lines) and `hal/dx12/d3d12` (1,017), which became internal in the layout change,
+so the first delta is large and expected.
+
+A hunk walk of `a3705c2` against the post-A files gives 11 / 8 / 8 hunks with default context and 40 / 32 / 27 with
+`-U0` (`-U0` splits adjacent blocks that the default context merges):
+
+```sh
+git diff a3705c2..f3541ed -- tools/apigolden/testdata/api_windows.txt | grep -c '^@@'    # 11 (rust 8, wasm 8)
+git diff -U0 a3705c2..f3541ed -- tools/apigolden/testdata/api_windows.txt | grep -c '^@@' # 40 (rust 32, wasm 27)
+```
 
 ## Honest limits
 

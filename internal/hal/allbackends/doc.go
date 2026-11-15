@@ -3,43 +3,46 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-// Package allbackends imports all HAL backend implementations.
+// Package allbackends registers every HAL backend implemented in this module.
 //
-// Import this package for side effects to register all available backends:
+// It is this repository's own registration convenience, for its examples and
+// tests. Since ADR-083 the platform backends and the software backend are
+// registered by default, so a user of the public API needs no blank import.
 //
-//	import (
-//		_ "github.com/gogpu/wgpu/hal/allbackends"
-//	)
-//
-// This will register:
+// The package lives at github.com/gogpu/wgpu/internal/hal/allbackends, so it is
+// importable only inside this module. Importing it for side effects registers:
 //   - Vulkan backend (Windows, Linux, macOS; Android/arm64 preview)
 //   - Metal backend (macOS; iOS untested)
 //   - DX12 backend (Windows)
 //   - OpenGL ES backend (Windows, Linux)
 //   - Software backend (all supported native platforms)
 //
-// After importing, use hal.GetBackend or hal.SelectBestBackend to access backends.
+// After importing, reach the backends through internal/hal (GetBackend,
+// SelectBestBackend). The no-op provider is not registered here; import
+// github.com/gogpu/wgpu/internal/hal/noop explicitly when a test needs it.
 //
 // Build tags control which backends are available:
 //   - Desktop: platform GPU backends plus software fallback
 //   - Android/arm64: Vulkan only
 //
-// The no-op provider is not registered by this package. Import
-// github.com/gogpu/wgpu/hal/noop explicitly when it is required for tests.
-//
 // Example usage:
 //
 //	import (
-//		_ "github.com/gogpu/wgpu/hal/allbackends"
-//		"github.com/gogpu/wgpu/core"
+//		_ "github.com/gogpu/wgpu/internal/hal/allbackends"
+//		"github.com/gogpu/wgpu"
 //	)
 //
 //	func main() {
-//		// Instance will now enumerate real GPUs
-//		instance := core.NewInstance(nil)
-//		adapters := instance.EnumerateAdapters()
-//		for _, a := range adapters {
-//			fmt.Println(a) // Real GPU adapters
+//		instance, err := wgpu.CreateInstance(nil)
+//		if err != nil {
+//			panic(err)
 //		}
+//		defer instance.Release()
+//
+//		adapter, err := instance.RequestAdapter(nil)
+//		if err != nil {
+//			panic(err)
+//		}
+//		_ = adapter // a real GPU adapter
 //	}
 package allbackends

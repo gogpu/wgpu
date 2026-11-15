@@ -566,55 +566,6 @@ func TestSurfaceConfigureWhileAcquired(t *testing.T) {
 	}
 }
 
-func TestSurfacePrepareFrame(t *testing.T) {
-	surface, device, _ := newTestSurface(t)
-	config := testSurfaceConfig()
-
-	if err := surface.Configure(device, config); err != nil {
-		t.Fatalf("Configure: %v", err)
-	}
-
-	called := false
-	surface.SetPrepareFrame(func() (uint32, uint32, bool) {
-		called = true
-		return 800, 600, false // no change
-	})
-
-	_, err := surface.AcquireTexture(nil)
-	if err != nil {
-		t.Fatalf("AcquireTexture: %v", err)
-	}
-
-	if !called {
-		t.Error("PrepareFrame hook was not called")
-	}
-}
-
-func TestSurfacePrepareFrameReconfigure(t *testing.T) {
-	surface, device, _ := newTestSurface(t)
-	config := testSurfaceConfig()
-
-	if err := surface.Configure(device, config); err != nil {
-		t.Fatalf("Configure: %v", err)
-	}
-
-	// PrepareFrame reports new dimensions
-	surface.SetPrepareFrame(func() (uint32, uint32, bool) {
-		return 1920, 1080, true // changed
-	})
-
-	_, err := surface.AcquireTexture(nil)
-	if err != nil {
-		t.Fatalf("AcquireTexture: %v", err)
-	}
-
-	// Config should have been updated
-	if surface.Config().Width != 1920 || surface.Config().Height != 1080 {
-		t.Errorf("config after PrepareFrame = %dx%d, want 1920x1080",
-			surface.Config().Width, surface.Config().Height)
-	}
-}
-
 func TestSurfaceDiscardTexture(t *testing.T) {
 	surface, device, _ := newTestSurface(t)
 	config := testSurfaceConfig()

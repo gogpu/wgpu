@@ -80,6 +80,10 @@ The pinned output in `reference/` holds every file a run produces, raw inputs in
 checkable end to end against the commit that pinned it. Refreshing the pin is the command in "Regenerating the
 reference" pointed at `scripts/inversion-graph/reference`, and the change goes in the same commit as what caused it.
 
+**Note (2026-11-15):** ADR-070 §15.2 supersedes "the same commit": `reference/` is the dated HEAD `84e547f`
+snapshot, and a re-run at a later head is expected to differ. Refresh the pin only as a deliberate re-baseline,
+never as a gate.
+
 ## Reference numbers
 
 Measured at the commit this directory was added; the pinned output in `reference/` is authoritative.
@@ -137,6 +141,24 @@ diff <out-dir>/summary.txt scripts/inversion-graph/reference/summary.txt
 
 Any difference outside `summary.txt` is a change in the graph, and the pinned output in `reference/` must be updated
 in the same commit as the change that caused it.
+
+**Note (2026-11-15):** the ADR-070 §15.2 rule wins over "in the same commit as the change": the pinned output is the
+dated HEAD `84e547f` snapshot, a re-run at a later head is expected to differ, and the pin is refreshed only as a
+deliberate re-baseline, never as a gate.
+
+## claims.tsv
+
+`claims.tsv` is the machine-readable claim of every golden row by the B step that creates it (ADR-070 §15.2). It sits
+next to the goldens and is part of the pinned tool set: a change to it is a claim change, reviewed like the golden.
+
+- **Header:** one `phase: open|final` line. `open` during the window — unclaimed rows are expected. The S13 sweep sets
+  `final`; from then every golden row must be claimed.
+- **Data rows:** five tab-separated columns — `golden` (`target|inverted`), `src`, `dst`, `context`
+  (`all|native|native+rust|rust|wasm`), `step` (`S1`…`S13`).
+- **Who adds rows:** the step's own commit, exactly the rows that step creates; the commit message carries the same
+  `Migrates: <src>→<dst> (<context>)` trailer as the human record. Never add another step's rows.
+- **The gate** (`internal/layoutcheck`) fails on a duplicated row, a row that names no golden row, a malformed line,
+  and — once `phase: final` — an unclaimed golden row.
 
 ## Notes
 

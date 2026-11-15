@@ -343,9 +343,6 @@ func (s *Surface) Unconfigure() {
 
 // GetCurrentTexture acquires the next texture for rendering.
 // Returns the surface texture and whether the surface is suboptimal.
-//
-// If a PrepareFrame hook is registered and reports changed dimensions,
-// the surface is automatically reconfigured before acquiring.
 func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 	if s.released {
 		return nil, false, ErrReleased
@@ -432,13 +429,6 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 	return s.core.PresentWithDamage(s.device.queue.hal, damageRects)
 }
 
-// SetPrepareFrame registers a platform hook called before each GetCurrentTexture.
-// If the hook returns changed=true with new dimensions, the surface is automatically
-// reconfigured. This is the integration point for HiDPI/DPI change handling:
-//   - macOS Metal: read CAMetalLayer.contentsScale
-//   - Windows: handle WM_DPICHANGED
-//   - Wayland: read wl_output.scale
-//
 // SetPresentsWithTransaction toggles Core Animation transaction-based present
 // on Metal surfaces. Enable during macOS live window resize so the drawable
 // swap commits atomically with the resize CA transaction (Flutter/wgpu #3756

@@ -10,8 +10,8 @@
 // # Platform Support
 //
 // Supported:
-//   - Windows (WGL) - via hal/gles/wgl package
-//   - Linux (EGL: X11, Wayland, surfaceless) - via hal/gles/egl package
+//   - Windows (WGL) - via internal/hal/gles/wgl package
+//   - Linux (EGL: X11, Wayland, surfaceless) - via internal/hal/gles/egl package
 //
 // Planned:
 //   - Android (EGL)
@@ -21,7 +21,7 @@
 //
 // The backend is organized into subpackages:
 //
-//	hal/gles/
+//	internal/hal/gles/
 //	├── gl/       - OpenGL function bindings
 //	├── wgl/      - Windows GL context management
 //	└── egl/      - EGL display and context management (Linux)
@@ -30,9 +30,9 @@
 //
 // Import this package to register the OpenGL backend:
 //
-//	import _ "github.com/gogpu/wgpu/hal/gles"
+//	import _ "github.com/gogpu/wgpu/internal/hal/gles"
 //
-// The backend is then available via hal.GetBackend(gputypes.BackendGL).
+// The backend is then available via internal/hal.GetBackend(gputypes.BackendGL).
 //
 // # OpenGL Version Requirements
 //

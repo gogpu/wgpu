@@ -36,18 +36,6 @@ var (
 	ErrSurfaceNilConfig = errors.New("core: surface configuration must not be nil")
 )
 
-// SetPrepareFrame registers a platform hook that is called before acquiring a texture.
-//
-// The hook returns the current surface dimensions and whether they changed.
-// If changed is true, the surface is automatically reconfigured before acquiring.
-//
-// Pass nil to remove the hook.
-func (s *Surface) SetPrepareFrame(fn PrepareFrameFunc) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.prepareFrame = fn
-}
-
 // Configure configures the surface with the given device and settings.
 //
 // The surface must not have an acquired texture. If the surface is already
@@ -121,9 +109,7 @@ func (s *Surface) Unconfigure() {
 
 // AcquireTexture acquires the next surface texture for rendering.
 //
-// The surface must be in the Configured state. If a PrepareFrame hook is
-// registered and reports that dimensions changed, the surface is automatically
-// reconfigured before acquiring.
+// The surface must be in the Configured state.
 //
 // After a successful acquire, the surface enters the Acquired state.
 // The caller must either Present or DiscardTexture before acquiring again.
@@ -144,11 +130,6 @@ func (s *Surface) AcquireTextureWithLease(fence hal.Fence) (*hal.AcquiredSurface
 	}
 	if s.state != SurfaceStateConfigured {
 		return nil, 0, ErrSurfaceNotConfigured
-	}
-
-	// Call PrepareFrame hook if registered
-	if err := s.applyPrepareFrame(); err != nil {
-		return nil, 0, err
 	}
 
 	result, err := s.raw.AcquireTexture(fence)
@@ -353,34 +334,6 @@ func (s *Surface) Config() *hal.SurfaceConfiguration {
 	}
 	configCopy := *s.config
 	return &configCopy
-}
-
-// applyPrepareFrame calls the PrepareFrame hook and reconfigures if dimensions changed.
-// Must be called with s.mu held.
-func (s *Surface) applyPrepareFrame() error {
-	if s.prepareFrame == nil {
-		return nil
-	}
-
-	width, height, changed := s.prepareFrame()
-	if !changed || s.config == nil {
-		return nil
-	}
-
-	newConfig := *s.config
-	newConfig.Width = width
-	newConfig.Height = height
-
-	halDevice := s.getHALDevice(s.device)
-	if halDevice == nil {
-		return ErrDeviceDestroyed
-	}
-
-	if err := s.raw.Configure(halDevice, &newConfig); err != nil {
-		return err
-	}
-	s.config = &newConfig
-	return nil
 }
 
 // getHALDevice extracts the hal.Device from a core.Device using the snatch lock.
