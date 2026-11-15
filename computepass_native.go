@@ -80,8 +80,8 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
 	for _, buf := range group.boundBuffers {
-		if buf.core != nil && buf.core.Ref != nil {
-			p.trackRef(buf.core.Ref)
+		if cb := buf.impl.CoreBuffer(); cb != nil && cb.Ref != nil {
+			p.trackRef(cb.Ref)
 		}
 	}
 	// Track bind group itself for submit-time validation (VAL-B5 and, via
@@ -174,7 +174,7 @@ func (p *ComputePassEncoder) flushDispatch(method string, indirect *Buffer, indi
 	}
 	var indirectCore *core.Buffer
 	if indirect != nil {
-		indirectCore = indirect.core
+		indirectCore = indirect.impl.CoreBuffer()
 	}
 	if err := p.core.FlushDispatch(active, indirectCore, indirectUsage); err != nil {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.%s: %w", method, err))
@@ -223,7 +223,7 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 			offset, buffer.Size(), ErrDispatchIndirectBufferOverrun))
 		return
 	}
-	p.trackRef(buffer.core.Ref)
+	p.trackRef(buffer.impl.CoreBuffer().Ref)
 	p.encoder.trackBuffer(buffer)
 
 	// FEAT-COMPUTE-004: GPU-side indirect dispatch validation.
@@ -254,7 +254,7 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 	}
 
 	// Fallback: no validation available, dispatch directly.
-	p.core.DispatchIndirect(buffer.coreBuffer(), offset)
+	p.core.DispatchIndirect(buffer.impl.CoreBuffer(), offset)
 }
 
 // dispatchIndirectValidated runs the GPU-side validation shader before the
@@ -279,7 +279,7 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 	iv *core.IndirectValidation,
 	raw hal.ComputePassEncoder,
 ) {
-	params, err := iv.DispatchParams(buffer.coreBuffer(), offset)
+	params, err := iv.DispatchParams(buffer.impl.CoreBuffer(), offset)
 	if err != nil {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.DispatchIndirect: indirect validation: %w", err))
 		return
@@ -332,7 +332,7 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 		p.core.ReplaceRawPass(userPass)
 	} else {
 		// No parent encoder access -- fall back to unvalidated dispatch.
-		p.core.DispatchIndirect(buffer.coreBuffer(), offset)
+		p.core.DispatchIndirect(buffer.impl.CoreBuffer(), offset)
 	}
 }
 

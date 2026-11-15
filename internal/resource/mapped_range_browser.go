@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-package wgpu
+package resource
 
 // MappedRange is a safe view over a region of a mapped GPU buffer.
 //

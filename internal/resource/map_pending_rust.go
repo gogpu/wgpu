@@ -1,6 +1,6 @@
 //go:build rust
 
-package wgpu
+package resource
 
 import (
 	"context"

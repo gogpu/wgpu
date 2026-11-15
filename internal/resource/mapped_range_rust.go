@@ -1,6 +1,6 @@
 //go:build rust
 
-package wgpu
+package resource
 
 import rwgpu "github.com/go-webgpu/webgpu/wgpu"
 

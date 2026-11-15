@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/gputypes"
 
 	"github.com/gogpu/wgpu/internal/pipeconst"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Device represents a logical GPU device.
@@ -60,7 +61,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		return nil, fmt.Errorf("wgpu: failed to create buffer: %w", err)
 	}
 
-	return &Buffer{r: rb}, nil
+	return &Buffer{impl: resource.NewBufferRust(rb)}, nil
 }
 
 // CreateTexture creates a GPU texture.
@@ -572,7 +573,7 @@ func convertBindGroupEntry(e BindGroupEntry) rwgpu.BindGroupEntry {
 		Size:    e.Size,
 	}
 	if e.Buffer != nil {
-		re.Buffer = e.Buffer.r
+		re.Buffer = e.Buffer.impl.R()
 	}
 	if e.Sampler != nil {
 		re.Sampler = e.Sampler.r

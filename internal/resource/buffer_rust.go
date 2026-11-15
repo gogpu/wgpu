@@ -1,6 +1,6 @@
 //go:build rust
 
-package wgpu
+package resource
 
 import (
 	"context"
@@ -16,6 +16,17 @@ import (
 type Buffer struct {
 	r        *rwgpu.Buffer
 	released bool
+}
+
+// NewBufferRust builds a Buffer over a go-webgpu/webgpu buffer handle.
+func NewBufferRust(r *rwgpu.Buffer) *Buffer { return &Buffer{r: r} }
+
+// R returns the underlying go-webgpu/webgpu buffer handle.
+func (b *Buffer) R() *rwgpu.Buffer {
+	if b == nil {
+		return nil
+	}
+	return b.r
 }
 
 // Size returns the buffer size in bytes.

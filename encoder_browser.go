@@ -51,8 +51,8 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 		return
 	}
 	e.browser.CopyBufferToBuffer(
-		src.browser.Ref(), srcOffset,
-		dst.browser.Ref(), dstOffset,
+		src.impl.Browser().Ref(), srcOffset,
+		dst.impl.Browser().Ref(), dstOffset,
 		size,
 	)
 }
@@ -64,7 +64,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 	}
 	for _, r := range regions {
 		srcObj := browser.BuildImageCopyBuffer(
-			src.browser.Ref(),
+			src.impl.Browser().Ref(),
 			r.BufferLayout.Offset,
 			r.BufferLayout.BytesPerRow,
 			r.BufferLayout.RowsPerImage,
@@ -84,7 +84,7 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	if e.released || buffer == nil {
 		return
 	}
-	e.browser.ClearBuffer(buffer.browser.Ref(), offset, size)
+	e.browser.ClearBuffer(buffer.impl.Browser().Ref(), offset, size)
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
@@ -99,7 +99,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 			r.TextureBase.Origin.X, r.TextureBase.Origin.Y, r.TextureBase.Origin.Z,
 		)
 		dstObj := browser.BuildImageCopyBuffer(
-			dst.browser.Ref(),
+			dst.impl.Browser().Ref(),
 			r.BufferLayout.Offset,
 			r.BufferLayout.BytesPerRow,
 			r.BufferLayout.RowsPerImage,

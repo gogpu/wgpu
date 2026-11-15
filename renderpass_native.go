@@ -121,8 +121,8 @@ func (p *RenderPassEncoder) trackBindGroup(group *BindGroup) {
 	// Without this, Buffer.Release() before Submit can HAL-destroy buffers
 	// that are still referenced by a pending command buffer.
 	for _, buf := range group.boundBuffers {
-		if buf.core != nil && buf.core.Ref != nil {
-			p.trackRef(buf.core.Ref)
+		if cb := buf.impl.CoreBuffer(); cb != nil && cb.Ref != nil {
+			p.trackRef(cb.Ref)
 		}
 	}
 	// Track bind group itself for submit-time validation (VAL-B5 and, via
@@ -148,9 +148,9 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 	if slot+1 > p.vertexBufferCount {
 		p.vertexBufferCount = slot + 1
 	}
-	p.trackRef(buffer.core.Ref)
+	p.trackRef(buffer.impl.CoreBuffer().Ref)
 	p.encoder.trackBuffer(buffer)
-	p.core.SetVertexBuffer(slot, buffer.coreBuffer(), offset)
+	p.core.SetVertexBuffer(slot, buffer.impl.CoreBuffer(), offset)
 	if p.test != nil {
 		p.test.VertexBufferBound(p.testPass, slot, buffer.Label(), offset, buffer.Size())
 	}
@@ -164,9 +164,9 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.Index
 	}
 	p.indexBufferSet = true
 	p.indexBufferFormat = format
-	p.trackRef(buffer.core.Ref)
+	p.trackRef(buffer.impl.CoreBuffer().Ref)
 	p.encoder.trackBuffer(buffer)
-	p.core.SetIndexBuffer(buffer.coreBuffer(), format, offset)
+	p.core.SetIndexBuffer(buffer.impl.CoreBuffer(), format, offset)
 	if p.test != nil {
 		p.test.IndexBufferBound(p.testPass, buffer.Label(), format, offset, buffer.Size())
 	}
@@ -337,10 +337,10 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 			offset, drawCount, buffer.Size(), ErrDrawIndirectBufferOverrun))
 		return
 	}
-	p.trackRef(buffer.core.Ref)
+	p.trackRef(buffer.impl.CoreBuffer().Ref)
 	p.encoder.trackBuffer(buffer)
 	p.flushBindGroups()
-	p.core.MultiDrawIndirect(buffer.coreBuffer(), offset, drawCount)
+	p.core.MultiDrawIndirect(buffer.impl.CoreBuffer(), offset, drawCount)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
@@ -410,10 +410,10 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 			offset, drawCount, buffer.Size(), ErrDrawIndirectBufferOverrun))
 		return
 	}
-	p.trackRef(buffer.core.Ref)
+	p.trackRef(buffer.impl.CoreBuffer().Ref)
 	p.encoder.trackBuffer(buffer)
 	p.flushBindGroups()
-	p.core.MultiDrawIndexedIndirect(buffer.coreBuffer(), offset, drawCount)
+	p.core.MultiDrawIndexedIndirect(buffer.impl.CoreBuffer(), offset, drawCount)
 }
 
 // ExecuteBundles executes reusable render command bundles in this render pass.
@@ -464,8 +464,8 @@ func (p *RenderPassEncoder) MultiDrawIndirectCount(
 		record: func() {
 			p.flushBindGroups()
 			p.core.DrawIndirectCount(
-				indirectBuffer.coreBuffer(), indirectOffset,
-				countBuffer.coreBuffer(), countOffset, maxDrawCount,
+				indirectBuffer.impl.CoreBuffer(), indirectOffset,
+				countBuffer.impl.CoreBuffer(), countOffset, maxDrawCount,
 			)
 		},
 	})
@@ -489,8 +489,8 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirectCount(
 		record: func() {
 			p.flushBindGroups()
 			p.core.DrawIndexedIndirectCount(
-				indirectBuffer.coreBuffer(), indirectOffset,
-				countBuffer.coreBuffer(), countOffset, maxDrawCount,
+				indirectBuffer.impl.CoreBuffer(), indirectOffset,
+				countBuffer.impl.CoreBuffer(), countOffset, maxDrawCount,
 			)
 		},
 	})

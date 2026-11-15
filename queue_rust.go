@@ -54,10 +54,10 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	if q.released {
 		return ErrReleased
 	}
-	if buffer == nil || buffer.r == nil {
+	if buffer == nil || buffer.impl.R() == nil {
 		return fmt.Errorf("wgpu: WriteBuffer: buffer is nil")
 	}
-	return q.r.WriteBuffer(buffer.r, offset, data)
+	return q.r.WriteBuffer(buffer.impl.R(), offset, data)
 }
 
 // WriteTexture writes data to a texture.

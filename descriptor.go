@@ -278,7 +278,7 @@ func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
 
 	switch {
 	case e.Buffer != nil:
-		halBuf := e.Buffer.halBuffer()
+		halBuf := e.Buffer.impl.HALBuffer()
 		if halBuf != nil {
 			entry.Resource = gputypes.BufferBinding{
 				Buffer: halBuf.NativeHandle(),

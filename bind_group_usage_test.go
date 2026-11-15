@@ -75,9 +75,9 @@ func TestBindGroupUsagesFromLayoutEntries(t *testing.T) {
 	defer group.Release()
 
 	wantBuffers := map[*core.Buffer]track.BufferUses{
-		uniform.core:  track.BufferUsesUniform,
-		storage.core:  track.BufferUsesStorageWrite,
-		readOnly.core: track.BufferUsesStorageRead,
+		uniform.impl.CoreBuffer():  track.BufferUsesUniform,
+		storage.impl.CoreBuffer():  track.BufferUsesStorageWrite,
+		readOnly.impl.CoreBuffer(): track.BufferUsesStorageRead,
 	}
 	if got := len(group.usages.Buffers); got != len(wantBuffers) {
 		t.Fatalf("buffer usages = %d, want %d", got, len(wantBuffers))

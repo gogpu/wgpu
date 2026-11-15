@@ -266,7 +266,7 @@ func (e *CommandEncoder) transitionCopyBuffers(raw hal.CommandEncoder, requests 
 		if !needed {
 			continue
 		}
-		if halBuffer := request.buffer.halBuffer(); halBuffer != nil {
+		if halBuffer := request.buffer.impl.HALBuffer(); halBuffer != nil {
 			barriers = append(barriers, transition.IntoHAL(halBuffer))
 		}
 	}
@@ -284,10 +284,14 @@ func prepareCopyBufferUsages(requests []copyBufferUsage) ([]preparedCopyBufferUs
 	prepared := make([]preparedCopyBufferUsage, 0, len(requests))
 	positions := make(map[track.TrackerIndex]int, len(requests))
 	for _, request := range requests {
-		if request.buffer == nil || request.buffer.core == nil {
+		var cb *core.Buffer
+		if request.buffer != nil {
+			cb = request.buffer.impl.CoreBuffer()
+		}
+		if cb == nil {
 			continue
 		}
-		td := request.buffer.core.TrackingData()
+		td := cb.TrackingData()
 		if td == nil || !td.Index().IsValid() {
 			continue
 		}
@@ -454,15 +458,15 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	if raw == nil {
 		return
 	}
-	halSrc := src.halBuffer()
-	halDst := dst.halBuffer()
+	halSrc := src.impl.HALBuffer()
+	halDst := dst.impl.HALBuffer()
 	if halSrc == nil || halDst == nil {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: source or destination buffer is released: %w", ErrReleased))
 		return
 	}
 	// WebGPU copyBufferToBuffer valid usage; Rust wgpu-core transfer.rs
 	// copy_buffer_to_buffer. An invalid copy must not reach the backend.
-	if err := core.ValidateBufferToBufferCopy(src.core == dst.core,
+	if err := core.ValidateBufferToBufferCopy(src.impl.CoreBuffer() == dst.impl.CoreBuffer(),
 		core.BufferCopyEndpoint{Usage: src.Usage(), Size: src.Size(), Offset: srcOffset},
 		core.BufferCopyEndpoint{Usage: dst.Usage(), Size: dst.Size(), Offset: dstOffset},
 		size); err != nil {
@@ -480,8 +484,8 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	}) {
 		return
 	}
-	e.trackRef(src.core.Ref)
-	e.trackRef(dst.core.Ref)
+	e.trackRef(src.impl.CoreBuffer().Ref)
+	e.trackRef(dst.impl.CoreBuffer().Ref)
 	e.trackBuffer(src)
 	e.trackBuffer(dst)
 	raw.CopyBufferToBuffer(halSrc, halDst, []hal.BufferCopy{
@@ -514,7 +518,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 			return
 		}
 	}
-	halDst := dst.halBuffer()
+	halDst := dst.impl.HALBuffer()
 	if halDst == nil {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: destination buffer is released: %w", ErrReleased))
 		return
@@ -541,7 +545,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	}
 	e.trackTexture(src)
 	e.trackBuffer(dst)
-	e.trackRef(dst.core.Ref)
+	e.trackRef(dst.impl.CoreBuffer().Ref)
 	halRegions := make([]hal.BufferTextureCopy, len(regions))
 	for i, r := range regions {
 		halRegions[i] = r.toHAL()
@@ -663,7 +667,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: destination texture is released: %w", ErrReleased))
 		return
 	}
-	halSrc := src.halBuffer()
+	halSrc := src.impl.HALBuffer()
 	if halSrc == nil {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: source buffer is released: %w", ErrReleased))
 		return
@@ -731,7 +735,7 @@ func (e *CommandEncoder) recordBufferToTexture(src *Buffer, halSrc hal.Buffer, d
 	}
 	e.trackTexture(dst)
 	e.trackBuffer(src)
-	e.trackRef(src.core.Ref)
+	e.trackRef(src.impl.CoreBuffer().Ref)
 	halRegions := make([]hal.BufferTextureCopy, len(regions))
 	for i, r := range regions {
 		halRegions[i] = hal.BufferTextureCopy{
@@ -814,7 +818,7 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	if raw == nil {
 		return
 	}
-	halBuffer := buffer.halBuffer()
+	halBuffer := buffer.impl.HALBuffer()
 	if halBuffer == nil {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.ClearBuffer: buffer is released: %w", ErrReleased))
 		return
@@ -832,7 +836,7 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	if !e.recordCopyUsages(raw, nil, []copyBufferUsage{{buffer: buffer, usage: track.BufferUsesCopyDst}}) {
 		return
 	}
-	e.trackRef(buffer.core.Ref)
+	e.trackRef(buffer.impl.CoreBuffer().Ref)
 	e.trackBuffer(buffer)
 	raw.ClearBuffer(halBuffer, offset, size)
 }
@@ -847,7 +851,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is nil"))
 		return
 	}
-	if dst.released == nil || dst.released.Load() {
+	if dst.impl.IsReleased() {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
 		return
 	}
@@ -857,7 +861,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 		return
 	}
 
-	halDestination := dst.halBuffer()
+	halDestination := dst.impl.HALBuffer()
 	if halDestination == nil {
 		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
 		return
@@ -875,7 +879,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 	if !e.recordCopyUsages(raw, nil, []copyBufferUsage{{buffer: dst, usage: track.BufferUsesCopyDst}}) {
 		return
 	}
-	e.trackRef(dst.core.Ref)
+	e.trackRef(dst.impl.CoreBuffer().Ref)
 	e.trackBuffer(dst)
 	e.trackQuerySet(querySet)
 

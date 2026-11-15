@@ -364,7 +364,7 @@ func TestCopyAfterEarlierCommandUsageIsNotAConflict(t *testing.T) {
 					t.Errorf("destination texture usage = %v, want %v", got, want)
 				}
 			}
-			if got := enc.core.Mutable().BufferScope().EndUsage(buffer.core.TrackingData().Index()); got != tt.wantBuffer {
+			if got := enc.core.Mutable().BufferScope().EndUsage(buffer.impl.CoreBuffer().TrackingData().Index()); got != tt.wantBuffer {
 				t.Errorf("buffer usage = %v, want %v", got, tt.wantBuffer)
 			}
 			cb, err := enc.Finish()
@@ -392,8 +392,10 @@ func TestCopyOntoItselfIsRejectedAtomically(t *testing.T) {
 			record: func(enc *CommandEncoder, tex *Texture, _ *Buffer) { enc.CopyTextureToTexture(tex, tex, nil) },
 		},
 		{
-			name:   "buffer to same buffer",
-			record: func(enc *CommandEncoder, _ *Texture, buf *Buffer) { enc.CopyBufferToBuffer(buf, 0, buf, 128, 64) },
+			name: "buffer to same buffer",
+			record: func(enc *CommandEncoder, _ *Texture, buf *Buffer) {
+				enc.CopyBufferToBuffer(buf, 0, buf, 128, 64)
+			},
 		},
 	}
 
@@ -415,7 +417,7 @@ func TestCopyOntoItselfIsRejectedAtomically(t *testing.T) {
 			if enc.core.Mutable().TextureScope().IsUsed(tex.coreTexture.TrackingData().Index()) {
 				t.Error("rejected copy recorded the texture in the command buffer tracker")
 			}
-			if enc.core.Mutable().BufferScope().IsUsed(buf.core.TrackingData().Index()) {
+			if enc.core.Mutable().BufferScope().IsUsed(buf.impl.CoreBuffer().TrackingData().Index()) {
 				t.Error("rejected copy recorded the buffer in the command buffer tracker")
 			}
 			if got := len(enc.trackedRefs); got != 0 {
@@ -453,10 +455,10 @@ func TestCopyBufferToBufferRecordsBothUsages(t *testing.T) {
 	}
 	defer cb.Release()
 
-	if got := cb.core.BufferScope().EndUsage(src.core.TrackingData().Index()); got != track.BufferUsesCopySrc {
+	if got := cb.core.BufferScope().EndUsage(src.impl.CoreBuffer().TrackingData().Index()); got != track.BufferUsesCopySrc {
 		t.Errorf("source usage = %v, want %v", got, track.BufferUsesCopySrc)
 	}
-	if got := cb.core.BufferScope().EndUsage(dst.core.TrackingData().Index()); got != track.BufferUsesCopyDst {
+	if got := cb.core.BufferScope().EndUsage(dst.impl.CoreBuffer().TrackingData().Index()); got != track.BufferUsesCopyDst {
 		t.Errorf("destination usage = %v, want %v", got, track.BufferUsesCopyDst)
 	}
 }
@@ -483,5 +485,5 @@ func seedTextureUsage(enc *CommandEncoder, texture *Texture, usage track.Texture
 // seedBufferUsage simulates an earlier command of the encoder that left the
 // buffer in usage.
 func seedBufferUsage(enc *CommandEncoder, buffer *Buffer, usage track.BufferUses) {
-	enc.core.Mutable().BufferScope().SetSingle(buffer.core.TrackingData().Index(), usage)
+	enc.core.Mutable().BufferScope().SetSingle(buffer.impl.CoreBuffer().TrackingData().Index(), usage)
 }

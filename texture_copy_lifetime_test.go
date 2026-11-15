@@ -32,7 +32,7 @@ func TestCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 		t.Fatalf("CreateBuffer: %v", err)
 	}
 	defer buffer.Release()
-	ref := buffer.core.Ref
+	ref := buffer.impl.CoreBuffer().Ref
 
 	enc, err := device.CreateCommandEncoder(nil)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 			texture := createCopyScopeTexture(t, device, "texture-copy-lifetime", tt.textureUse)
 			defer texture.Release()
 
-			refs := map[string]*core.ResourceRef{"buffer": buffer.core.Ref, "texture": texture.ref()}
+			refs := map[string]*core.ResourceRef{"buffer": buffer.impl.CoreBuffer().Ref, "texture": texture.ref()}
 			checkRefCounts := func(when string, want int32) {
 				t.Helper()
 				for name, ref := range refs {

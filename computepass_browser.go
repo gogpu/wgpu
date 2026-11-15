@@ -2,7 +2,9 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/internal/browser"
+import (
+	"github.com/gogpu/wgpu/internal/browser"
+)
 
 // ComputePassEncoder records compute dispatch commands.
 // On browser, this wraps a GPUComputePassEncoder via internal/browser.ComputePassEncoder.
@@ -34,10 +36,10 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
-	if buffer == nil || buffer.browser == nil {
+	if buffer == nil || buffer.impl.Browser() == nil {
 		return
 	}
-	p.browser.DispatchIndirect(buffer.browser.Ref(), offset)
+	p.browser.DispatchIndirect(buffer.impl.Browser().Ref(), offset)
 }
 
 // End ends the compute pass.

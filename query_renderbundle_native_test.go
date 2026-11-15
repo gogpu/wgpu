@@ -5,7 +5,6 @@ package wgpu
 import (
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -323,9 +322,9 @@ func TestResolveQuerySetGuards(t *testing.T) {
 	querySet := newTestQuerySet(resource, device)
 	releasedQuerySet := newTestQuerySet(resource, device)
 	releasedQuerySet.released = true
-	activeDestination := &Buffer{released: &atomic.Bool{}}
-	releasedDestination := &Buffer{released: &atomic.Bool{}}
-	releasedDestination.released.Store(true)
+	activeDestination := NewTestBufferFromCore(nil)
+	releasedDestination := NewTestBufferFromCore(nil)
+	releasedDestination.Release()
 
 	tests := []struct {
 		name        string
@@ -372,20 +371,20 @@ func TestResolveQuerySetRecordsErrors(t *testing.T) {
 		querySet    func(*Device) *QuerySet
 		destination *Buffer
 	}{
-		{name: "nil query set", destination: &Buffer{released: &atomic.Bool{}}},
+		{name: "nil query set", destination: NewTestBufferFromCore(nil)},
 		{name: "nil destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }},
 		{name: "released query set", querySet: func(d *Device) *QuerySet {
 			q := newTestQuerySet(resource, d)
 			q.released = true
 			return q
-		}, destination: &Buffer{released: &atomic.Bool{}}},
+		}, destination: NewTestBufferFromCore(nil)},
 		{name: "released destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }, destination: func() *Buffer {
-			b := &Buffer{released: &atomic.Bool{}}
-			b.released.Store(true)
+			b := NewTestBufferFromCore(nil)
+			b.Release()
 			return b
 		}()},
-		{name: "nil HAL query set", querySet: func(*Device) *QuerySet { return &QuerySet{} }, destination: &Buffer{released: &atomic.Bool{}}},
-		{name: "nil HAL destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }, destination: &Buffer{released: &atomic.Bool{}}},
+		{name: "nil HAL query set", querySet: func(*Device) *QuerySet { return &QuerySet{} }, destination: NewTestBufferFromCore(nil)},
+		{name: "nil HAL destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }, destination: NewTestBufferFromCore(nil)},
 	}
 
 	for _, tt := range tests {

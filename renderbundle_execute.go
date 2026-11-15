@@ -86,13 +86,13 @@ func (b *RenderBundle) replay(raw hal.RenderPassEncoder) error {
 		case bundleSetBindGroup:
 			raw.SetBindGroup(cmd.slot, cmd.group.hal, cmd.offsets)
 		case bundleSetVertexBuffer:
-			buffer := cmd.buffer.halBuffer()
+			buffer := cmd.buffer.impl.HALBuffer()
 			if buffer == nil {
 				return fmt.Errorf("vertex buffer %q: %w", cmd.buffer.Label(), core.ErrResourceDestroyed)
 			}
 			raw.SetVertexBuffer(cmd.slot, buffer, cmd.offset)
 		case bundleSetIndexBuffer:
-			buffer := cmd.buffer.halBuffer()
+			buffer := cmd.buffer.impl.HALBuffer()
 			if buffer == nil {
 				return fmt.Errorf("index buffer %q: %w", cmd.buffer.Label(), core.ErrResourceDestroyed)
 			}

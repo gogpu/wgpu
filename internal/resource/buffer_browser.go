@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-package wgpu
+package resource
 
 import (
 	"context"
@@ -19,6 +19,21 @@ type Buffer struct {
 
 	// mapState tracks the current mapping state. Updated by MapAsync/Unmap.
 	mapState MapState
+}
+
+// NewBufferBrowser builds a Buffer over a browser GPUBuffer handle. size and
+// usage are cached for validation and reporting; mapState seeds the mapping
+// state (MapStateMapped when the buffer was created MappedAtCreation).
+func NewBufferBrowser(browserBuf *browser.Buffer, size uint64, usage gputypes.BufferUsage, mapState MapState) *Buffer {
+	return &Buffer{browser: browserBuf, size: size, usage: usage, mapState: mapState}
+}
+
+// Browser returns the underlying browser GPUBuffer handle.
+func (b *Buffer) Browser() *browser.Buffer {
+	if b == nil {
+		return nil
+	}
+	return b.browser
 }
 
 // Size returns the buffer size in bytes.

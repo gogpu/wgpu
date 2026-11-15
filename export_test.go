@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // SetTestRequiredVertexBuffers sets the requiredVertexBuffers field for testing.
@@ -51,16 +52,18 @@ func (d *Device) TestCmdEncoderPoolSize() int {
 // function over the type can (ADR-070 §11 grain note; the implementation's own
 // white-box test carries the same assertion once it moves).
 func BufferTestReleased(b *Buffer) bool {
-	if b == nil || b.released == nil {
+	if b == nil || b.impl == nil {
 		return false
 	}
-	return b.released.Load()
+	return b.impl.IsReleased()
 }
 
 // NewTestBufferFromCore wraps an existing core buffer in a Buffer (testing only).
 // HAL is whatever the core buffer carries; sufficient for validation unit tests
 // that read Size/Usage/Label or inspect the core state.
-func NewTestBufferFromCore(coreBuf *core.Buffer) *Buffer { return &Buffer{core: coreBuf} }
+func NewTestBufferFromCore(coreBuf *core.Buffer) *Buffer {
+	return &Buffer{impl: resource.NewBufferFromCore(coreBuf)}
+}
 
 // TestDestroyQueue returns the device's DestroyQueue (testing only).
 func (d *Device) TestDestroyQueue() *core.DestroyQueue {

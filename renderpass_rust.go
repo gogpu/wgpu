@@ -36,20 +36,20 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 // SetVertexBuffer sets a vertex buffer for the given slot.
 // Offset is in bytes.
 func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset uint64) {
-	if buffer == nil || buffer.r == nil {
+	if buffer == nil || buffer.impl.R() == nil {
 		return
 	}
 	// go-webgpu takes (slot, buffer, offset, size). Pass MaxUint64 for "rest of buffer".
-	p.r.SetVertexBuffer(slot, buffer.r, offset, math.MaxUint64)
+	p.r.SetVertexBuffer(slot, buffer.impl.R(), offset, math.MaxUint64)
 }
 
 // SetIndexBuffer sets the index buffer.
 func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
-	if buffer == nil || buffer.r == nil {
+	if buffer == nil || buffer.impl.R() == nil {
 		return
 	}
 	// go-webgpu takes (buffer, format, offset, size). Pass MaxUint64 for "rest of buffer".
-	p.r.SetIndexBuffer(buffer.r, format, offset, math.MaxUint64)
+	p.r.SetIndexBuffer(buffer.impl.R(), format, offset, math.MaxUint64)
 }
 
 // SetViewport sets the viewport transformation.
@@ -100,16 +100,16 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 	if drawCount == 0 {
 		return
 	}
-	if buffer == nil || buffer.r == nil {
+	if buffer == nil || buffer.impl.R() == nil {
 		return
 	}
 	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
-		p.r.DrawIndirect(buffer.r, indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
+		p.r.DrawIndirect(buffer.impl.R(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
 		recordOffset, _ := indirect.RecordOffset(offset, drawIndirectRecordSize, i)
-		p.r.DrawIndirect(buffer.r, recordOffset)
+		p.r.DrawIndirect(buffer.impl.R(), recordOffset)
 	}
 }
 
@@ -124,11 +124,11 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	if drawCount == 0 {
 		return
 	}
-	if buffer == nil || buffer.r == nil {
+	if buffer == nil || buffer.impl.R() == nil {
 		return
 	}
 	lowerRustIndexedIndirect(buffer.Size(), offset, drawCount, func(recordOffset uint64) {
-		p.r.DrawIndexedIndirect(buffer.r, recordOffset)
+		p.r.DrawIndexedIndirect(buffer.impl.R(), recordOffset)
 	})
 }
 

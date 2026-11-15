@@ -334,7 +334,7 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 
 	// --- end VAL-A1 ---
 
-	halBuffer := buffer.halBuffer()
+	halBuffer := buffer.impl.HALBuffer()
 	if halBuffer == nil {
 		return fmt.Errorf("wgpu: WriteBuffer: no HAL buffer")
 	}
@@ -348,10 +348,11 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	// state (matching Rust suballocation.rs:437), allowing CopyBufferRegion as dst.
 	if q.pending != nil {
 		index := track.InvalidTrackerIndex
-		if td := buffer.core.TrackingData(); td != nil {
+		coreBuf := buffer.impl.CoreBuffer()
+		if td := coreBuf.TrackingData(); td != nil {
 			index = td.Index()
 		}
-		return q.pending.writeBufferFor(buffer.core.Ref, halBuffer, index, offset, data)
+		return q.pending.writeBufferFor(coreBuf.Ref, halBuffer, index, offset, data)
 	}
 
 	return q.hal.WriteBuffer(halBuffer, offset, data)
@@ -613,8 +614,9 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 // destroyed by Release itself. Callers never pass nil: trackBuffer skips nil
 // and collectBindGroupResources only records non-nil entries.
 func validateSubmitBuffer(buf *Buffer, index int) error {
-	if buf.released != nil && buf.released.Load() &&
-		(buf.core == nil || buf.core.Ref == nil || buf.core.IsDestroyed()) {
+	coreBuf := buf.impl.CoreBuffer()
+	if buf.impl.IsReleased() &&
+		(coreBuf == nil || coreBuf.Ref == nil || coreBuf.IsDestroyed()) {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed buffer %q: %w",
 			index, buf.Label(), ErrSubmitBufferDestroyed)
 	}
@@ -853,17 +855,21 @@ func buildBufferTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.
 // addTrackedBuffer adds a single buffer to the resolver if it has a
 // valid core buffer and TrackerIndex.
 func addTrackedBuffer(resolver map[track.TrackerIndex]hal.Buffer, buf *Buffer) {
-	if buf == nil || buf.core == nil {
+	if buf == nil {
 		return
 	}
-	td := buf.core.TrackingData()
+	coreBuf := buf.impl.CoreBuffer()
+	if coreBuf == nil {
+		return
+	}
+	td := coreBuf.TrackingData()
 	if td == nil || !td.Index().IsValid() {
 		return
 	}
 	if _, exists := resolver[td.Index()]; exists {
 		return
 	}
-	if halBuf := buf.halBuffer(); halBuf != nil {
+	if halBuf := buf.impl.HALBuffer(); halBuf != nil {
 		resolver[td.Index()] = halBuf
 	}
 }

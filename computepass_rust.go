@@ -2,7 +2,9 @@
 
 package wgpu
 
-import rwgpu "github.com/go-webgpu/webgpu/wgpu"
+import (
+	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+)
 
 // ComputePassEncoder records compute dispatch commands.
 // On Rust backend, this wraps go-webgpu/webgpu ComputePassEncoder.
@@ -35,10 +37,10 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
-	if buffer == nil || buffer.r == nil {
+	if buffer == nil || buffer.impl.R() == nil {
 		return
 	}
-	p.r.DispatchWorkgroupsIndirect(buffer.r, offset)
+	p.r.DispatchWorkgroupsIndirect(buffer.impl.R(), offset)
 }
 
 // End ends the compute pass.

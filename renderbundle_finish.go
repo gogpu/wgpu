@@ -121,12 +121,12 @@ func (s *bundleState) checkBuffer(method string, buffer *Buffer, usage gputypes.
 	if buffer == nil {
 		return fmt.Errorf("%s: %w: buffer is nil", method, errBundleCommand)
 	}
-	if buffer.core == nil || (buffer.released != nil && buffer.released.Load()) {
+	if buffer.impl.CoreBuffer() == nil || buffer.impl.IsReleased() {
 		return fmt.Errorf("%s: buffer: %w", method, ErrReleased)
 	}
 	// The buffer's host is the shared device view; the device's cached adapter
 	// is one pointer per Device, so interface equality is device identity.
-	if buffer.device != s.device.seamView() {
+	if buffer.impl.Device() != s.device.seamView() {
 		return fmt.Errorf("%s: buffer: %w", method, errBundleDevice)
 	}
 	if buffer.Usage()&usage == 0 {
@@ -150,7 +150,7 @@ func (s *bundleState) setVertexBuffer(cmd *bundleCommand) error {
 		return fmt.Errorf("SetVertexBuffer: %w: offset %d is not a multiple of %d",
 			errBundleCommand, cmd.offset, vertexBufferAlignment)
 	}
-	if err := s.scope.MergeBuffer(cmd.buffer.core, track.BufferUsesVertex); err != nil {
+	if err := s.scope.MergeBuffer(cmd.buffer.impl.CoreBuffer(), track.BufferUsesVertex); err != nil {
 		return fmt.Errorf("SetVertexBuffer: slot %d: %w", cmd.slot, err)
 	}
 	s.vertexBufferCount = max(s.vertexBufferCount, cmd.slot+1)
@@ -172,7 +172,7 @@ func (s *bundleState) setIndexBuffer(cmd *bundleCommand) error {
 		return fmt.Errorf("SetIndexBuffer: %w: offset %d is not a multiple of the index size %d",
 			errBundleCommand, cmd.offset, size)
 	}
-	if err := s.scope.MergeBuffer(cmd.buffer.core, track.BufferUsesIndex); err != nil {
+	if err := s.scope.MergeBuffer(cmd.buffer.impl.CoreBuffer(), track.BufferUsesIndex); err != nil {
 		return fmt.Errorf("SetIndexBuffer: %w", err)
 	}
 	s.indexBufferSet = true
@@ -269,18 +269,19 @@ func (s *bundleState) keepBindGroup(group *BindGroup) {
 	}
 	s.keep(group.ref)
 	for _, buf := range group.boundBuffers {
-		if buf.core != nil {
-			s.keep(buf.core.Ref)
+		if cb := buf.impl.CoreBuffer(); cb != nil {
+			s.keep(cb.Ref)
 		}
 	}
 }
 
 // keepBuffer keeps a vertex or index buffer.
 func (s *bundleState) keepBuffer(buffer *Buffer) {
-	if _, ok := s.seen[buffer.core.Ref]; !ok || buffer.core.Ref == nil {
+	coreBuf := buffer.impl.CoreBuffer()
+	if _, ok := s.seen[coreBuf.Ref]; !ok || coreBuf.Ref == nil {
 		s.buffers = append(s.buffers, buffer)
 	}
-	s.keep(buffer.core.Ref)
+	s.keep(coreBuf.Ref)
 }
 
 // build returns the finished bundle. It takes a reference to every resource

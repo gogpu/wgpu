@@ -296,9 +296,9 @@ func buildBindGroupUsages(layoutEntries []gputypes.BindGroupLayoutEntry, entries
 			continue
 		}
 		switch {
-		case layoutEntry.Buffer != nil && entry.Buffer != nil && entry.Buffer.core != nil:
+		case layoutEntry.Buffer != nil && entry.Buffer != nil && entry.Buffer.impl.CoreBuffer() != nil:
 			usages.Buffers = append(usages.Buffers, core.BindGroupBufferUse{
-				Buffer: entry.Buffer.core,
+				Buffer: entry.Buffer.impl.CoreBuffer(),
 				Usage:  bufferBindingUses(layoutEntry.Buffer.Type),
 			})
 		case layoutEntry.Texture != nil || layoutEntry.StorageTexture != nil:

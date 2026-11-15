@@ -147,7 +147,7 @@ func TestCopyRecordsTransitionsFromEarlierCommands(t *testing.T) {
 	defer encoder.DiscardEncoding()
 
 	texIndex := texture.coreTexture.TrackingData().Index()
-	bufIndex := buffer.core.TrackingData().Index()
+	bufIndex := buffer.impl.CoreBuffer().TrackingData().Index()
 	request := func(raw hal.CommandEncoder) bool {
 		return encoder.recordCopyUsages(raw,
 			[]copyTextureUsage{{texture: texture, usage: track.TextureUsesCopySrc}},
@@ -285,7 +285,7 @@ func TestClearBufferTracksCopyDstUsage(t *testing.T) {
 	}
 	defer encoder.DiscardEncoding()
 
-	index := buffer.core.TrackingData().Index()
+	index := buffer.impl.CoreBuffer().TrackingData().Index()
 	encoder.core.Mutable().BufferScope().SetSingle(index, track.BufferUsesVertex)
 
 	encoder.ClearBuffer(buffer, 0, 16)

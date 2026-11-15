@@ -46,10 +46,10 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	if q.released {
 		return ErrReleased
 	}
-	if buffer == nil || buffer.browser == nil {
+	if buffer == nil || buffer.impl.Browser() == nil {
 		return ErrReleased
 	}
-	q.browser.WriteBuffer(buffer.browser.Ref(), offset, data)
+	q.browser.WriteBuffer(buffer.impl.Browser().Ref(), offset, data)
 	return nil
 }
 

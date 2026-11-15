@@ -56,8 +56,8 @@ func (p *RenderPassEncoder) executeIndirectCountDraw(cfg indirectCountDrawConfig
 }
 
 func (p *RenderPassEncoder) trackIndirectCountBuffers(indirectBuffer, countBuffer *Buffer) {
-	p.trackRef(indirectBuffer.core.Ref)
-	p.trackRef(countBuffer.core.Ref)
+	p.trackRef(indirectBuffer.impl.CoreBuffer().Ref)
+	p.trackRef(countBuffer.impl.CoreBuffer().Ref)
 	p.encoder.trackBuffer(indirectBuffer)
 	p.encoder.trackBuffer(countBuffer)
 }

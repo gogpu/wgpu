@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-package wgpu
+package resource
 
 import "context"
 

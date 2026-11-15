@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Device represents a logical GPU device.
@@ -105,18 +106,19 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		coreBuffer.Destroy()
 	})
 
-	buf := &Buffer{core: coreBuffer, device: d.seamView(), released: new(atomic.Bool)}
+	buf := resource.NewBuffer(coreBuffer, d.seamView())
 
 	// Safety net: if the buffer is garbage collected without Release(),
 	// schedule deferred destruction via DestroyQueue. This prevents
 	// resource leaks when callers create per-frame buffers without
 	// explicit lifecycle management (BUG-WGPU-RESOURCE-LIFECYCLE-001).
-	buf.armCleanup()
+	// NewBuffer arms the cleanup: it captures the label, released flag and
+	// core destroy function, never the Buffer pointer.
 
 	if d.test != nil {
 		d.test.BufferCreated(desc.Label, desc.Size, desc.Usage)
 	}
-	return buf, nil
+	return &Buffer{impl: buf}, nil
 }
 
 // CreateTexture creates a GPU texture.

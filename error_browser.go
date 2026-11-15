@@ -5,14 +5,17 @@ package wgpu
 import (
 	"errors"
 	"fmt"
+
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Public API sentinel errors.
 var (
-	// ErrReleased is declared in map_types_browser.go, next to the buffer
-	// mapping sentinels: the browser buffer implementation returns it and the
-	// resource package keeps it, so its home travels with the buffers. Root
-	// re-exports the same value once the move lands.
+	// ErrReleased is returned when operating on a released resource. The value
+	// is the resource package's: this build has no internal/core, so the
+	// sentinel lives with the buffer code that returns it, and re-exporting the
+	// same value keeps errors.Is working through the public API (§15.1).
+	ErrReleased = resource.ErrReleased
 
 	// Adapter-selection sentinels (ADR-083 §2.2). internal/core has no files in
 	// the js/wasm build, and the browser's WebGPU reports its own errors, so they

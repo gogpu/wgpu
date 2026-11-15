@@ -393,11 +393,11 @@ func TestRenderBundleUsageScope(t *testing.T) {
 	rig := newBundleTestRig()
 	layout := rebindLayout(false)
 	buffer := rig.buffer(t, BufferUsageVertex|BufferUsageStorage)
-	if td := buffer.core.TrackingData(); td == nil || !td.Index().IsValid() {
+	if td := buffer.impl.CoreBuffer().TrackingData(); td == nil || !td.Index().IsValid() {
 		t.Skip("noop buffers have no tracker index")
 	}
 	writer := rig.group(layout)
-	writer.usages = &core.BindGroupUsages{Buffers: []core.BindGroupBufferUse{{Buffer: buffer.core, Usage: track.BufferUsesStorageWrite}}}
+	writer.usages = &core.BindGroupUsages{Buffers: []core.BindGroupBufferUse{{Buffer: buffer.impl.CoreBuffer(), Usage: track.BufferUsesStorageWrite}}}
 
 	t.Run("inside the bundle", func(t *testing.T) {
 		enc := rig.encoder(t, nil)

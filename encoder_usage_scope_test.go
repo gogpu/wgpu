@@ -223,7 +223,7 @@ func TestCopyBufferToBufferThenVertexBufferSameEncoder(t *testing.T) {
 	})
 	cb := mustFinish(t, enc)
 
-	idx := vertices.core.TrackingData().Index()
+	idx := vertices.impl.CoreBuffer().TrackingData().Index()
 	tracker := cb.core.BufferScope()
 	if got := tracker.StartUsage(idx); got != track.BufferUsesCopyDst {
 		t.Errorf("first usage in command buffer = %v, want CopyDst", got)

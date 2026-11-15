@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 func TestBrowserDrawIndexedIndirectInvalidSpanDelegatesOneFailingCall(t *testing.T) {
@@ -39,10 +40,12 @@ func TestBrowserDrawIndexedIndirectInvalidSpanDelegatesOneFailingCall(t *testing
 			rawBuffer := js.Global().Get("Object").New()
 			rawBuffer.Set("size", float64(test.bufferSize))
 			rawBuffer.Set("usage", 0)
-			buffer := &Buffer{
-				browser: browser.NewBuffer(rawBuffer),
-				size:    test.bufferSize,
-			}
+			buffer := resource.NewBufferBrowser(
+				browser.NewBuffer(rawBuffer),
+				uint64(test.bufferSize),
+				0,
+				MapStateUnmapped,
+			)
 
 			pass.MultiDrawIndexedIndirect(buffer, test.offset, test.drawCount)
 

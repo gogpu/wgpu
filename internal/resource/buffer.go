@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package resource
 
 import (
 	"context"
@@ -250,8 +250,51 @@ func (b *Buffer) Unmap() error {
 	return nil
 }
 
-// coreBuffer returns the underlying core.Buffer.
-func (b *Buffer) coreBuffer() *core.Buffer { return b.core }
+// NewBuffer builds a Buffer over core state and the shared device view.
+//
+// It is the production constructor: it allocates the released flag (heap
+// allocated so the cleanup ref can share it without an interior pointer) and
+// arms the GC cleanup. The device that creates a buffer is the only caller.
+func NewBuffer(coreBuf *core.Buffer, device core.DeviceView) *Buffer {
+	b := &Buffer{core: coreBuf, device: device, released: new(atomic.Bool)}
+	b.armCleanup()
+	return b
+}
+
+// NewBufferFromCore builds a Buffer over core state with no device and no GC
+// cleanup. White-box validation tests and diagnostics use it to inspect the
+// core state without arming a cleanup that would outlive the test.
+func NewBufferFromCore(coreBuf *core.Buffer) *Buffer {
+	return &Buffer{core: coreBuf, released: new(atomic.Bool)}
+}
+
+// CoreBuffer returns the core buffer state the encoder and queue record
+// against.
+func (b *Buffer) CoreBuffer() *core.Buffer {
+	if b == nil {
+		return nil
+	}
+	return b.core
+}
+
+// HALBuffer returns the HAL buffer, or nil when the buffer is not resident.
+func (b *Buffer) HALBuffer() hal.Buffer {
+	if b == nil {
+		return nil
+	}
+	return b.halBuffer()
+}
+
+// Device returns the shared device view the buffer was created on.
+func (b *Buffer) Device() core.DeviceView {
+	if b == nil {
+		return nil
+	}
+	return b.device
+}
+
+// IsReleased reports whether Release has run on the buffer.
+func (b *Buffer) IsReleased() bool { return b != nil && b.released != nil && b.released.Load() }
 
 // halBuffer returns the underlying HAL buffer.
 func (b *Buffer) halBuffer() hal.Buffer {
@@ -270,8 +313,8 @@ func (b *Buffer) halBuffer() hal.Buffer {
 // When GC collects the buffer without an explicit Release(), the cleanup
 // schedules deferred destruction via DestroyQueue — the same path as Release().
 //
-// The cleanup ref struct captures only the label, released flag, DestroyQueue,
-// and core destroy function — NOT the Buffer pointer itself. This is a Go 1.24
+// The cleanup ref struct captures only the label, the released flag, the core
+// ResourceRef and the destroy function — NOT the Buffer pointer itself. This is a Go 1.24
 // runtime.AddCleanup requirement: the callback argument must not reference the
 // object being cleaned up.
 //
@@ -281,6 +324,11 @@ func (b *Buffer) halBuffer() hal.Buffer {
 // touches stay private to the buffer.
 func (b *Buffer) armCleanup() {
 	coreBuf := b.core
+	if coreBuf == nil {
+		// No core state (test or wrong-construction path): nothing to destroy,
+		// and there is no valid cleanup ref to build.
+		return
+	}
 	b.cleanup = runtime.AddCleanup(b, func(ref bufferCleanupRef) {
 		if !ref.released.CompareAndSwap(false, true) {
 			return

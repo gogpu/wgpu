@@ -9,3 +9,7 @@
 # The golden files (target-edges.tsv, inverted-edges.tsv) stay hand-reviewed design intent.
 golden	src	dst	context	step
 phase: open
+target	internal/resource	internal/browser	wasm	S1
+target	internal/resource	internal/core	all	S1
+target	internal/resource	internal/hal	all	S1
+inverted	internal/resource	internal/device	all	S1

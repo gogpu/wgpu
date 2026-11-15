@@ -34,22 +34,22 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 // SetVertexBuffer sets a vertex buffer for the given slot.
 // Offset is in bytes. Pass 0 for size to use the rest of the buffer.
 func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset uint64) {
-	if buffer == nil || buffer.browser == nil {
+	if buffer == nil || buffer.impl.Browser() == nil {
 		return
 	}
 	// size=0 tells the browser layer to omit the size parameter,
 	// which means "rest of buffer" per the WebGPU spec.
-	p.browser.SetVertexBuffer(slot, buffer.browser.Ref(), offset, 0)
+	p.browser.SetVertexBuffer(slot, buffer.impl.Browser().Ref(), offset, 0)
 }
 
 // SetIndexBuffer sets the index buffer.
 func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
-	if buffer == nil || buffer.browser == nil {
+	if buffer == nil || buffer.impl.Browser() == nil {
 		return
 	}
 	formatStr := browser.IndexFormatToJS(format)
 	// size=0 tells the browser layer to omit the size parameter.
-	p.browser.SetIndexBuffer(buffer.browser.Ref(), formatStr, offset, 0)
+	p.browser.SetIndexBuffer(buffer.impl.Browser().Ref(), formatStr, offset, 0)
 }
 
 // SetViewport sets the viewport transformation.
@@ -96,16 +96,16 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 	if drawCount == 0 {
 		return
 	}
-	if buffer == nil || buffer.browser == nil {
+	if buffer == nil || buffer.impl.Browser() == nil {
 		return
 	}
 	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
-		p.browser.DrawIndirect(buffer.browser.Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
+		p.browser.DrawIndirect(buffer.impl.Browser().Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
 		recordOffset, _ := indirect.RecordOffset(offset, drawIndirectRecordSize, i)
-		p.browser.DrawIndirect(buffer.browser.Ref(), recordOffset)
+		p.browser.DrawIndirect(buffer.impl.Browser().Ref(), recordOffset)
 	}
 }
 
@@ -120,16 +120,16 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	if drawCount == 0 {
 		return
 	}
-	if buffer == nil || buffer.browser == nil {
+	if buffer == nil || buffer.impl.Browser() == nil {
 		return
 	}
 	if !indexedIndirectRangeFits(buffer.Size(), offset, drawCount) {
-		p.browser.DrawIndexedIndirect(buffer.browser.Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndexedIndirectRecordSize, drawCount))
+		p.browser.DrawIndexedIndirect(buffer.impl.Browser().Ref(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndexedIndirectRecordSize, drawCount))
 		return
 	}
 	for i := uint32(0); i < drawCount; i++ {
 		recordOffset, _ := indirect.RecordOffset(offset, drawIndexedIndirectRecordSize, i)
-		p.browser.DrawIndexedIndirect(buffer.browser.Ref(), recordOffset)
+		p.browser.DrawIndexedIndirect(buffer.impl.Browser().Ref(), recordOffset)
 	}
 }
 

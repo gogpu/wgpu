@@ -61,7 +61,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	if e.released || src == nil || dst == nil {
 		return
 	}
-	e.r.CopyBufferToBuffer(src.r, srcOffset, dst.r, dstOffset, size)
+	e.r.CopyBufferToBuffer(src.impl.R(), srcOffset, dst.impl.R(), dstOffset, size)
 }
 
 // CopyBufferToTexture copies data from a buffer to a texture.
@@ -71,7 +71,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 	}
 	for _, r := range regions {
 		rSrc := &rwgpu.TexelCopyBufferInfo{
-			Buffer: src.r.Handle(),
+			Buffer: src.impl.R().Handle(),
 			Layout: rwgpu.TexelCopyBufferLayout{
 				Offset:       r.BufferLayout.Offset,
 				BytesPerRow:  r.BufferLayout.BytesPerRow,
@@ -97,7 +97,7 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	if e.released || buffer == nil {
 		return
 	}
-	e.r.ClearBuffer(buffer.r, offset, size)
+	e.r.ClearBuffer(buffer.impl.R(), offset, size)
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
@@ -118,7 +118,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 			Size: rwgpu.Extent3D{Width: r.Size.Width, Height: r.Size.Height, DepthOrArrayLayers: r.Size.DepthOrArrayLayers},
 		}
 	}
-	e.r.CopyTextureToBuffer(src.r, dst.r, rRegions)
+	e.r.CopyTextureToBuffer(src.r, dst.impl.R(), rRegions)
 }
 
 // CopyTextureToTexture copies data between textures.

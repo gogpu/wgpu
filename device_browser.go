@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 	"github.com/gogpu/wgpu/internal/pipeconst"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Device represents a logical GPU device.
@@ -62,13 +63,7 @@ func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
 		state = MapStateMapped
 	}
 
-	return &Buffer{
-		browser:  bb,
-		size:     desc.Size,
-		usage:    desc.Usage,
-		released: false,
-		mapState: state,
-	}, nil
+	return &Buffer{impl: resource.NewBufferBrowser(bb, desc.Size, desc.Usage, resource.MapState(state))}, nil
 }
 
 // CreateTexture creates a GPU texture from the given descriptor.
@@ -424,8 +419,8 @@ func convertBindGroupEntries(entries []BindGroupEntry) []browser.BindGroupEntryJ
 			SamplerRef:     js.Undefined(),
 			TextureViewRef: js.Undefined(),
 		}
-		if e.Buffer != nil && e.Buffer.browser != nil {
-			entry.BufferRef = e.Buffer.browser.Ref()
+		if e.Buffer != nil && e.Buffer.impl.Browser() != nil {
+			entry.BufferRef = e.Buffer.impl.Browser().Ref()
 			entry.BufferOffset = e.Offset
 			entry.BufferSize = e.Size
 		}
