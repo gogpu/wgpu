@@ -9,8 +9,8 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal/software/shader"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal/software/shader"
 )
 
 // badMagicSPIRV is a SPIR-V header with a wrong magic number: a module the

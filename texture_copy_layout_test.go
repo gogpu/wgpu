@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // TestBufferTextureCopyLayoutValidation: the buffer layout of a buffer-texture

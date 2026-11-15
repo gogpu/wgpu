@@ -28,7 +28,7 @@ import (
 	"github.com/gogpu/naga/spirv"
 	"github.com/gogpu/naga/valid"
 	"github.com/gogpu/naga/wgsl"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // Module is a validated IR module and the ModuleInfo of that validation,

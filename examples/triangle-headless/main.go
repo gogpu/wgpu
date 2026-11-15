@@ -29,7 +29,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 
-	_ "github.com/gogpu/wgpu/hal/allbackends"
+	_ "github.com/gogpu/wgpu/internal/hal/allbackends"
 )
 
 // Shader bisection table.

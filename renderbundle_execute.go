@@ -5,8 +5,8 @@ package wgpu
 import (
 	"fmt"
 
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // refLabel returns the debug label of a resource reference, or "".

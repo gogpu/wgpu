@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core/track"
+	"github.com/gogpu/wgpu/internal/core/track"
 )
 
 // These tests pin the WebGPU usage-scope rule: a usage conflict is only

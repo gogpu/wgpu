@@ -2,7 +2,7 @@
 
 package wgputest
 
-import "github.com/gogpu/wgpu/hal/software"
+import "github.com/gogpu/wgpu/internal/hal/software"
 
 // openSoftware opens a private Pure Go software instance.
 //

@@ -23,8 +23,8 @@ import (
 	"os"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/software"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/software"
 )
 
 func main() {

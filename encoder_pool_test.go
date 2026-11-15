@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 func TestEncoderPool_AcquireCreatesNew(t *testing.T) {

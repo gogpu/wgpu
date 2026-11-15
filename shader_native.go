@@ -8,7 +8,7 @@ import (
 
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/valid"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
 

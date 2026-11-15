@@ -18,7 +18,7 @@ import (
 	// these tests exercise the full HAL integration path. Otherwise, the
 	// tests skip gracefully. Future architecture changes may allow the
 	// software backend to be selected directly.
-	_ "github.com/gogpu/wgpu/hal/software"
+	_ "github.com/gogpu/wgpu/internal/hal/software"
 )
 
 // createTestDevice creates an Instance, Adapter, and Device for integration testing.

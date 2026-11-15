@@ -4,7 +4,7 @@ package wgpu
 
 import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // SetTestRequiredVertexBuffers sets the requiredVertexBuffers field for testing.

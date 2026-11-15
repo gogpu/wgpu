@@ -10,7 +10,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // TestSoftwareIsNotRegisteredByDefault: Phase 0 registers the platform

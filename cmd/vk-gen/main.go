@@ -24,7 +24,7 @@ import (
 
 var (
 	specFile  = flag.String("spec", "vk.xml", "Path to vk.xml specification")
-	outputDir = flag.String("out", "../../hal/vulkan/vk/", "Output directory")
+	outputDir = flag.String("out", "../../internal/hal/vulkan/vk/", "Output directory")
 	// apiVersion reserved for future multi-API support (e.g., vulkansc)
 )
 

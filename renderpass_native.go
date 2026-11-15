@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // RenderPassEncoder records draw commands within a render pass.

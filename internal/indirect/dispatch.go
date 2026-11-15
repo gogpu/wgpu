@@ -8,7 +8,7 @@ package indirect
 import (
 	"sync"
 
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // DispatchArgsSize is the size of DispatchIndirect arguments: x, y, z as u32.

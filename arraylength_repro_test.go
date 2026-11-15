@@ -18,7 +18,7 @@ import (
 	//
 	// This import is why the file sits behind the integration tag: registering
 	// a real backend changes adapter selection for every test in the package.
-	_ "github.com/gogpu/wgpu/hal/metal"
+	_ "github.com/gogpu/wgpu/internal/hal/metal"
 )
 
 // arrayLengthShader writes arrayLength(&out) into the first element of a

@@ -156,7 +156,7 @@ audit_source_selection() {
 	fi
 
 	(cd "$root" && env "${env_args[@]}" go list -tags "$vulkan_only_tags" -deps ./examples/triangle-headless) >"$dependencies"
-	if grep -Eq 'github.com/gogpu/wgpu/hal/(gles|software)$' "$dependencies"; then
+	if grep -Eq 'github.com/gogpu/wgpu/internal/hal/(gles|software)$' "$dependencies"; then
 		echo "the Vulkan-only Android dependency graph contains a GLES or software fallback" >&2
 		exit 1
 	fi

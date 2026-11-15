@@ -20,7 +20,7 @@ import (
 	//
 	// This import is why the file sits behind the integration tag: registering
 	// a real backend changes adapter selection for every test in the package.
-	_ "github.com/gogpu/wgpu/hal/vulkan"
+	_ "github.com/gogpu/wgpu/internal/hal/vulkan"
 )
 
 const (

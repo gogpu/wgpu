@@ -2,7 +2,7 @@
 
 package wgputest
 
-import "github.com/gogpu/wgpu/hal/noop"
+import "github.com/gogpu/wgpu/internal/hal/noop"
 
 // openNoop opens a private noop instance. The noop backend does not register
 // itself, so this leaves the global HAL registry untouched.

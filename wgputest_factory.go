@@ -5,7 +5,7 @@ package wgpu
 import (
 	"errors"
 
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/wgputestbridge"
 )
 

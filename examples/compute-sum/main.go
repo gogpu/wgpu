@@ -20,7 +20,7 @@ import (
 	"github.com/gogpu/wgpu"
 
 	// Register all available GPU backends (Vulkan, DX12, GLES, Metal, etc.)
-	_ "github.com/gogpu/wgpu/hal/allbackends"
+	_ "github.com/gogpu/wgpu/internal/hal/allbackends"
 )
 
 // sumShaderWGSL performs pairwise addition: output[i] = input[2*i] + input[2*i+1].

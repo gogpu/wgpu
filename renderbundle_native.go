@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // Render bundles are recorded and replayed by core, not by the backends:

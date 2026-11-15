@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
-	_ "github.com/gogpu/wgpu/hal/software"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
+	_ "github.com/gogpu/wgpu/internal/hal/software"
 )
 
 const headlessTriangleWGSL = `

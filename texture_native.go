@@ -6,9 +6,9 @@ import (
 	"slices"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/core/track"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // Texture represents a GPU texture.

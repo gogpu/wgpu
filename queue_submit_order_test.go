@@ -5,9 +5,9 @@ package wgpu
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/core/track"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 // labeledCB is a HAL command buffer that remembers the label its encoder was

@@ -1,0 +1,1593 @@
+// Copyright 2025 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+//go:build darwin && !(js && wasm)
+
+package metal
+
+import (
+	"fmt"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+	"unsafe"
+
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/naga/msl"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/metal/mslmap"
+	"github.com/gogpu/wgpu/internal/shaderir"
+)
+
+// Vertex buffer indices are assigned from the end of the range and count down.
+// This maximizes the gap between uniform/storage buffers and vertex buffers.
+const maxVertexBuffers = 31
+
+// unknownError is the default error message when Metal returns a nil NSError.
+const unknownError = "unknown error"
+
+// Device implements hal.Device for Metal.
+type Device struct {
+	raw           ID // id<MTLDevice>
+	commandQueue  ID // id<MTLCommandQueue>
+	adapter       *Adapter
+	eventListener ID     // id<MTLSharedEventListener> — created lazily, reused
+	queue         *Queue // back-reference for WaitIdle semaphore draining
+	// hasUnifiedMemory is true on Apple Silicon (UMA). On UMA, MTLStorageModeShared
+	// textures are physically identical to Private but allow setPurgeableState(empty)
+	// and direct CPU writes without a staging blit, which eliminates the main source
+	// of resize-induced memory growth.
+	hasUnifiedMemory bool
+	// isAppleGPU is true when the device belongs to MTLGPUFamilyApple1 or higher
+	// (Apple-designed GPU: A-series, M-series). Intel/AMD GPUs on Mac report
+	// hasUnifiedMemory=true but are NOT Apple GPU family and do not support
+	// MTLStorageModeShared for multisample textures. This field drives texture
+	// storage mode selection instead of hasUnifiedMemory.
+	isAppleGPU      bool
+	icbTranslatorMu sync.Mutex
+	icbTranslators  map[gputypes.IndexFormat]indexedICBTranslator
+}
+
+// newDevice creates a new Device from a Metal device.
+func newDevice(adapter *Adapter) (*Device, error) {
+	if adapter.raw == 0 {
+		return nil, fmt.Errorf("metal: adapter has no device")
+	}
+
+	queue := MsgSend(adapter.raw, Sel("newCommandQueue"))
+	if queue == 0 {
+		return nil, fmt.Errorf("metal: failed to create command queue")
+	}
+
+	// Detect UMA: hasUnifiedMemory returns YES on Apple Silicon (M-series) and
+	// some Intel integrated GPUs (e.g. Iris Plus 655). Used for DeviceType
+	// classification and buffer storage decisions.
+	hasUMA := MsgSend(adapter.raw, Sel("hasUnifiedMemory")) != 0
+
+	// Detect Apple-designed GPU (A-series, M-series) via MTLGPUFamilyApple1.
+	// This is the correct predicate for texture storage mode: Intel/AMD GPUs
+	// may report hasUnifiedMemory=true but crash on MTLStorageModeShared for
+	// multisample textures. Only Apple GPU family supports Shared for all
+	// single-sample texture types.
+	isApple := DeviceSupportsFamily(adapter.raw, MTLGPUFamilyApple1)
+
+	hal.Logger().Info("metal: device created",
+		"name", DeviceName(adapter.raw),
+		"hasUnifiedMemory", hasUMA,
+		"isAppleGPU", isApple,
+	)
+
+	return &Device{
+		raw:              adapter.raw,
+		commandQueue:     queue,
+		adapter:          adapter,
+		hasUnifiedMemory: hasUMA,
+		isAppleGPU:       isApple,
+	}, nil
+}
+
+// CreateBuffer creates a GPU buffer.
+func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: buffer descriptor is nil in Metal.CreateBuffer — core validation gap")
+	}
+
+	var options MTLResourceOptions
+	mapRead := desc.Usage&gputypes.BufferUsageMapRead != 0
+	mapWrite := desc.Usage&gputypes.BufferUsageMapWrite != 0
+	copyDst := desc.Usage&gputypes.BufferUsageCopyDst != 0
+
+	if mapRead || mapWrite || copyDst || desc.MappedAtCreation {
+		// CopyDst buffers need CPU-visible storage for Queue.WriteBuffer().
+		// MappedAtCreation needs CPU-visible storage for the initial mapping.
+		// On Apple Silicon UMA, StorageModeShared is zero-cost (same physical memory).
+		// This matches the Vulkan backend which maps CopyDst/MappedAtCreation to host-visible memory.
+		options = MTLResourceStorageModeShared
+	} else {
+		options = MTLResourceStorageModePrivate
+	}
+
+	if mapWrite && !mapRead {
+		options |= MTLResourceCPUCacheModeWriteCombined
+	}
+
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	raw := MsgSend(d.raw, Sel("newBufferWithLength:options:"),
+		uintptr(desc.Size), uintptr(options))
+	if raw == 0 {
+		return nil, fmt.Errorf("metal: failed to create buffer")
+	}
+
+	if desc.Label != "" {
+		label := NSString(desc.Label)
+		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
+	}
+
+	return &Buffer{
+		raw:     raw,
+		size:    desc.Size,
+		usage:   desc.Usage,
+		options: options,
+		device:  d,
+	}, nil
+}
+
+// MapBuffer returns a CPU-visible pointer into the given Metal buffer.
+//
+// Buffers created with MTLStorageModeShared or MTLStorageModeManaged expose
+// host-visible memory via MTLBuffer.contents(). Private buffers do not and
+// return an error; core must route such reads through a staging buffer at
+// a higher layer.
+//
+// Metal Shared memory is always coherent with CPU access, so the driver
+// reports IsCoherent=true; Managed storage would need didModifyRange
+// for CPU→GPU writes but the Go wgpu path currently uses only Shared
+// host-visible buffers.
+func (d *Device) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	buf, ok := buffer.(*Buffer)
+	if !ok || buf == nil || buf.raw == 0 {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	if offset+size > buf.size {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	ptr := buf.Contents()
+	if ptr == nil {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	return hal.BufferMapping{
+		Ptr:        unsafe.Add(ptr, int(offset)),
+		IsCoherent: true,
+	}, nil
+}
+
+// UnmapBuffer is a no-op on Metal because Shared-storage buffers are
+// persistently mapped and coherent with the GPU.
+func (d *Device) UnmapBuffer(_ hal.Buffer) error {
+	return nil
+}
+
+// DestroyBuffer destroys a GPU buffer.
+func (d *Device) DestroyBuffer(buffer hal.Buffer) {
+	mtlBuffer, ok := buffer.(*Buffer)
+	if !ok || mtlBuffer == nil {
+		return
+	}
+	if mtlBuffer.raw != 0 {
+		Release(mtlBuffer.raw)
+		mtlBuffer.raw = 0
+	}
+	mtlBuffer.device = nil
+}
+
+// CreateTexture creates a GPU texture.
+func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: texture descriptor is nil in Metal.CreateTexture — core validation gap")
+	}
+
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	texDesc := MsgSend(ID(GetClass("MTLTextureDescriptor")), Sel("new"))
+	if texDesc == 0 {
+		return nil, fmt.Errorf("metal: failed to create texture descriptor")
+	}
+	defer Release(texDesc)
+
+	texType := textureTypeFromDimension(desc.Dimension, desc.SampleCount, desc.Size.DepthOrArrayLayers)
+	_ = MsgSend(texDesc, Sel("setTextureType:"), uintptr(texType))
+
+	pixelFormat := d.adapter.mapTextureFormat(desc.Format)
+	if pixelFormat == MTLPixelFormatInvalid {
+		// newTextureWithDescriptor aborts the process (SIGABRT) on an
+		// invalid pixel format, so a format without a Metal mapping is an
+		// error here, never a call.
+		return nil, fmt.Errorf("metal: texture format %v has no Metal pixel format", desc.Format)
+	}
+	_ = MsgSend(texDesc, Sel("setPixelFormat:"), uintptr(pixelFormat))
+
+	_ = MsgSend(texDesc, Sel("setWidth:"), uintptr(desc.Size.Width))
+	_ = MsgSend(texDesc, Sel("setHeight:"), uintptr(desc.Size.Height))
+
+	shape := metalTextureDescriptorShape(desc.Dimension, desc.Size.DepthOrArrayLayers)
+	_ = MsgSend(texDesc, Sel("setDepth:"), uintptr(shape.depth))
+	if texType == MTLTextureType1DArray || texType == MTLTextureType2DArray {
+		_ = MsgSend(texDesc, Sel("setArrayLength:"), uintptr(shape.arrayLength))
+	}
+
+	mipLevels := desc.MipLevelCount
+	if mipLevels == 0 {
+		mipLevels = 1
+	}
+	_ = MsgSend(texDesc, Sel("setMipmapLevelCount:"), uintptr(mipLevels))
+
+	sampleCount := desc.SampleCount
+	if sampleCount == 0 {
+		sampleCount = 1
+	}
+	_ = MsgSend(texDesc, Sel("setSampleCount:"), uintptr(sampleCount))
+
+	usage := textureUsageToMTL(desc.Format, desc.Usage)
+	_ = MsgSend(texDesc, Sel("setUsage:"), uintptr(usage))
+
+	// Select storage mode based on GPU family and sample count.
+	// Apple GPU + single-sample → Shared (zero-copy CPU writes, setPurgeableState).
+	// Apple GPU + multisample → Private (MSAA has no Shared benefit).
+	// Non-Apple GPU (Intel/AMD) → Private always (spec requirement for MSAA).
+	storageMode, isShared := textureStorageMode(d.isAppleGPU, sampleCount)
+	_ = MsgSend(texDesc, Sel("setStorageMode:"), uintptr(storageMode))
+
+	raw := MsgSend(d.raw, Sel("newTextureWithDescriptor:"), uintptr(texDesc))
+	if raw == 0 {
+		return nil, fmt.Errorf("metal: failed to create texture")
+	}
+
+	if desc.Label != "" {
+		label := NSString(desc.Label)
+		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
+	}
+
+	return &Texture{
+		raw:        raw,
+		format:     desc.Format,
+		width:      desc.Size.Width,
+		height:     desc.Size.Height,
+		depth:      max(desc.Size.DepthOrArrayLayers, 1),
+		mipLevels:  mipLevels,
+		samples:    sampleCount,
+		dimension:  desc.Dimension,
+		usage:      desc.Usage,
+		device:     d,
+		isExternal: false,
+		isShared:   isShared,
+	}, nil
+}
+
+// DestroyTexture destroys a GPU texture.
+//
+// setPurgeableState(empty) is called before Release so that Metal can reclaim
+// the physical memory pages immediately, even if Metal's internal retain count
+// has not yet reached zero (e.g. the texture is referenced by a completed but
+// not-yet-garbage-collected command buffer). This is safe because DestroyTexture
+// is only called from DestroyQueue.Triage after the GPU submission that last
+// used the texture has completed.
+func (d *Device) DestroyTexture(texture hal.Texture) {
+	mtlTexture, ok := texture.(*Texture)
+	if !ok || mtlTexture == nil {
+		return
+	}
+	if mtlTexture.raw != 0 && !mtlTexture.isExternal {
+		_ = MsgSend(mtlTexture.raw, Sel("setPurgeableState:"), uintptr(MTLPurgeableStateEmpty))
+		Release(mtlTexture.raw)
+		mtlTexture.raw = 0
+	}
+	mtlTexture.device = nil
+}
+
+// CreateTextureView creates a view into a texture.
+func (d *Device) CreateTextureView(texture hal.Texture, desc *hal.TextureViewDescriptor) (hal.TextureView, error) {
+	var mtlTexture *Texture
+	switch t := texture.(type) {
+	case *Texture:
+		mtlTexture = t
+	case *SurfaceTexture:
+		if t != nil {
+			mtlTexture = t.texture
+		}
+	}
+	if mtlTexture == nil {
+		return nil, fmt.Errorf("metal: invalid texture")
+	}
+	if desc == nil {
+		desc = &hal.TextureViewDescriptor{}
+	}
+
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	pixelFormat := d.adapter.mapViewFormat(mtlTexture.format, desc.Format, desc.Aspect)
+	if pixelFormat == MTLPixelFormatInvalid {
+		// As in CreateTexture: Metal aborts on an invalid pixel format, so
+		// a view format without a Metal mapping is an error, never a call.
+		return nil, fmt.Errorf("metal: texture view format %v (texture %v, aspect %v) has no Metal pixel format",
+			desc.Format, mtlTexture.format, desc.Aspect)
+	}
+
+	baseMip := desc.BaseMipLevel
+	mipCount := desc.MipLevelCount
+	if mipCount == 0 {
+		// 0 means "all remaining mip levels" in WebGPU spec
+		mipCount = mtlTexture.mipLevels - baseMip
+	}
+
+	baseLayer := desc.BaseArrayLayer
+	layerCount := desc.ArrayLayerCount
+	if layerCount == 0 {
+		// 0 means "all remaining array layers" in WebGPU spec
+		layerCount = mtlTexture.depth - baseLayer
+		if layerCount == 0 {
+			layerCount = 1
+		}
+	}
+
+	var viewType MTLTextureType
+	if desc.Dimension == gputypes.TextureViewDimensionUndefined {
+		viewType = textureTypeFromDimension(mtlTexture.dimension, mtlTexture.samples, mtlTexture.depth)
+	} else {
+		viewType = textureViewDimensionToMTL(desc.Dimension)
+	}
+
+	// Metal requires the texture view type to match the source texture's
+	// multisample state. A 2DMultisample source cannot have a 2D view.
+	// Vulkan handles this implicitly, but Metal is stricter.
+	if mtlTexture.samples > 1 && viewType == MTLTextureType2D {
+		viewType = MTLTextureType2DMultisample
+	}
+
+	// Metal's newTextureViewWithPixelFormat:textureType:levels:slices: expects NSRange structs
+	levelRange := NSRange{
+		Location: NSUInteger(baseMip),
+		Length:   NSUInteger(mipCount),
+	}
+	sliceRange := NSRange{
+		Location: NSUInteger(baseLayer),
+		Length:   NSUInteger(layerCount),
+	}
+
+	raw := msgSendID(mtlTexture.raw, Sel("newTextureViewWithPixelFormat:textureType:levels:slices:"),
+		argUint64(uint64(pixelFormat)),
+		argUint64(uint64(viewType)),
+		argStruct(levelRange, nsRangeType),
+		argStruct(sliceRange, nsRangeType),
+	)
+	if raw == 0 {
+		return nil, fmt.Errorf("metal: failed to create texture view")
+	}
+
+	return &TextureView{raw: raw, texture: mtlTexture, device: d}, nil
+}
+
+// DestroyTextureView destroys a texture view.
+func (d *Device) DestroyTextureView(view hal.TextureView) {
+	mtlView, ok := view.(*TextureView)
+	if !ok || mtlView == nil {
+		return
+	}
+	if mtlView.raw != 0 {
+		Release(mtlView.raw)
+		mtlView.raw = 0
+	}
+	mtlView.device = nil
+}
+
+// CreateSampler creates a texture sampler.
+func (d *Device) CreateSampler(desc *hal.SamplerDescriptor) (hal.Sampler, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("BUG: sampler descriptor is nil in Metal.CreateSampler — core validation gap")
+	}
+
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	sampDesc := MsgSend(ID(GetClass("MTLSamplerDescriptor")), Sel("new"))
+	if sampDesc == 0 {
+		return nil, fmt.Errorf("metal: failed to create sampler descriptor")
+	}
+	defer Release(sampDesc)
+
+	_ = MsgSend(sampDesc, Sel("setMinFilter:"), uintptr(filterModeToMTL(desc.MinFilter)))
+	_ = MsgSend(sampDesc, Sel("setMagFilter:"), uintptr(filterModeToMTL(desc.MagFilter)))
+	_ = MsgSend(sampDesc, Sel("setMipFilter:"), uintptr(mipmapFilterModeToMTL(desc.MipmapFilter)))
+	_ = MsgSend(sampDesc, Sel("setSAddressMode:"), uintptr(addressModeToMTL(desc.AddressModeU)))
+	_ = MsgSend(sampDesc, Sel("setTAddressMode:"), uintptr(addressModeToMTL(desc.AddressModeV)))
+	_ = MsgSend(sampDesc, Sel("setRAddressMode:"), uintptr(addressModeToMTL(desc.AddressModeW)))
+
+	// Literal clamps, as in Rust wgpu-hal (the root resolves a zero
+	// LodMaxClamp to 32). The properties are floats: they travel in FP
+	// registers, so they go through the typed call, not MsgSend's uintptr.
+	msgSendVoid(sampDesc, Sel("setLodMinClamp:"), argFloat32(desc.LodMinClamp))
+	msgSendVoid(sampDesc, Sel("setLodMaxClamp:"), argFloat32(desc.LodMaxClamp))
+
+	if desc.Anisotropy > 1 {
+		_ = MsgSend(sampDesc, Sel("setMaxAnisotropy:"), uintptr(desc.Anisotropy))
+	}
+
+	if desc.Compare != gputypes.CompareFunctionUndefined {
+		_ = MsgSend(sampDesc, Sel("setCompareFunction:"), uintptr(compareFunctionToMTL(desc.Compare)))
+	}
+
+	raw := MsgSend(d.raw, Sel("newSamplerStateWithDescriptor:"), uintptr(sampDesc))
+	if raw == 0 {
+		return nil, fmt.Errorf("metal: failed to create sampler state")
+	}
+
+	return &Sampler{raw: raw, device: d}, nil
+}
+
+// DestroySampler destroys a sampler.
+func (d *Device) DestroySampler(sampler hal.Sampler) {
+	mtlSampler, ok := sampler.(*Sampler)
+	if !ok || mtlSampler == nil {
+		return
+	}
+	if mtlSampler.raw != 0 {
+		Release(mtlSampler.raw)
+		mtlSampler.raw = 0
+	}
+	mtlSampler.device = nil
+}
+
+// CreateBindGroupLayout creates a bind group layout.
+//
+// The entries are kept sorted by binding number: the slots of a group and the
+// order of its dynamic offsets follow the binding numbers, not the order the
+// caller listed the entries in (Rust wgpu-core hands wgpu-hal sorted entries).
+func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
+	layout := &BindGroupLayout{entries: mslmap.SortEntries(desc.Entries), device: d}
+	for s := range layout.stageSlots {
+		layout.stageSlots[s], _ = mslmap.GroupSlots(layout.entries, stageVisibility[s])
+	}
+	return layout, nil
+}
+
+// DestroyBindGroupLayout destroys a bind group layout.
+func (d *Device) DestroyBindGroupLayout(layout hal.BindGroupLayout) {
+	mtlLayout, ok := layout.(*BindGroupLayout)
+	if !ok || mtlLayout == nil {
+		return
+	}
+	mtlLayout.device = nil
+}
+
+// CreateBindGroup creates a bind group.
+//
+// It resolves each entry of the layout, in binding order, to the resource the
+// encoder binds: its slot in each stage, the index of its dynamic offset, and
+// the binding size of a storage buffer for naga's `_buffer_sizes` argument.
+//
+// Reference: Rust wgpu-hal metal/device.rs create_bind_group.
+func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, error) {
+	layout, ok := desc.Layout.(*BindGroupLayout)
+	if !ok || layout == nil {
+		return nil, fmt.Errorf("metal: invalid bind group layout")
+	}
+	group := &BindGroup{layout: layout, entries: desc.Entries, device: d}
+	group.resources = make([]bindGroupResource, len(layout.entries))
+	dynamicCount := 0
+	for i := range layout.entries {
+		le := &layout.entries[i]
+		res := &group.resources[i]
+		res.kind = mslmap.EntryKind(le)
+		res.binding = le.Binding
+		res.dynamicIndex = -1
+		for s := range res.slots {
+			res.slots[s] = layout.stageSlots[s][i]
+		}
+		if le.Buffer != nil && le.Buffer.HasDynamicOffset {
+			// Dynamic offsets come in binding order, whichever stages
+			// see the binding.
+			res.dynamicIndex = dynamicCount
+			dynamicCount++
+		}
+		entry, found := findBindGroupEntry(desc.Entries, le.Binding)
+		if !found {
+			continue
+		}
+		switch r := entry.Resource.(type) {
+		case gputypes.BufferBinding:
+			res.handle = r.Buffer
+			res.offset = r.Offset
+			if mslmap.IsStorageBuffer(le) {
+				res.size = boundBufferSize(r)
+				res.sized = true
+			}
+		case gputypes.TextureViewBinding:
+			res.handle = r.TextureView
+		case gputypes.SamplerBinding:
+			res.handle = r.Sampler
+		}
+	}
+	return group, nil
+}
+
+// findBindGroupEntry returns the entry of entries for binding.
+func findBindGroupEntry(entries []gputypes.BindGroupEntry, binding uint32) (gputypes.BindGroupEntry, bool) {
+	for _, entry := range entries {
+		if entry.Binding == binding {
+			return entry, true
+		}
+	}
+	return gputypes.BindGroupEntry{}, false
+}
+
+// DestroyBindGroup destroys a bind group.
+func (d *Device) DestroyBindGroup(group hal.BindGroup) {
+	mtlGroup, ok := group.(*BindGroup)
+	if !ok || mtlGroup == nil {
+		return
+	}
+	mtlGroup.device = nil
+}
+
+// CreatePipelineLayout creates a pipeline layout.
+//
+// Each pipeline stage numbers the bindings visible to it, group after group,
+// in binding order, separately for buffers, textures and samplers. The
+// shaders of a pipeline are compiled with these slots and the encoder binds
+// each bind group at them, so the slots never depend on which bindings a
+// shader declares.
+//
+// Reference: Rust wgpu-hal metal/device.rs create_pipeline_layout.
+func (d *Device) CreatePipelineLayout(desc *hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
+	groups := make([][]gputypes.BindGroupLayoutEntry, len(desc.BindGroupLayouts))
+	for i, bglIface := range desc.BindGroupLayouts {
+		if bgl, ok := bglIface.(*BindGroupLayout); ok && bgl != nil {
+			groups[i] = bgl.entries
+		}
+	}
+	layout := &PipelineLayout{layouts: desc.BindGroupLayouts, device: d}
+	for s := range layout.stages {
+		stage, err := mslmap.NewStageLayout(groups, stageVisibility[s])
+		if err != nil {
+			return nil, fmt.Errorf("metal: %w", err)
+		}
+		layout.stages[s] = stage
+	}
+	return layout, nil
+}
+
+// DestroyPipelineLayout destroys a pipeline layout.
+func (d *Device) DestroyPipelineLayout(layout hal.PipelineLayout) {
+	mtlLayout, ok := layout.(*PipelineLayout)
+	if !ok || mtlLayout == nil {
+		return
+	}
+	mtlLayout.device = nil
+}
+
+// CreateShaderModule creates a shader module.
+//
+// This function parses WGSL and lowers it to naga IR. It does not write MSL,
+// because the buffer slot for naga's `_buffer_sizes` argument comes from the
+// pipeline layout, which is not known yet. The pipeline writes the MSL later.
+// WGSL syntax and validation errors are still reported here.
+//
+// Reference: Rust wgpu-hal metal/device.rs:138-145 (load_shader takes the
+// pipeline layout and is called from create_*_pipeline).
+func (d *Device) CreateShaderModule(desc *hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
+	if desc.Source.WGSL == "" {
+		// No WGSL source - just store the descriptor for later
+		return &ShaderModule{source: desc.Source, device: d}, nil
+	}
+
+	start := time.Now()
+
+	lowered, err := shaderir.LowerDescriptor(desc)
+	if err != nil {
+		return nil, fmt.Errorf("metal: failed to parse WGSL: %w", err)
+	}
+
+	// Extract workgroup sizes from entry points for compute shaders
+	workgroupSizes := extractWorkgroupSizes(lowered.IR)
+
+	hal.Logger().Debug("metal: WGSL→IR lowering",
+		"elapsed", time.Since(start),
+		"entryPoints", len(lowered.IR.EntryPoints),
+	)
+
+	return &ShaderModule{
+		source:         desc.Source,
+		irModule:       &lowered,
+		device:         d,
+		workgroupSizes: workgroupSizes,
+	}, nil
+}
+
+// compiledLibrary holds one MSL translation of a shader module and the data
+// that the caller needs in order to bind it.
+type compiledLibrary struct {
+	library         ID // id<MTLLibrary>; the caller must release it
+	entrypointNames map[string]string
+	// sizesBindings lists the bindings whose byte size the kernel needs, in
+	// the field order that naga uses. It is empty if the shader has no
+	// runtime-sized array.
+	sizesBindings []ir.ResourceBinding
+	// sizesSlot is the buffer slot that the `_buffer_sizes` argument was
+	// compiled with. It has a meaning only if sizesBindings is not empty.
+	sizesSlot int
+	// specialized is true when the library was written from the shader
+	// module specialized for its pipeline stage (librarySpec).
+	specialized bool
+	// workgroupSize is the workgroup size of that entry point when
+	// specialized; otherwise the shader module's sizes apply.
+	workgroupSize [3]uint32
+}
+
+// librarySpec selects the entry point compileLibrary writes, the only one in
+// the library. When the module has overrides or the stage gives pipeline
+// constants, it is written from the module specialized for the stage with
+// naga.ProcessOverrides (Rust wgpu-hal metal/device.rs:174, load_shader). The
+// MSL backend no longer resolves override defaults itself, so a module with
+// overrides must be specialized even without constants.
+type librarySpec struct {
+	stage      ir.ShaderStage
+	entryPoint string
+	constants  map[string]float64
+}
+
+// compileLibrary writes MSL for one pipeline stage, the entry point of spec,
+// with the slots of the pipeline layout for that stage, and builds an
+// MTLLibrary from it. naga's `_buffer_sizes` argument goes to the stage's
+// sizes slot.
+//
+// Reference: Rust wgpu-hal metal/device.rs load_shader (per_entry_point_map
+// from layout.per_stage_map, one entry point per library).
+func (d *Device) compileLibrary(module *ShaderModule, layout *PipelineLayout, spec librarySpec) (*compiledLibrary, error) {
+	if module == nil || module.irModule == nil {
+		return nil, fmt.Errorf("metal: shader module has no WGSL source")
+	}
+
+	start := time.Now()
+
+	out := &compiledLibrary{}
+	stage := *module.irModule
+	if shaderir.PerStage(stage.IR, spec.constants) {
+		var err error
+		stage, err = shaderir.Specialize(stage, spec.stage, spec.entryPoint, spec.constants)
+		if err != nil {
+			return nil, fmt.Errorf("metal: %w", err)
+		}
+		out.specialized = true
+		out.workgroupSize = stage.IR.EntryPoints[0].Workgroup
+	}
+
+	stageLayout := layout.stage(pipelineStage(spec.stage))
+	if stageLayout.SizesSlot >= 0 {
+		bindings, err := mslmap.RuntimeArrayBindings(stage.IR)
+		if err != nil {
+			return nil, fmt.Errorf("metal: %w", err)
+		}
+		out.sizesBindings = bindings
+		out.sizesSlot = stageLayout.SizesSlot
+	}
+	options := stageLayout.Options(spec.stage, spec.entryPoint)
+	// naga writes for this version and refuses features of newer ones;
+	// newLibraryWithSource compiles at the same version.
+	options.LangVersion = d.adapter.compileOptions.mslVersion
+
+	mslSource, info, err := msl.Compile(stage.IR, options)
+	if err != nil {
+		return nil, fmt.Errorf("metal: failed to compile to MSL: %w", shaderir.BackendError(err))
+	}
+	if info.RequiresSizesBuffer && len(out.sizesBindings) == 0 {
+		return nil, fmt.Errorf("metal: shader requires a buffer sizes argument but no runtime-sized array binding was found")
+	}
+	out.entrypointNames = info.EntryPointNames
+
+	hal.Logger().Debug("metal: IR→MSL compilation",
+		"elapsed", time.Since(start),
+		"mslBytes", len(mslSource),
+		"sizesBuffer", len(out.sizesBindings) > 0,
+	)
+
+	library, errorPtr := d.newLibraryWithSource(mslSource)
+	if library == 0 {
+		errMsg := unknownError
+		if errorPtr != 0 {
+			if details := formatNSError(errorPtr); details != "" {
+				errMsg = details
+			}
+			// Object is autoreleased
+		}
+		return nil, fmt.Errorf("metal: failed to compile MSL: %s\nMSL:\n%s", errMsg, mslSource)
+	}
+	out.library = library
+
+	return out, nil
+}
+
+// pipelineStage returns the pipeline stage index of a naga shader stage.
+func pipelineStage(stage ir.ShaderStage) int {
+	switch stage {
+	case ir.StageVertex:
+		return stageVertex
+	case ir.StageFragment:
+		return stageFragment
+	default:
+		return stageCompute
+	}
+}
+
+func formatNSError(errObj ID) string {
+	if errObj == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	if desc := GoString(MsgSend(errObj, Sel("localizedDescription"))); desc != "" {
+		parts = append(parts, desc)
+	}
+	if reason := GoString(MsgSend(errObj, Sel("localizedFailureReason"))); reason != "" {
+		parts = append(parts, reason)
+	}
+	if debug := GoString(MsgSend(errObj, Sel("debugDescription"))); debug != "" {
+		parts = append(parts, debug)
+	}
+	if info := MsgSend(errObj, Sel("userInfo")); info != 0 {
+		if infoDesc := GoString(MsgSend(info, Sel("description"))); infoDesc != "" {
+			parts = append(parts, infoDesc)
+		}
+	}
+	return strings.Join(parts, " | ")
+}
+
+// DestroyShaderModule destroys a shader module.
+func (d *Device) DestroyShaderModule(module hal.ShaderModule) {
+	mtlModule, ok := module.(*ShaderModule)
+	if !ok || mtlModule == nil {
+		return
+	}
+	mtlModule.irModule = nil
+	mtlModule.device = nil
+}
+
+// CreateRenderPipeline creates a render pipeline.
+func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.RenderPipeline, error) {
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	var pipeLayout *PipelineLayout
+	if pl, ok := desc.Layout.(*PipelineLayout); ok {
+		pipeLayout = pl
+	}
+
+	// Get shader modules
+	//
+	// Each stage is compiled on its own, with the slots the pipeline layout
+	// gives that stage: the vertex and fragment stages number only the
+	// bindings visible to them, so they need separate libraries even for one
+	// shader module. A stage that sees a storage buffer gets naga's
+	// `_buffer_sizes` argument at its slot after its buffers; the encoder
+	// fills it before every draw (P1-MTL-005).
+	//
+	// Reference: Rust wgpu-hal metal/device.rs create_render_pipeline
+	// (load_shader per stage, sizes_slot per stage).
+	vertexModule, ok := desc.Vertex.Module.(*ShaderModule)
+	if !ok || vertexModule == nil {
+		return nil, fmt.Errorf("metal: invalid vertex shader module")
+	}
+	vertexLib, err := d.compileLibrary(vertexModule, pipeLayout,
+		librarySpec{stage: ir.StageVertex, entryPoint: desc.Vertex.EntryPoint, constants: desc.Vertex.Constants})
+	if err != nil {
+		return nil, err
+	}
+	defer Release(vertexLib.library)
+
+	var fragmentModule *ShaderModule
+	var fragmentLib *compiledLibrary
+	if desc.Fragment != nil {
+		fragmentModule, ok = desc.Fragment.Module.(*ShaderModule)
+		if !ok || fragmentModule == nil {
+			return nil, fmt.Errorf("metal: invalid fragment shader module")
+		}
+		fragmentLib, err = d.compileLibrary(fragmentModule, pipeLayout,
+			librarySpec{stage: ir.StageFragment, entryPoint: desc.Fragment.EntryPoint, constants: desc.Fragment.Constants})
+		if err != nil {
+			return nil, err
+		}
+		defer Release(fragmentLib.library)
+	}
+
+	// Create pipeline descriptor
+	pipelineDesc := MsgSend(ID(GetClass("MTLRenderPipelineDescriptor")), Sel("new"))
+	if pipelineDesc == 0 {
+		return nil, fmt.Errorf("metal: failed to create pipeline descriptor")
+	}
+	defer Release(pipelineDesc)
+
+	// Set label if provided
+	if desc.Label != "" {
+		label := NSString(desc.Label)
+		_ = MsgSend(pipelineDesc, Sel("setLabel:"), uintptr(label))
+		Release(label)
+	}
+
+	// Resolve translated entrypoint name
+	entrypointName := desc.Vertex.EntryPoint
+	if translated, ok := vertexLib.entrypointNames[entrypointName]; ok {
+		entrypointName = translated
+	}
+
+	// Get vertex function from library
+	vertexFuncName := NSString(entrypointName)
+	vertexFunc := MsgSend(vertexLib.library, Sel("newFunctionWithName:"), uintptr(vertexFuncName))
+	Release(vertexFuncName)
+	if vertexFunc == 0 {
+		return nil, fmt.Errorf("metal: vertex function '%s' not found", entrypointName)
+	}
+	defer Release(vertexFunc)
+
+	// Set vertex function
+	_ = MsgSend(pipelineDesc, Sel("setVertexFunction:"), uintptr(vertexFunc))
+
+	// Configure vertex descriptor from vertex buffer layouts
+	if len(desc.Vertex.Buffers) > 0 {
+		if vd, err := d.buildVertexDescriptor(desc.Vertex.Buffers); err != nil {
+			return nil, err
+		} else if vd != 0 {
+			_ = MsgSend(pipelineDesc, Sel("setVertexDescriptor:"), uintptr(vd))
+		}
+	}
+
+	// Get and set fragment function if present
+	if fragmentModule != nil && desc.Fragment != nil {
+		// Resolve translated entrypoint name
+		entrypointName := desc.Fragment.EntryPoint
+		if translated, ok := fragmentLib.entrypointNames[entrypointName]; ok {
+			entrypointName = translated
+		}
+
+		fragmentFuncName := NSString(entrypointName)
+		fragmentFunc := MsgSend(fragmentLib.library, Sel("newFunctionWithName:"), uintptr(fragmentFuncName))
+		Release(fragmentFuncName)
+		if fragmentFunc == 0 {
+			return nil, fmt.Errorf("metal: fragment function '%s' not found", entrypointName)
+		}
+		defer Release(fragmentFunc)
+
+		_ = MsgSend(pipelineDesc, Sel("setFragmentFunction:"), uintptr(fragmentFunc))
+
+		// Configure color attachments
+		colorAttachments := MsgSend(pipelineDesc, Sel("colorAttachments"))
+		for i, target := range desc.Fragment.Targets {
+			attachment := MsgSend(colorAttachments, Sel("objectAtIndexedSubscript:"), uintptr(i))
+			if attachment == 0 {
+				continue
+			}
+
+			// Set pixel format
+			pixelFormat := d.adapter.mapTextureFormat(target.Format)
+			_ = MsgSend(attachment, Sel("setPixelFormat:"), uintptr(pixelFormat))
+
+			// Set write mask
+			_ = MsgSend(attachment, Sel("setWriteMask:"), uintptr(colorWriteMaskToMTL(target.WriteMask)))
+
+			// Configure blending if present
+			if target.Blend != nil {
+				_ = MsgSend(attachment, Sel("setBlendingEnabled:"), uintptr(1))
+				_ = MsgSend(attachment, Sel("setSourceRGBBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Color.SrcFactor)))
+				_ = MsgSend(attachment, Sel("setDestinationRGBBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Color.DstFactor)))
+				_ = MsgSend(attachment, Sel("setRgbBlendOperation:"), uintptr(blendOperationToMTL(target.Blend.Color.Operation)))
+				_ = MsgSend(attachment, Sel("setSourceAlphaBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Alpha.SrcFactor)))
+				_ = MsgSend(attachment, Sel("setDestinationAlphaBlendFactor:"), uintptr(blendFactorToMTL(target.Blend.Alpha.DstFactor)))
+				_ = MsgSend(attachment, Sel("setAlphaBlendOperation:"), uintptr(blendOperationToMTL(target.Blend.Alpha.Operation)))
+			}
+		}
+	}
+
+	var depthStencilState ID
+	var depthBias, depthSlopeScale, depthClamp float32
+	if desc.DepthStencil != nil {
+		rawFormat := uintptr(d.adapter.mapTextureFormat(desc.DepthStencil.Format))
+		if desc.DepthStencil.Format.HasDepth() {
+			_ = MsgSend(pipelineDesc, Sel("setDepthAttachmentPixelFormat:"), rawFormat)
+		}
+		if desc.DepthStencil.Format.HasStencil() {
+			_ = MsgSend(pipelineDesc, Sel("setStencilAttachmentPixelFormat:"), rawFormat)
+		}
+
+		// Create depth stencil state
+		depthStencilDesc := MsgSend(ID(GetClass("MTLDepthStencilDescriptor")), Sel("new"))
+		_ = MsgSend(depthStencilDesc, Sel("setDepthCompareFunction:"), uintptr(compareFunctionToMTL(desc.DepthStencil.DepthCompare)))
+		msgSendVoid(depthStencilDesc, Sel("setDepthWriteEnabled:"), argBool(desc.DepthStencil.DepthWriteEnabled))
+
+		// Translate the stencil state. Without this Metal keeps its defaults
+		// (compare = Always, ops = Keep) and the stencil test is silently
+		// ignored. WebGPU masks are global, so both faces share them; the face
+		// properties copy, so each descriptor is released after assignment.
+		front := newStencilFaceDescriptor(desc.DepthStencil.StencilFront,
+			desc.DepthStencil.StencilReadMask, desc.DepthStencil.StencilWriteMask)
+		MsgSend(depthStencilDesc, Sel("setFrontFaceStencil:"), uintptr(front))
+		Release(front)
+
+		back := newStencilFaceDescriptor(desc.DepthStencil.StencilBack,
+			desc.DepthStencil.StencilReadMask, desc.DepthStencil.StencilWriteMask)
+		MsgSend(depthStencilDesc, Sel("setBackFaceStencil:"), uintptr(back))
+		Release(back)
+
+		depthStencilState = MsgSend(d.raw, Sel("newDepthStencilStateWithDescriptor:"), uintptr(depthStencilDesc))
+		Release(depthStencilDesc)
+
+		// Record bias values to set in render pass
+		depthBias = float32(desc.DepthStencil.DepthBias)
+		depthSlopeScale = desc.DepthStencil.DepthBiasSlopeScale
+		depthClamp = desc.DepthStencil.DepthBiasClamp
+	}
+
+	// Set sample count
+	sampleCount := desc.Multisample.Count
+	if sampleCount == 0 {
+		sampleCount = 1
+	}
+	_ = MsgSend(pipelineDesc, Sel("setSampleCount:"), uintptr(sampleCount))
+
+	// Create pipeline state. ICB support stays entirely private: eligible
+	// pipelines get one flagged attempt and transparently retry ordinary
+	// creation if Metal rejects the stricter descriptor.
+	// errorPtr travels as a uintptr; pin it for the creation calls below
+	// (P1-VK-012).
+	var errorPtr ID
+	var pinner runtime.Pinner
+	pinner.Pin(&errorPtr)
+	defer pinner.Unpin()
+	icbCandidate := d.canCreateICBPipeline(desc, pipelineDesc)
+	pipelineState, icbCompatible := createRenderPipelineState(icbCandidate, func(icb bool) ID {
+		errorPtr = 0
+		if icbCandidate {
+			var enabled uintptr
+			if icb {
+				enabled = 1
+			}
+			_ = MsgSend(pipelineDesc, Sel("setSupportIndirectCommandBuffers:"), enabled)
+		}
+		return MsgSend(d.raw, Sel("newRenderPipelineStateWithDescriptor:error:"),
+			uintptr(pipelineDesc), uintptr(unsafe.Pointer(&errorPtr)))
+	})
+
+	if pipelineState == 0 {
+		errMsg := unknownError
+		if errorPtr != 0 {
+			errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
+			if errDesc != 0 {
+				errMsg = GoString(errDesc)
+			}
+			// Object is autoreleased
+		}
+		return nil, fmt.Errorf("metal: failed to create pipeline state: %s", errMsg)
+	}
+
+	hal.Logger().Debug("metal: render pipeline created",
+		"label", desc.Label,
+		"vertexEntry", desc.Vertex.EntryPoint,
+		"sampleCount", sampleCount,
+	)
+
+	pipeline := &RenderPipeline{
+		raw:             pipelineState,
+		device:          d,
+		layout:          pipeLayout,
+		cullMode:        cullModeToMTL(desc.Primitive.CullMode),
+		frontFace:       frontFaceToMTL(desc.Primitive.FrontFace),
+		icbCompatible:   icbCompatible,
+		primitiveType:   primitiveTopologyToMTL(desc.Primitive.Topology),
+		vertexSizes:     vertexLib.sizesBindings,
+		vertexSizesSlot: vertexLib.sizesSlot,
+
+		depthStencil:    depthStencilState,
+		depthBias:       depthBias,
+		depthSlopeScale: depthSlopeScale,
+		depthClamp:      depthClamp,
+	}
+	if fragmentLib != nil {
+		pipeline.fragmentSizes = fragmentLib.sizesBindings
+		pipeline.fragmentSizesSlot = fragmentLib.sizesSlot
+	}
+	return pipeline, nil
+}
+
+// newStencilFaceDescriptor builds an MTLStencilDescriptor for one face. The
+// returned object is owned by the caller and must be Released after it is
+// assigned to the depth-stencil descriptor (whose face properties copy it).
+func newStencilFaceDescriptor(face hal.StencilFaceState, readMask, writeMask uint32) ID {
+	sd := MsgSend(ID(GetClass("MTLStencilDescriptor")), Sel("new"))
+	MsgSend(sd, Sel("setStencilCompareFunction:"), uintptr(compareFunctionToMTL(face.Compare)))
+	MsgSend(sd, Sel("setStencilFailureOperation:"), uintptr(stencilOperationToMTL(face.FailOp)))
+	MsgSend(sd, Sel("setDepthFailureOperation:"), uintptr(stencilOperationToMTL(face.DepthFailOp)))
+	MsgSend(sd, Sel("setDepthStencilPassOperation:"), uintptr(stencilOperationToMTL(face.PassOp)))
+	MsgSend(sd, Sel("setReadMask:"), uintptr(readMask))
+	MsgSend(sd, Sel("setWriteMask:"), uintptr(writeMask))
+	return sd
+}
+
+// buildVertexDescriptor creates an MTLVertexDescriptor from WebGPU vertex buffer layouts.
+func (d *Device) buildVertexDescriptor(buffers []gputypes.VertexBufferLayout) (ID, error) {
+	vertexDesc := MsgSend(ID(GetClass("MTLVertexDescriptor")), Sel("vertexDescriptor"))
+	if vertexDesc == 0 {
+		return 0, fmt.Errorf("metal: failed to create vertex descriptor")
+	}
+
+	attributes := MsgSend(vertexDesc, Sel("attributes"))
+	layouts := MsgSend(vertexDesc, Sel("layouts"))
+
+	for slot, buf := range buffers {
+		bufIdx := maxVertexBuffers - 1 - slot
+		for _, attr := range buf.Attributes {
+			attrDesc := MsgSend(attributes, Sel("objectAtIndexedSubscript:"), uintptr(attr.ShaderLocation))
+			if attrDesc == 0 {
+				continue
+			}
+			_ = MsgSend(attrDesc, Sel("setFormat:"), uintptr(vertexFormatToMTL(attr.Format)))
+			_ = MsgSend(attrDesc, Sel("setOffset:"), uintptr(attr.Offset))
+			_ = MsgSend(attrDesc, Sel("setBufferIndex:"), uintptr(bufIdx))
+		}
+
+		layoutDesc := MsgSend(layouts, Sel("objectAtIndexedSubscript:"), uintptr(bufIdx))
+		if layoutDesc != 0 {
+			l := vertexBufferLayoutToMTL(&buffers[slot])
+			_ = MsgSend(layoutDesc, Sel("setStride:"), uintptr(l.stride))
+			_ = MsgSend(layoutDesc, Sel("setStepFunction:"), uintptr(l.stepFunc))
+			_ = MsgSend(layoutDesc, Sel("setStepRate:"), uintptr(l.stepRate))
+		}
+	}
+
+	return vertexDesc, nil
+}
+
+// DestroyRenderPipeline destroys a render pipeline.
+func (d *Device) DestroyRenderPipeline(pipeline hal.RenderPipeline) {
+	mtlPipeline, ok := pipeline.(*RenderPipeline)
+	if !ok || mtlPipeline == nil {
+		return
+	}
+	if mtlPipeline.raw != 0 {
+		Release(mtlPipeline.raw)
+		mtlPipeline.raw = 0
+	}
+	mtlPipeline.device = nil
+}
+
+// CreateComputePipeline creates a compute pipeline.
+//
+// desc.Compute.Constants are applied by compileLibrary (naga.ProcessOverrides
+// before MSL emission, Rust metal/device.rs:174).
+//
+// TODO(zero-init-workgroup): Pass desc.Compute.ZeroInitializeWorkgroupMemory
+// to naga MSL options. Rust wgpu-hal sets pipeline_options.zero_initialize_workgroup_memory
+// per-stage (metal/device.rs:179).
+func (d *Device) CreateComputePipeline(desc *hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	var pipeLayout *PipelineLayout
+	if pl, ok := desc.Layout.(*PipelineLayout); ok {
+		pipeLayout = pl
+	}
+
+	// Get shader module
+	computeModule, ok := desc.Compute.Module.(*ShaderModule)
+	if !ok || computeModule == nil {
+		return nil, fmt.Errorf("metal: invalid compute shader module")
+	}
+
+	// Write the MSL now, because the pipeline layout gives the sizes slot.
+	lib, err := d.compileLibrary(computeModule, pipeLayout, librarySpec{
+		stage:      ir.StageCompute,
+		entryPoint: desc.Compute.EntryPoint,
+		constants:  desc.Compute.Constants,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer Release(lib.library)
+
+	// Resolve translated entrypoint name
+	entrypointName := desc.Compute.EntryPoint
+	if translated, ok := lib.entrypointNames[entrypointName]; ok {
+		entrypointName = translated
+	}
+
+	// Get compute function from library
+	funcName := NSString(entrypointName)
+	computeFunc := MsgSend(lib.library, Sel("newFunctionWithName:"), uintptr(funcName))
+	Release(funcName)
+	if computeFunc == 0 {
+		return nil, fmt.Errorf("metal: compute function '%s' not found", entrypointName)
+	}
+	defer Release(computeFunc)
+
+	// Create compute pipeline state
+	// errorPtr travels as a uintptr; pin it for the call (P1-VK-012).
+	var errorPtr ID
+	var pinner runtime.Pinner
+	pinner.Pin(&errorPtr)
+	pipelineState := MsgSend(d.raw, Sel("newComputePipelineStateWithFunction:error:"),
+		uintptr(computeFunc), uintptr(unsafe.Pointer(&errorPtr)))
+	pinner.Unpin()
+
+	if pipelineState == 0 {
+		errMsg := unknownError
+		if errorPtr != 0 {
+			errDesc := MsgSend(errorPtr, Sel("localizedDescription"))
+			if errDesc != 0 {
+				errMsg = GoString(errDesc)
+			}
+			// Object is autoreleased
+		}
+		return nil, fmt.Errorf("metal: failed to create compute pipeline state: %s", errMsg)
+	}
+
+	// Get workgroup size from shader module metadata, or, for a module with
+	// overrides, from the specialized entry point: the size may come from an
+	// override (BUG-OVERRIDE-WORKGROUP-001).
+	workgroupSize := getWorkgroupSize(computeModule, desc.Compute.EntryPoint)
+	if lib.specialized {
+		workgroupSize = MTLSize{
+			Width:  NSUInteger(lib.workgroupSize[0]),
+			Height: NSUInteger(lib.workgroupSize[1]),
+			Depth:  NSUInteger(lib.workgroupSize[2]),
+		}
+	}
+
+	hal.Logger().Debug("metal: compute pipeline created",
+		"entryPoint", desc.Compute.EntryPoint,
+		"workgroupSize", fmt.Sprintf("%dx%dx%d", workgroupSize.Width, workgroupSize.Height, workgroupSize.Depth),
+	)
+
+	return &ComputePipeline{
+		raw:           pipelineState,
+		device:        d,
+		layout:        pipeLayout,
+		workgroupSize: workgroupSize,
+		sizesBindings: lib.sizesBindings,
+		sizesSlot:     lib.sizesSlot,
+	}, nil
+}
+
+// getWorkgroupSize retrieves workgroup size for a compute entry point.
+// Falls back to default {64, 1, 1} if not found.
+func getWorkgroupSize(module *ShaderModule, entryPoint string) MTLSize {
+	if module.workgroupSizes != nil {
+		if size, ok := module.workgroupSizes[entryPoint]; ok {
+			return MTLSize{
+				Width:  NSUInteger(size[0]),
+				Height: NSUInteger(size[1]),
+				Depth:  NSUInteger(size[2]),
+			}
+		}
+	}
+	// Default fallback
+	return MTLSize{Width: 64, Height: 1, Depth: 1}
+}
+
+// DestroyComputePipeline destroys a compute pipeline.
+func (d *Device) DestroyComputePipeline(pipeline hal.ComputePipeline) {
+	mtlPipeline, ok := pipeline.(*ComputePipeline)
+	if !ok || mtlPipeline == nil {
+		return
+	}
+	if mtlPipeline.raw != 0 {
+		Release(mtlPipeline.raw)
+		mtlPipeline.raw = 0
+	}
+	mtlPipeline.device = nil
+}
+
+// CreateCommandEncoder creates a command encoder.
+//
+// The Metal command buffer is NOT created here — it is deferred to BeginEncoding.
+// This matches the two-step pattern used by Vulkan (allocate → vkBeginCommandBuffer)
+// CreateQuerySet creates a query set.
+// TODO: implement using Metal counter sample buffers for timestamp support.
+func (d *Device) CreateQuerySet(_ *hal.QuerySetDescriptor) (hal.QuerySet, error) {
+	return nil, hal.ErrTimestampsNotSupported
+}
+
+// DestroyQuerySet destroys a query set.
+func (d *Device) DestroyQuerySet(_ hal.QuerySet) {
+	// Stub: Metal query set implementation pending.
+}
+
+// CreateCommandEncoder creates a command encoder for recording GPU commands.
+//
+// and DX12 (create list → Reset). Creating the command buffer eagerly here would
+// conflict with BeginEncoding's guard (cmdBuffer != 0 → "already recording"),
+// causing every subsequent BeginEncoding call to fail and leak the pre-allocated
+// command buffer and its autorelease pool.
+func (d *Device) CreateCommandEncoder(desc *hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	label := ""
+	if desc != nil {
+		label = desc.Label
+	}
+	hal.Logger().Debug("metal: command encoder created", "label", label)
+	return &CommandEncoder{device: d, label: label}, nil
+}
+
+// CreateFence creates a synchronization fence backed by MTLSharedEvent.
+//
+// MTLSharedEvent (unlike MTLEvent) exposes a signaledValue property readable
+// from the CPU, enabling proper blocking waits and non-blocking status queries.
+func (d *Device) CreateFence() (hal.Fence, error) {
+	event := MsgSend(d.raw, Sel("newSharedEvent"))
+	if event == 0 {
+		return nil, fmt.Errorf("metal: failed to create shared event")
+	}
+	return &Fence{event: event, device: d}, nil
+}
+
+// DestroyFence destroys a fence.
+func (d *Device) DestroyFence(fence hal.Fence) {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return
+	}
+	if mtlFence.event != 0 {
+		Release(mtlFence.event)
+		mtlFence.event = 0
+	}
+	mtlFence.device = nil
+}
+
+// getOrCreateEventListener returns a lazily-created MTLSharedEventListener.
+// The listener is allocated once per device and reused for all event notifications.
+// It is released in Destroy().
+func (d *Device) getOrCreateEventListener() ID {
+	if d.eventListener != 0 {
+		return d.eventListener
+	}
+	cls := GetClass("MTLSharedEventListener")
+	if cls == 0 {
+		return 0
+	}
+	obj := MsgSend(ID(cls), Sel("alloc"))
+	if obj == 0 {
+		return 0
+	}
+	obj = MsgSend(obj, Sel("init"))
+	if obj == 0 {
+		return 0
+	}
+	d.eventListener = obj
+	return d.eventListener
+}
+
+// Wait waits for a fence to reach the specified value.
+//
+// Uses Metal's MTLSharedEvent.notifyListener:atValue:block: for event-driven
+// notification when available. This avoids CPU polling and reduces latency
+// compared to the spin-yield-sleep fallback.
+//
+// Falls back to polling with progressive backoff if block infrastructure
+// is unavailable (e.g., _NSConcreteStackBlock symbol not loaded).
+func (d *Device) Wait(fence hal.Fence, value uint64, timeout time.Duration) (bool, error) {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return false, fmt.Errorf("metal: invalid fence")
+	}
+
+	// Fast path: already signaled.
+	signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
+	if uint64(signaled) >= value {
+		return true, nil
+	}
+
+	// Try event-driven path using MTLSharedEvent notification.
+	if result, attempted, err := d.waitEventDriven(mtlFence, value, timeout); attempted {
+		return result, err
+	}
+
+	// Fallback: poll with progressive backoff.
+	return d.waitPolling(mtlFence, value, timeout)
+}
+
+// waitEventDriven attempts to wait using MTLSharedEvent.notifyListener:atValue:block:.
+// Returns (result, true, nil/error) if the event-driven path was used.
+// Returns (false, false, nil) if the path is unavailable and caller should fall back.
+func (d *Device) waitEventDriven(mtlFence *Fence, value uint64, timeout time.Duration) (bool, bool, error) {
+	hal.Logger().Debug("metal: Wait", "value", value, "timeout", timeout, "path", "event-driven")
+	listener := d.getOrCreateEventListener()
+	if listener == 0 {
+		return false, false, nil
+	}
+
+	blockPtr, blockID, done := newSharedEventNotificationBlock()
+	if blockPtr == 0 {
+		return false, false, nil
+	}
+	defer releaseBlock(blockID)
+
+	// Register the notification: notifyListener:atValue:block:
+	// This tells Metal to invoke our block when signaledValue >= value.
+	msgSendVoid(mtlFence.event, Sel("notifyListener:atValue:block:"),
+		argPointer(uintptr(listener)),
+		argUint64(value),
+		argPointer(blockPtr),
+	)
+
+	// Block is pinned via blockPinRegistry until releaseBlock(blockID).
+	// No runtime.KeepAlive needed — the deferred releaseBlock above
+	// keeps the pin alive for the entire function scope.
+
+	// Wait for the callback or timeout.
+	select {
+	case <-done:
+		return true, true, nil
+	case <-time.After(timeout):
+		// Timeout — check once more in case the event fired between
+		// the select evaluation and now.
+		select {
+		case <-done:
+			return true, true, nil
+		default:
+			return false, true, nil
+		}
+	}
+}
+
+// waitPolling waits for a fence using progressive backoff polling.
+// This is the fallback path when event-driven notification is unavailable.
+func (d *Device) waitPolling(mtlFence *Fence, value uint64, timeout time.Duration) (bool, error) {
+	hal.Logger().Debug("metal: Wait (polling)", "value", value, "timeout", timeout)
+	deadline := time.Now().Add(timeout)
+	spins := 0
+	for {
+		signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
+		if uint64(signaled) >= value {
+			return true, nil
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+
+		// Progressive backoff: first 100 iterations spin, then yield, then sleep.
+		spins++
+		switch {
+		case spins < 100:
+			// Busy spin for low-latency scenarios.
+		case spins < 200:
+			runtime.Gosched()
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+// ResetFence resets a fence to the unsignaled state.
+// Sets the MTLSharedEvent.signaledValue to 0 via Objective-C message send.
+func (d *Device) ResetFence(fence hal.Fence) error {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return fmt.Errorf("metal: invalid fence")
+	}
+	_ = MsgSend(mtlFence.event, Sel("setSignaledValue:"), uintptr(0))
+	return nil
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+// Reads the GPU-updated signaledValue from MTLSharedEvent.
+func (d *Device) GetFenceStatus(fence hal.Fence) (bool, error) {
+	mtlFence, ok := fence.(*Fence)
+	if !ok || mtlFence == nil {
+		return false, fmt.Errorf("metal: invalid fence")
+	}
+	signaled := MsgSendUint(mtlFence.event, Sel("signaledValue"))
+	return signaled > 0, nil
+}
+
+// FreeCommandBuffer releases a submitted command buffer.
+// Autorelease pools are no longer stored in command buffers — they use scoped
+// pools that drain immediately in BeginEncoding (macOS Tahoe LIFO fix).
+func (d *Device) FreeCommandBuffer(cmdBuffer hal.CommandBuffer) {
+	cb, ok := cmdBuffer.(*CommandBuffer)
+	if !ok || cb == nil {
+		return
+	}
+	cb.Destroy()
+}
+
+// CreateRenderBundleEncoder is not supported in Metal backend.
+func (d *Device) CreateRenderBundleEncoder(desc *hal.RenderBundleEncoderDescriptor) (hal.RenderBundleEncoder, error) {
+	return nil, fmt.Errorf("metal: render bundles not supported")
+}
+
+// DestroyRenderBundle is not supported in Metal backend.
+func (d *Device) DestroyRenderBundle(bundle hal.RenderBundle) {}
+
+// WaitIdle waits for all GPU work to complete.
+//
+// Metal has no device-level wait API like Vulkan's vkDeviceWaitIdle. Instead,
+// we submit an empty command buffer and call waitUntilCompleted on it. Since
+// command buffers execute in order on the same queue, this guarantees all
+// previously submitted work has finished.
+//
+// CreateAccelerationStructure creates an acceleration structure (BLAS or TLAS).
+//
+// Allocates a Metal acceleration structure with the requested size via
+// [MTLDevice newAccelerationStructureWithSize:].
+//
+// Reference: Rust wgpu-hal metal/device.rs:2100-2114.
+func (d *Device) CreateAccelerationStructure(desc *hal.AccelerationStructureDescriptor) (hal.AccelerationStructure, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("metal: acceleration structure descriptor is nil")
+	}
+
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	raw := MsgSend(d.raw, Sel("newAccelerationStructureWithSize:"), uintptr(desc.Size))
+	if raw == 0 {
+		return nil, fmt.Errorf("metal: failed to create acceleration structure (size=%d)", desc.Size)
+	}
+
+	if desc.Label != "" {
+		label := NSString(desc.Label)
+		_ = MsgSend(raw, Sel("setLabel:"), uintptr(label))
+		Release(label)
+	}
+
+	hal.Logger().Debug("metal: acceleration structure created",
+		"label", desc.Label,
+		"size", desc.Size,
+		"format", desc.Format,
+	)
+
+	return &AccelerationStructure{raw: raw, device: d}, nil
+}
+
+// DestroyAccelerationStructure destroys an acceleration structure.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2116-2121.
+func (d *Device) DestroyAccelerationStructure(accelStruct hal.AccelerationStructure) {
+	mtlAS, ok := accelStruct.(*AccelerationStructure)
+	if !ok || mtlAS == nil {
+		return
+	}
+	if mtlAS.raw != 0 {
+		Release(mtlAS.raw)
+		mtlAS.raw = 0
+	}
+	mtlAS.device = nil
+}
+
+// GetAccelerationStructureBuildSizes returns the sizes needed for building an AS.
+//
+// Delegates to getAccelerationStructureBuildSizes in raytracing.go which creates
+// a transient descriptor and queries Metal for the sizes.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2076-2091.
+func (d *Device) GetAccelerationStructureBuildSizes(desc *hal.GetAccelerationStructureBuildSizesDescriptor) hal.AccelerationStructureBuildSizes {
+	return d.getAccelerationStructureBuildSizes(desc)
+}
+
+// GetAccelerationStructureDeviceAddress returns the GPU resource ID of an AS.
+//
+// Uses Metal 3+ gpuResourceID property. Returns 0 if the AS is nil or the
+// property is unavailable on older GPU families.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2093-2098.
+func (d *Device) GetAccelerationStructureDeviceAddress(accelStruct hal.AccelerationStructure) uint64 {
+	mtlAS, ok := accelStruct.(*AccelerationStructure)
+	if !ok || mtlAS == nil || mtlAS.raw == 0 {
+		return 0
+	}
+	// gpuResourceID returns MTLResourceID (a uint64 on Metal 3+).
+	// On older devices without Metal 3, this returns 0.
+	return uint64(MsgSend(mtlAS.raw, Sel("gpuResourceID")))
+}
+
+// TlasInstanceToBytes converts a TlasInstance to Metal's 64-byte packed format.
+//
+// Reference: Rust wgpu-hal metal/device.rs:2123-2159.
+func (d *Device) TlasInstanceToBytes(instance hal.TlasInstance) []byte {
+	return tlasInstanceToBytes(instance)
+}
+
+// After the GPU is idle, we drain and refill the frame semaphore to ensure
+// all in-flight slots are reclaimed. This prevents deadlocks when the caller
+// wants to submit new work after WaitIdle returns.
+func (d *Device) WaitIdle() error {
+	hal.Logger().Debug("metal: WaitIdle starting")
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+
+	// Submit an empty command buffer and wait for it synchronously.
+	// All previously committed command buffers on this queue will complete
+	// before this one starts, so waitUntilCompleted acts as a full barrier.
+	cmdBuffer := MsgSend(d.commandQueue, Sel("commandBuffer"))
+	if cmdBuffer != 0 {
+		Retain(cmdBuffer)
+		_ = MsgSend(cmdBuffer, Sel("commit"))
+		_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
+		Release(cmdBuffer)
+	}
+
+	// GPU is idle — all previously submitted command buffers have completed.
+	// Explicitly advance completedIndex to submissionIndex so that
+	// PollCompleted() returns the correct value immediately, without waiting
+	// for addCompletedHandler blocks to fire on Metal's dispatch thread.
+	// Those blocks fire asynchronously and may not have run yet even though
+	// waitUntilCompleted has returned (Metal runs handlers on a separate queue).
+	if d.queue != nil {
+		target := d.queue.submissionIndex
+		for {
+			current := d.queue.completedIndex.Load()
+			if current >= target {
+				break
+			}
+			if d.queue.completedIndex.CompareAndSwap(current, target) {
+				break
+			}
+		}
+	}
+
+	// Drain and refill the frame semaphore. After waitUntilCompleted, all
+	// in-flight completion handlers have fired and returned their tokens.
+	// We drain any remaining tokens and refill to maxFramesInFlight so the
+	// semaphore is in a clean state for subsequent submissions.
+	if d.queue != nil && d.queue.frameSemaphore != nil {
+		// Drain all available tokens (non-blocking).
+		for {
+			select {
+			case <-d.queue.frameSemaphore:
+			default:
+				goto refill
+			}
+		}
+	refill:
+		// Refill to capacity.
+		for i := 0; i < maxFramesInFlight; i++ {
+			d.queue.frameSemaphore <- struct{}{}
+		}
+	}
+
+	hal.Logger().Debug("metal: WaitIdle complete")
+	return nil
+}
+
+// Destroy releases the device and associated resources.
+func (d *Device) Destroy() {
+	hal.Logger().Debug("metal: device destroyed")
+	d.releaseIndexedICBTranslators()
+	if d.eventListener != 0 {
+		Release(d.eventListener)
+		d.eventListener = 0
+	}
+	if d.commandQueue != 0 {
+		Release(d.commandQueue)
+		d.commandQueue = 0
+	}
+}
+
+// extractWorkgroupSizes extracts workgroup sizes from IR module entry points.
+// Returns a map from entry point name to workgroup size [x, y, z].
+func extractWorkgroupSizes(module *ir.Module) map[string][3]uint32 {
+	if module == nil {
+		return nil
+	}
+	result := make(map[string][3]uint32)
+	for i := range module.EntryPoints {
+		ep := &module.EntryPoints[i]
+		if ep.Stage == ir.StageCompute {
+			result[ep.Name] = ep.Workgroup
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}

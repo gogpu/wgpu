@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/core/track"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 var rgba8Formats = []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}

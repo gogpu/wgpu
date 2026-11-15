@@ -9,7 +9,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 func TestDispatchSourceFor(t *testing.T) {

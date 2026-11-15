@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // TestCreateComputePipelineWorkgroupStorageLimit checks the WebGPU

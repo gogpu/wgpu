@@ -1,0 +1,151 @@
+//go:build !(js && wasm)
+
+package noop
+
+import (
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/hal"
+)
+
+// CommandEncoder implements hal.CommandEncoder for the noop backend.
+type CommandEncoder struct{}
+
+// BeginEncoding is a no-op.
+func (c *CommandEncoder) BeginEncoding(_ string) error {
+	return nil
+}
+
+// EndEncoding returns a placeholder command buffer.
+func (c *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
+	return &Resource{}, nil
+}
+
+// DiscardEncoding is a no-op.
+func (c *CommandEncoder) DiscardEncoding() {}
+
+// ResetAll is a no-op.
+func (c *CommandEncoder) ResetAll(_ []hal.CommandBuffer) {}
+
+// Destroy is a no-op for the noop backend.
+func (c *CommandEncoder) Destroy() {}
+
+// TransitionBuffers is a no-op.
+func (c *CommandEncoder) TransitionBuffers(_ []hal.BufferBarrier) {}
+
+// TransitionTextures is a no-op.
+func (c *CommandEncoder) TransitionTextures(_ []hal.TextureBarrier) {}
+
+// ClearBuffer is a no-op.
+func (c *CommandEncoder) ClearBuffer(_ hal.Buffer, _, _ uint64) {}
+
+// CopyBufferToBuffer is a no-op.
+func (c *CommandEncoder) CopyBufferToBuffer(_, _ hal.Buffer, _ []hal.BufferCopy) {}
+
+// CopyBufferToTexture is a no-op.
+func (c *CommandEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []hal.BufferTextureCopy) {
+}
+
+// CopyTextureToBuffer is a no-op.
+func (c *CommandEncoder) CopyTextureToBuffer(_ hal.Texture, _ hal.Buffer, _ []hal.BufferTextureCopy) {
+}
+
+// CopyTextureToTexture is a no-op.
+func (c *CommandEncoder) CopyTextureToTexture(_, _ hal.Texture, _ []hal.TextureCopy) {}
+
+// ResolveQuerySet is a no-op.
+func (c *CommandEncoder) ResolveQuerySet(_ hal.QuerySet, _, _ uint32, _ hal.Buffer, _ uint64) {}
+
+// BuildAccelerationStructures is a no-op.
+func (c *CommandEncoder) BuildAccelerationStructures(_ []hal.BuildAccelerationStructureDescriptor) {}
+
+// PlaceAccelerationStructureBarrier is a no-op.
+func (c *CommandEncoder) PlaceAccelerationStructureBarrier(_ hal.AccelerationStructureBarrier) {}
+
+// CopyAccelerationStructure is a no-op.
+func (c *CommandEncoder) CopyAccelerationStructure(_, _ hal.AccelerationStructure, _ gputypes.AccelerationStructureCopyMode) {
+}
+
+// ReadAccelerationStructureCompactSize is a no-op.
+func (c *CommandEncoder) ReadAccelerationStructureCompactSize(_ hal.AccelerationStructure, _ hal.Buffer, _ uint64) {
+}
+
+// BeginRenderPass returns a noop render pass encoder.
+func (c *CommandEncoder) BeginRenderPass(_ *hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	return &RenderPassEncoder{}
+}
+
+// BeginComputePass returns a noop compute pass encoder.
+func (c *CommandEncoder) BeginComputePass(_ *hal.ComputePassDescriptor) hal.ComputePassEncoder {
+	return &ComputePassEncoder{}
+}
+
+// RenderPassEncoder implements hal.RenderPassEncoder for the noop backend.
+type RenderPassEncoder struct{}
+
+// End is a no-op.
+func (r *RenderPassEncoder) End() {}
+
+// SetPipeline is a no-op.
+func (r *RenderPassEncoder) SetPipeline(_ hal.RenderPipeline) {}
+
+// SetBindGroup is a no-op.
+func (r *RenderPassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32) {}
+
+// SetVertexBuffer is a no-op.
+func (r *RenderPassEncoder) SetVertexBuffer(_ uint32, _ hal.Buffer, _ uint64) {}
+
+// SetIndexBuffer is a no-op.
+func (r *RenderPassEncoder) SetIndexBuffer(_ hal.Buffer, _ gputypes.IndexFormat, _ uint64) {}
+
+// SetViewport is a no-op.
+func (r *RenderPassEncoder) SetViewport(_ gputypes.Viewport) {}
+
+// SetScissorRect is a no-op.
+func (r *RenderPassEncoder) SetScissorRect(_ gputypes.ScissorRect) {}
+
+// SetBlendConstant is a no-op.
+func (r *RenderPassEncoder) SetBlendConstant(_ *gputypes.Color) {}
+
+// SetStencilReference is a no-op.
+func (r *RenderPassEncoder) SetStencilReference(_ uint32) {}
+
+// Draw is a no-op.
+func (r *RenderPassEncoder) Draw(_ gputypes.DrawArgs) {}
+
+// DrawIndexed is a no-op.
+func (r *RenderPassEncoder) DrawIndexed(_ gputypes.DrawIndexedArgs) {}
+
+// DrawIndirect is a no-op.
+func (r *RenderPassEncoder) DrawIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
+
+// DrawIndexedIndirect is a no-op.
+func (r *RenderPassEncoder) DrawIndexedIndirect(_ hal.Buffer, _ uint64, _ uint32) {}
+
+// DrawIndirectCount is a no-op.
+func (r *RenderPassEncoder) DrawIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
+}
+
+// DrawIndexedIndirectCount is a no-op.
+func (r *RenderPassEncoder) DrawIndexedIndirectCount(_ hal.Buffer, _ uint64, _ hal.Buffer, _ uint64, _ uint32) {
+}
+
+// ExecuteBundle is a no-op.
+func (r *RenderPassEncoder) ExecuteBundle(_ hal.RenderBundle) {}
+
+// ComputePassEncoder implements hal.ComputePassEncoder for the noop backend.
+type ComputePassEncoder struct{}
+
+// End is a no-op.
+func (c *ComputePassEncoder) End() {}
+
+// SetPipeline is a no-op.
+func (c *ComputePassEncoder) SetPipeline(_ hal.ComputePipeline) {}
+
+// SetBindGroup is a no-op.
+func (c *ComputePassEncoder) SetBindGroup(_ uint32, _ hal.BindGroup, _ []uint32) {}
+
+// Dispatch is a no-op.
+func (c *ComputePassEncoder) Dispatch(_, _, _ uint32) {}
+
+// DispatchIndirect is a no-op.
+func (c *ComputePassEncoder) DispatchIndirect(_ hal.Buffer, _ uint64) {}
