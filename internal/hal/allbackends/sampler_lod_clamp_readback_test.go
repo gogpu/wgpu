@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/wgputestbridge"
 )
 
 // lodLevels is the mip level count of the sampled texture (8x8 down to 1x1).
@@ -182,9 +183,13 @@ func openWarpDevice(t *testing.T, b overrideBackend) *wgpu.Device {
 		if err != nil {
 			t.Fatalf("Open %q: %v", a.Info.Name, err)
 		}
-		device, err := wgpu.NewDeviceFromHAL(open.Device, open.Queue, 0, a.Capabilities.Limits, "lod-warp")
+		raw, err := wgputestbridge.NewDeviceFromHAL(open.Device, open.Queue, 0, a.Capabilities.Limits, "lod-warp")
 		if err != nil {
 			t.Fatalf("NewDeviceFromHAL: %v", err)
+		}
+		device, ok := raw.(*wgpu.Device)
+		if !ok {
+			t.Fatalf("wrapped device type = %T", raw)
 		}
 		t.Cleanup(device.Release)
 		t.Logf("adapter: %s (%v)", a.Info.Name, a.Info.Backend)

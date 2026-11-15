@@ -12,6 +12,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
+	"github.com/gogpu/wgpu/internal/wgputestbridge"
 )
 
 // The storage layout: one buffer holds binding a at word 0 and binding b at
@@ -83,9 +84,10 @@ func checkStorageOOB(t *testing.T, b overrideBackend, device *wgpu.Device) {
 		checkOOBRestricted(t, got)
 	}
 	if b.backend == gputypes.BackendVulkan && !b.software {
-		robust, ok := device.HalDevice().(interface{ RobustBufferAccess2() bool })
+		raw := wgputestbridge.HALDevice(device)
+		robust, ok := raw.(interface{ RobustBufferAccess2() bool })
 		if !ok {
-			t.Fatalf("Vulkan device %T does not report RobustBufferAccess2", device.HalDevice())
+			t.Fatalf("Vulkan device %T does not report RobustBufferAccess2", raw)
 		}
 		if robust.RobustBufferAccess2() {
 			checkOOBDiscarded(t, got)
@@ -103,9 +105,10 @@ func skipWithoutRobustGL(t *testing.T, b overrideBackend, device *wgpu.Device) {
 	if b.backend != gputypes.BackendGL {
 		return
 	}
-	robust, ok := device.HalDevice().(interface{ RobustAccess() bool })
+	raw := wgputestbridge.HALDevice(device)
+	robust, ok := raw.(interface{ RobustAccess() bool })
 	if !ok {
-		t.Fatalf("GLES device %T does not report RobustAccess", device.HalDevice())
+		t.Fatalf("GLES device %T does not report RobustAccess", raw)
 	}
 	if !robust.RobustAccess() {
 		t.Skip("GL context without robust buffer access: containment is not guaranteed")

@@ -105,6 +105,67 @@ func New(opts *Options) (device, queue any, cleanup func(), err error) {
 	return f(opts)
 }
 
+// HALDeviceAccessor reports the HAL device behind a *wgpu.Device passed as any.
+// It is registered by the root package in native builds and lets an in-module
+// test type-assert a backend capability the public API does not expose
+// (RobustBufferAccess2, RobustAccess), now that (*Device).HalDevice has left
+// the public API (ADR-070 §15). It returns nil when the value is not a device,
+// has no HAL device, or the build registers no accessor.
+type HALDeviceAccessor func(device any) any
+
+var (
+	halDeviceMu       sync.RWMutex
+	halDeviceAccessor HALDeviceAccessor
+)
+
+// RegisterHALDeviceAccessor installs the accessor. Root calls it from init in
+// the native build; other builds leave it nil.
+func RegisterHALDeviceAccessor(f HALDeviceAccessor) {
+	halDeviceMu.Lock()
+	halDeviceAccessor = f
+	halDeviceMu.Unlock()
+}
+
+// HALDevice calls the registered accessor, or returns nil.
+func HALDevice(device any) any {
+	halDeviceMu.RLock()
+	f := halDeviceAccessor
+	halDeviceMu.RUnlock()
+	if f == nil {
+		return nil
+	}
+	return f(device)
+}
+
+// DeviceFromHALFactory wraps a HAL device and queue (passed as any) in a
+// *wgpu.Device. It is the in-module test seam for tests that open a HAL
+// backend directly; it replaced the public NewDeviceFromHAL (ADR-070 §15).
+type DeviceFromHALFactory func(halDevice, halQueue any, features gputypes.Features, limits gputypes.Limits, label string) (any, error)
+
+var (
+	deviceFromHALMu      sync.RWMutex
+	deviceFromHALFactory DeviceFromHALFactory
+)
+
+// RegisterDeviceFromHALFactory installs the factory. Root calls it from init
+// in the native build; other builds leave it nil.
+func RegisterDeviceFromHALFactory(f DeviceFromHALFactory) {
+	deviceFromHALMu.Lock()
+	deviceFromHALFactory = f
+	deviceFromHALMu.Unlock()
+}
+
+// NewDeviceFromHAL calls the registered factory, or returns ErrNoFactory.
+func NewDeviceFromHAL(halDevice, halQueue any, features gputypes.Features, limits gputypes.Limits, label string) (any, error) {
+	deviceFromHALMu.RLock()
+	f := deviceFromHALFactory
+	deviceFromHALMu.RUnlock()
+	if f == nil {
+		return nil, ErrNoFactory
+	}
+	return f(halDevice, halQueue, features, limits, label)
+}
+
 // TextureFactory builds a *wgpu.Texture with no device and no backend object,
 // for the public wgputest.NewDetachedTexture. desc is a
 // *wgpu.TextureDescriptor or nil; the result is returned as any and

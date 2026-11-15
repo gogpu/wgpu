@@ -5,12 +5,31 @@ package wgpu
 import (
 	"errors"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/wgputestbridge"
 )
 
 func init() {
 	wgputestbridge.Register(newTestDeviceFactory())
+	wgputestbridge.RegisterHALDeviceAccessor(func(device any) any {
+		d, ok := device.(*Device)
+		if !ok {
+			return nil
+		}
+		return d.halDevice()
+	})
+	wgputestbridge.RegisterDeviceFromHALFactory(func(halDevice, halQueue any, features gputypes.Features, limits gputypes.Limits, label string) (any, error) {
+		hd, ok := halDevice.(hal.Device)
+		if !ok || hd == nil {
+			return nil, errors.New("wgpu: halDevice is not a HAL device")
+		}
+		hq, ok := halQueue.(hal.Queue)
+		if !ok || hq == nil {
+			return nil, errors.New("wgpu: halQueue is not a HAL queue")
+		}
+		return newDeviceFromHAL(hd, hq, features, limits, label), nil
+	})
 }
 
 // newTestDeviceFactory constructs the wgpu Device for package wgputest around
