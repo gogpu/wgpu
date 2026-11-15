@@ -45,7 +45,7 @@ queue.WriteBuffer(buf, 0, data)
 ```
 wgpu (public API — Device, Queue, Buffer, Texture, Pipeline...)
   ↓ build tags select:
-  _native.go  → core/ → hal/ → Vulkan/Metal/DX12/GLES/Software
+  _native.go  → internal/core/ → internal/hal/ → Vulkan/Metal/DX12/GLES/Software
   _rust.go    → go-webgpu/webgpu → wgpu-native
   _browser.go → syscall/js → Browser WebGPU
 ```
@@ -55,13 +55,14 @@ wgpu (public API — Device, Queue, Buffer, Texture, Pipeline...)
 | Package | Purpose |
 |---------|---------|
 | `wgpu` (root) | Public API — all consumer code imports this |
-| `wgpu/core` | Validation, state tracking (Native Go only) |
-| `wgpu/hal` | HAL interfaces (Native Go only) |
-| `wgpu/hal/vulkan` | Vulkan backend |
-| `wgpu/hal/metal` | Metal backend (macOS) |
-| `wgpu/hal/dx12` | DirectX 12 backend (Windows) |
-| `wgpu/hal/gles` | OpenGL ES backend |
-| `wgpu/hal/software` | CPU software renderer |
+| `wgpu/hal` | Public interop surface — backend kinds and native handles behind `Instance`, `Adapter`, `Device`, `Surface` |
+| `wgpu/internal/core` | Validation, state tracking (Native Go only) |
+| `wgpu/internal/hal` | HAL interfaces (Native Go only) |
+| `wgpu/internal/hal/vulkan` | Vulkan backend |
+| `wgpu/internal/hal/metal` | Metal backend (macOS) |
+| `wgpu/internal/hal/dx12` | DirectX 12 backend (Windows) |
+| `wgpu/internal/hal/gles` | OpenGL ES backend |
+| `wgpu/internal/hal/software` | CPU software renderer |
 | `wgpu/internal/raytracing` | RT build orchestration, compaction, validation (ADR-062) |
 
 ### Ray Tracing (experimental, HAL only)

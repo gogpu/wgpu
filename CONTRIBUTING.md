@@ -85,15 +85,16 @@ New code goes into `internal/` packages. The root package contains only exported
 ```
 wgpu/
 ├── *.go                # Public API (exported types + thin wrappers)
-├── core/               # Validation, resource management, state tracking
-├── hal/                # Hardware abstraction layer
-│   ├── vulkan/         # Vulkan backend (Windows, Linux, macOS, Android preview)
-│   ├── metal/          # Metal backend (macOS)
-│   ├── dx12/           # DirectX 12 backend (Windows)
-│   ├── gles/           # OpenGL / OpenGL ES backend (Windows, Linux)
-│   ├── software/       # Full CPU rasterizer + SPIR-V interpreter + RT BVH
-│   └── noop/           # No-op backend (testing)
+├── hal/                # Public interop surface (backend kinds, native handles)
 ├── internal/
+│   ├── core/           # Validation, resource management, state tracking
+│   ├── hal/            # Hardware abstraction layer
+│   │   ├── vulkan/     # Vulkan backend (Windows, Linux, macOS, Android preview)
+│   │   ├── metal/      # Metal backend (macOS)
+│   │   ├── dx12/       # DirectX 12 backend (Windows)
+│   │   ├── gles/       # OpenGL / OpenGL ES backend (Windows, Linux)
+│   │   ├── software/   # Full CPU rasterizer + SPIR-V interpreter + RT BVH
+│   │   └── noop/       # No-op backend (testing)
 │   ├── browser/        # Browser WebGPU via syscall/js
 │   ├── raytracing/     # RT build orchestration, compaction, validation
 │   └── ...             # indirect, pipelinecache, shaderir, thread
@@ -105,7 +106,7 @@ wgpu/
 └── docs/               # Public documentation
 ```
 
-> **Note:** `core/` and `hal/` are planned to move under `internal/` (#329). New implementation code should go into `internal/` sub-packages.
+> **Note:** the core and HAL implementation packages live under `internal/` (#329); the public surface is the root package and the thin `hal` interop package. New implementation code should go into `internal/` sub-packages.
 
 ## Commit Messages
 
@@ -143,7 +144,7 @@ Backend-specific verification:
 ```bash
 go run ./examples/compute-sum/           # runs on the best available backend
 go run ./examples/raytracing-headless/   # software HAL BLAS build (no GPU needed)
-go test ./hal/allbackends/               # cross-backend readback tests on every adapter found
+go test ./internal/hal/allbackends/       # cross-backend readback tests on every adapter found
 ```
 
 ## Reporting Issues

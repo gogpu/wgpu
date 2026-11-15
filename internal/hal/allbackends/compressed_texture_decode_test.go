@@ -305,12 +305,12 @@ func writeTexcompressGolden(t *testing.T, readback map[int][]float32, adapter st
 	}
 	var sb strings.Builder
 	sb.WriteString("# GPU readback of textureLoad over every texel of the blocks of\n")
-	sb.WriteString("# hal/allbackends/compressed_texture_decode_cases_test.go. One line per block:\n")
+	sb.WriteString("# internal/hal/allbackends/compressed_texture_decode_cases_test.go. One line per block:\n")
 	sb.WriteString("# the format, the block bytes, then its 16 texels in row-major order as RGBA\n")
 	sb.WriteString("# float32 bits.\n")
 	fmt.Fprintf(&sb, "# Source: %s, Vulkan. On the same GPU DX12 (BC) and GLES (ETC2/EAC)\n", adapter)
 	sb.WriteString("# returned the same bits.\n")
-	sb.WriteString("# Regenerate: WGPU_UPDATE_TEXCOMPRESS=1 go test -run TestCompressedTextureDecode ./hal/allbackends/\n")
+	sb.WriteString("# Regenerate: WGPU_UPDATE_TEXCOMPRESS=1 go test -run TestCompressedTextureDecode ./internal/hal/allbackends/\n")
 	for i, c := range decodeCases {
 		width := 4 * len(c.blocks)
 		for b, block := range c.blocks {

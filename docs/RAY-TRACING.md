@@ -6,7 +6,7 @@
 
 ## What exists today
 
-The HAL (`hal/raytracing.go`) has acceleration structure resources and build commands, and each backend has code for
+The HAL (`internal/hal/raytracing.go`) has acceleration structure resources and build commands, and each backend has code for
 them. Nothing above the HAL uses it yet: the root `wgpu` package has no `Blas`, `Tlas` or acceleration structure
 binding, so ray tracing is reachable only by driving `hal` directly, as `examples/raytracing-headless/` does.
 
