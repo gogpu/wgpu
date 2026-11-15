@@ -269,8 +269,9 @@ import "github.com/gogpu/wgpu"
 
 The Pure Go software backend is **registered by default** (ADR-083, v0.35.0): no blank import is needed. It is
 outside the default adapter set, so an empty `Backends` mask keeps every existing program's adapters and picks
-unchanged. Select it with `RequestAdapterOptions.ForceFallbackAdapter` or by naming `gputypes.BackendsSoftware` in
-the mask; `-tags wgpu_nosoftware` leaves it out of the build.
+unchanged. Select it by naming `gputypes.BackendsSoftware` in the mask; `RequestAdapterOptions.ForceFallbackAdapter`
+then prefers it over other CPU adapters such as WARP and llvmpipe. `-tags wgpu_nosoftware` leaves it out of the
+build.
 
 Other GOOS/GOARCH combinations are outside the default registration set and get no backend: the backend packages are
 not importable outside the module. Some of them, for example linux/386, cannot build the Pure Go backends at all
@@ -356,9 +357,9 @@ CPU rasterizer for headless and windowed rendering. Always compiled — no build
 ```go
 import "github.com/gogpu/wgpu"
 
-// The software backend is registered by default. Select it with
-// RequestAdapterOptions.ForceFallbackAdapter or a mask naming
-// gputypes.BackendsSoftware; -tags wgpu_nosoftware leaves it out.
+// The software backend is registered by default. Name gputypes.BackendsSoftware
+// in the instance mask to select it; with RequestAdapterOptions.ForceFallbackAdapter
+// it is preferred over other CPU adapters. -tags wgpu_nosoftware leaves it out.
 
 // Use cases:
 // - CI/CD testing without GPU

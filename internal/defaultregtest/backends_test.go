@@ -13,13 +13,13 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
-// TestSoftwareIsNotRegisteredByDefault: Phase 0 registers the platform
-// hardware backends only. Software stays an explicit import until v0.35.0,
-// where it becomes default-registered but outside the default mask
-// (ADR-083 §2.1/§2.3, user decision 2026-10-18).
-func TestSoftwareIsNotRegisteredByDefault(t *testing.T) {
+// TestNoopIsNotRegisteredByDefault: the no-op backend is a test double and
+// belongs to no default binary. Since v0.35.0 it owns the BackendEmpty variant
+// alone — software reports BackendSoftware (ADR-083 §2.3) — so a BackendEmpty
+// registration here would be a no-op leaking into production.
+func TestNoopIsNotRegisteredByDefault(t *testing.T) {
 	if backend, ok := hal.GetBackend(gputypes.BackendEmpty); ok {
-		t.Fatalf("a BackendEmpty backend is registered by default (%T); software must stay an explicit import until v0.35.0", backend)
+		t.Fatalf("a BackendEmpty backend is registered by default (%T); the no-op backend must stay an explicit registration", backend)
 	}
 }
 

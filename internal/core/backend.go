@@ -68,7 +68,8 @@ var (
 		gputypes.BackendMetal,
 		gputypes.BackendDX12,
 		gputypes.BackendGL,
-		gputypes.BackendEmpty, // explicitly registered software/noop provider
+		gputypes.BackendSoftware, // explicit only: never part of a default mask
+		gputypes.BackendEmpty,    // explicitly registered no-op provider
 	}
 )
 
@@ -162,7 +163,15 @@ func RegisterHALBackends() {
 
 // FilterBackendsByMask filters backend providers by the enabled backends mask.
 // Returns only providers whose variant is enabled in the mask.
+//
+// A zero mask means the default set — the descriptor's hardware backends, never
+// software (ADR-083 §2.3). Software is admitted by the BackendsSoftware bit
+// alone; the no-op provider, which only a test or tool registers explicitly and
+// whose adapters enumeration drops, is not part of any mask.
 func FilterBackendsByMask(mask gputypes.Backends) []BackendProvider {
+	if mask == 0 {
+		mask = defaultMask()
+	}
 	ordered := GetOrderedBackendProviders()
 	result := make([]BackendProvider, 0, len(ordered))
 
@@ -185,9 +194,14 @@ func FilterBackendsByMask(mask gputypes.Backends) []BackendProvider {
 			if mask&gputypes.BackendsGL != 0 {
 				result = append(result, p)
 			}
+		case gputypes.BackendSoftware:
+			if mask&gputypes.BackendsSoftware != 0 {
+				result = append(result, p)
+			}
 		case gputypes.BackendEmpty:
-			// The software/noop provider is selectable when explicitly registered;
-			// NewInstance never fabricates an adapter when it is absent.
+			// The no-op provider is registered only by tests and tools; it is
+			// outside every mask and enumeration drops its adapters, so it can
+			// never become a silent fallback.
 			result = append(result, p)
 		default:
 			// Unknown backend types pass through if Primary is set
@@ -198,4 +212,12 @@ func FilterBackendsByMask(mask gputypes.Backends) []BackendProvider {
 	}
 
 	return result
+}
+
+// defaultMask is what a zero Backends means: the shared default set, hardware
+// only. Software is never in it (ADR-083 §2.3). The value comes from gputypes
+// so the default has one owner, and every software check compares against
+// gputypes.BackendsSoftware, never a numeric bit.
+func defaultMask() gputypes.Backends {
+	return gputypes.DefaultInstanceDescriptor().Backends
 }

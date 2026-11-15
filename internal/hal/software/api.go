@@ -25,7 +25,7 @@ func NewBackend() Backend { return Backend{} }
 
 // Variant returns the backend type identifier.
 func (Backend) Variant() gputypes.Backend {
-	return gputypes.BackendEmpty
+	return gputypes.BackendSoftware
 }
 
 // CreateInstance creates a new software rendering instance.
@@ -86,7 +86,7 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 				DeviceType: gputypes.DeviceTypeCPU,
 				Driver:     "software-1.0",
 				DriverInfo: "CPU-based software rendering backend",
-				Backend:    gputypes.BackendEmpty,
+				Backend:    gputypes.BackendSoftware,
 			},
 			// The BC and ETC2/EAC formats are sampled through
 			// internal/texcompress, which decodes them as GPUs do (tested

@@ -47,7 +47,7 @@ var halBackendConfigs = []halBackendConfig{
 	{name: backendDX12DXIL, variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12, dxil: true},
 	{name: backendGLES, variant: gputypes.BackendGL, mask: gputypes.BackendsGL},
 	{name: backendMetal, variant: gputypes.BackendMetal, mask: gputypes.BackendsMetal},
-	{name: backendSoftware, variant: gputypes.BackendEmpty, mask: gputypes.BackendsAll},
+	{name: backendSoftware, variant: gputypes.BackendSoftware, mask: gputypes.BackendsSoftware},
 }
 
 // forEachHALAdapter runs fn in a subtest backend/adapter for every adapter of

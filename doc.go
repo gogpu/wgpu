@@ -27,11 +27,12 @@
 // -tags wgpu_moltenvk), Vulkan and OpenGL ES on Android (arm64), and the
 // browser's WebGPU on js/wasm. The Pure Go software backend registers by
 // default too, outside the default adapter set: an empty Backends mask never
-// picks it; select it with RequestAdapterOptions.ForceFallbackAdapter or by
-// naming gputypes.BackendsSoftware in the mask. Other GOOS/GOARCH combinations
-// are outside the default registration set, and the backend packages are not
-// importable outside the module; some of them cannot build the Pure Go
-// backends at all (goffi has no syscall files for them).
+// picks it. Select it by naming gputypes.BackendsSoftware in the mask;
+// RequestAdapterOptions.ForceFallbackAdapter then prefers it over other CPU
+// adapters. Other GOOS/GOARCH combinations are outside the default registration
+// set, and the backend packages are not importable outside the module; some of
+// them cannot build the Pure Go backends at all (goffi has no syscall files for
+// them).
 //
 // Build tags remove a backend for a smaller binary: wgpu_novulkan,
 // wgpu_nodx12, wgpu_nometal, wgpu_nogles. wgpu_nosoftware removes the Pure Go

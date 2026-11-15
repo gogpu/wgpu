@@ -8,10 +8,9 @@ import "github.com/gogpu/wgpu/internal/hal/software"
 //
 // Importing hal/software also registers the software backend in the global HAL
 // registry: that is a side effect of this file's import, not of calling the
-// constructor. A test binary that imports wgputest therefore has software
-// registered for every code path, even when it only calls NewNoopDevice, and
-// until v0.35.0 the BackendEmpty rule admits software whatever mask a request
-// names (ADR-083 2.3). The package doc states this.
+// constructor. Since v0.35.0 the software backend registers by default in a
+// normal binary anyway (ADR-083 §2.3), and it is selected only through the
+// BackendsSoftware mask; the root package doc states the contract.
 func openSoftware() (openedBackend, error) {
 	return openBackend(software.NewBackend())
 }

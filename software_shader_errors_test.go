@@ -24,12 +24,12 @@ const badMagicParseError = "bad magic 0xdeadbeef"
 // newSoftwareDevice returns a device on the software adapter.
 func newSoftwareDevice(t *testing.T) *wgpu.Device {
 	t.Helper()
-	inst, err := wgpu.CreateInstance(nil)
+	inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 	t.Cleanup(inst.Release)
-	adapter, err := inst.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
+	adapter, err := inst.RequestAdapter(nil)
 	if err != nil {
 		t.Fatalf("RequestAdapter (software): %v", err)
 	}

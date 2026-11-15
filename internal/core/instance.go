@@ -184,9 +184,9 @@ func (i *Instance) enumerateRealAdapters(halDesc *hal.InstanceDescriptor) {
 
 	// Try each backend provider
 	for _, provider := range providers {
-		// Skip noop backend — it's for testing only, not real rendering.
-		// Software backend (also BackendEmpty variant) is allowed through
-		// because it provides real CPU-based rendering.
+		// Skip the no-op backend — it is a test double. The software backend is
+		// a real renderer and reaches this loop only when its mask bit selects
+		// it (ADR-083 §2.3).
 		if provider.Variant() == gputypes.BackendEmpty {
 			halInst, err := provider.CreateInstance(halDesc)
 			if err != nil {
@@ -397,7 +397,7 @@ const (
 // adapter. Other CPU adapters belong to a GPU API backend (Backend DX12 for
 // WARP), which keeps them distinguishable.
 func isSoftwareBackendAdapter(info *gputypes.AdapterInfo) bool {
-	return info.Backend == gputypes.BackendEmpty && info.DeviceType == gputypes.DeviceTypeCPU
+	return info.Backend == gputypes.BackendSoftware && info.DeviceType == gputypes.DeviceTypeCPU
 }
 
 func autoAdapterRank(info *gputypes.AdapterInfo, preference gputypes.PowerPreference) int {

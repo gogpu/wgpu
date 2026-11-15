@@ -29,10 +29,14 @@ func newInstance(t *testing.T) *wgpu.Instance {
 // newAdapter requests an adapter from a fresh instance.
 func newAdapter(t *testing.T) (*wgpu.Instance, *wgpu.Adapter) {
 	t.Helper()
-	inst := newInstance(t)
-	// Backends register by default (ADR-083 §2.1); pin the tests to the Pure
-	// Go software backend so the pick does not depend on this machine's GPUs.
-	adapter, err := inst.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
+	// Pin the tests to the Pure Go software backend: after ADR-083 §2.3 it is
+	// selectable only through its own mask, and the pick then does not depend
+	// on this machine's GPUs.
+	inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	adapter, err := inst.RequestAdapter(nil)
 	if err != nil {
 		t.Fatalf("RequestAdapter: %v", err)
 	}

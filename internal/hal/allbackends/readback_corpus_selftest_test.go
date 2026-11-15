@@ -209,7 +209,7 @@ func TestReadbackCorpusKnownFailureMatch(t *testing.T) {
 // comparison as TestReadbackCorpus: the right expectation passes, and a
 // corrupted one and a missing store both fail.
 func TestReadbackCorpusCatchesWrongValue(t *testing.T) {
-	backend, ok := hal.GetBackend(gputypes.BackendEmpty)
+	backend, ok := hal.GetBackend(gputypes.BackendSoftware)
 	if !ok {
 		t.Fatal("software backend not registered")
 	}

@@ -14,8 +14,8 @@ import (
 
 func TestBackendRegistration(t *testing.T) {
 	backend := NewBackend()
-	if backend.Variant() != gputypes.BackendEmpty {
-		t.Errorf("Expected BackendEmpty, got %v", backend.Variant())
+	if backend.Variant() != gputypes.BackendSoftware {
+		t.Errorf("Expected BackendSoftware, got %v", backend.Variant())
 	}
 }
 

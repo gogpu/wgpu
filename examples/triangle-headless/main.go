@@ -360,6 +360,8 @@ func initDevice() (*wgpu.Device, func(), error) {
 			backends = wgpu.BackendsMetal
 		case "gl", "gles":
 			backends = wgpu.BackendsGL
+		case "software", "sw", "cpu":
+			backends = gputypes.BackendsSoftware
 		}
 	}
 	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{

@@ -19,9 +19,9 @@ type NativeHandlesProvider interface {
 //
 // It is the key of the conversion table below and exists because no value the
 // backends already publish can serve as one: gputypes.Backend (Backend.Variant)
-// is lossy in both directions — the software and no-op backends both report
-// BackendEmpty, and a "rust"-tagged build reports the API below wgpu-native —
-// so a conversion keyed on it would relabel backends silently.
+// is lossy — the no-op backend reports BackendEmpty, which is also the zero
+// value, and a "rust"-tagged build reports the API below wgpu-native — so a
+// conversion keyed on it would relabel backends silently.
 type BackendID uint8
 
 const (

@@ -10,15 +10,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-
-	// Import the software backend so it registers with HAL.
-	// Note: The core Instance currently skips BackendEmpty during adapter
-	// enumeration, so the software backend is not used by CreateInstance
-	// directly. When a real GPU backend (Vulkan, DX12, GLES) is available,
-	// these tests exercise the full HAL integration path. Otherwise, the
-	// tests skip gracefully. Future architecture changes may allow the
-	// software backend to be selected directly.
-	_ "github.com/gogpu/wgpu/internal/hal/software"
 )
 
 // createTestDevice creates an Instance, Adapter, and Device for integration testing.
@@ -28,16 +19,15 @@ import (
 func createTestDevice(t *testing.T) (*wgpu.Instance, *wgpu.Adapter, *wgpu.Device) {
 	t.Helper()
 
-	instance, err := wgpu.CreateInstance(nil)
+	// Pin the integration tests to the software backend: the same adapter on
+	// every OS and in CI, which is what these CPU tests are written against.
+	// After ADR-083 §2.3 software is selectable only through its own mask.
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Skipf("cannot create instance: %v", err)
 	}
 
-	// Backends register by default (ADR-083 §2.1), so a plain request would
-	// pick this machine's GPU. Pin the integration tests to the software
-	// backend: the same adapter on every OS and in CI, which is what these
-	// CPU tests are written against.
-	adapter, err := instance.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
+	adapter, err := instance.RequestAdapter(nil)
 	if err != nil {
 		instance.Release()
 		t.Skipf("cannot request adapter: %v", err)

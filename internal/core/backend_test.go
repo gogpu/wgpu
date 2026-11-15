@@ -339,6 +339,75 @@ func TestFilterBackendsByMask(t *testing.T) {
 	}
 }
 
+// softwareTestProviders is the provider set of the mask-semantics tests: every
+// hardware backend, software and the explicit no-op double.
+func softwareTestProviders() []BackendProvider {
+	return []BackendProvider{
+		&testProvider{variant: gputypes.BackendVulkan, available: true},
+		&testProvider{variant: gputypes.BackendMetal, available: true},
+		&testProvider{variant: gputypes.BackendDX12, available: true},
+		&testProvider{variant: gputypes.BackendGL, available: true},
+		&testProvider{variant: gputypes.BackendSoftware, available: true},
+		&testProvider{variant: gputypes.BackendEmpty, available: true},
+	}
+}
+
+func hasVariant(providers []BackendProvider, variant gputypes.Backend) bool {
+	for _, p := range providers {
+		if p.Variant() == variant {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFilterBackendsByMaskZeroIsTheDefaultSet pins ADR-083 §2.3's mask-0 rule:
+// an empty mask selects the build's default hardware set and never software.
+func TestFilterBackendsByMaskZeroIsTheDefaultSet(t *testing.T) {
+	useProviders(t, softwareTestProviders()...)
+
+	filtered := FilterBackendsByMask(0)
+	if hasVariant(filtered, gputypes.BackendSoftware) {
+		t.Error("mask 0 admitted software; the default set is hardware only")
+	}
+	want := gputypes.DefaultInstanceDescriptor().Backends
+	for _, variant := range []gputypes.Backend{
+		gputypes.BackendVulkan, gputypes.BackendMetal, gputypes.BackendDX12, gputypes.BackendGL,
+	} {
+		if got := hasVariant(filtered, variant); got != want.Contains(variant) {
+			t.Errorf("mask 0: %v present = %v, want %v (default set %#x)", variant, got, want.Contains(variant), want)
+		}
+	}
+	if !hasVariant(filtered, gputypes.BackendEmpty) {
+		t.Error("mask 0 dropped the explicitly registered no-op provider; it is outside every mask")
+	}
+}
+
+// TestFilterBackendsByMaskSoftwareIsExplicitOnly pins that only the
+// BackendsSoftware bit admits software — no hardware mask, no All, and the
+// removed BackendEmpty bypass does not resurrect it.
+func TestFilterBackendsByMaskSoftwareIsExplicitOnly(t *testing.T) {
+	useProviders(t, softwareTestProviders()...)
+
+	for _, mask := range []gputypes.Backends{
+		gputypes.BackendsVulkan,
+		gputypes.BackendsVulkan | gputypes.BackendsGL,
+		gputypes.BackendsAll,
+	} {
+		if hasVariant(FilterBackendsByMask(mask), gputypes.BackendSoftware) {
+			t.Errorf("mask %#x admitted software; only BackendsSoftware does", mask)
+		}
+	}
+
+	filtered := FilterBackendsByMask(gputypes.BackendsSoftware)
+	if !hasVariant(filtered, gputypes.BackendSoftware) {
+		t.Error("BackendsSoftware did not admit software")
+	}
+	if hasVariant(filtered, gputypes.BackendVulkan) {
+		t.Error("BackendsSoftware admitted a hardware backend")
+	}
+}
+
 func TestHALBackendProvider(t *testing.T) {
 	// Register a HAL backend and then create a provider for it
 	// Since we're in the core package, we test the halBackendProvider wrapper

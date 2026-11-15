@@ -53,11 +53,12 @@
 //
 // Example:
 //
-//	import _ "github.com/gogpu/wgpu/hal/software"
+//	import _ "github.com/gogpu/wgpu/internal/hal/software"
 //
-//	// Software backend is registered automatically
+//	// The software backend registers by default since v0.35.0 (ADR-083); an
+//	// explicit import is needed only to use the package directly.
 //	// Adapter name: "Software Renderer"
 //	// Device type: gputypes.DeviceTypeCPU
 //
-// Backend identifier: gputypes.BackendEmpty
+// Backend identifier: gputypes.BackendSoftware
 package software

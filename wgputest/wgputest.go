@@ -32,11 +32,10 @@
 //
 // Importing this package registers the Pure Go software backend in the global
 // HAL registry, even for a test that only calls NewNoopDevice: the software
-// file imports hal/software, which registers itself. Until v0.35.0 the
-// BackendEmpty rule admits software whatever Backends mask a request names
-// (ADR-083 2.3), so in a test binary importing wgputest a Vulkan-only request
-// can return the software adapter. Mask-and-skip tests must account for that;
-// the noop device itself is private and does not register anything.
+// file imports hal/software, which registers itself. Since v0.35.0 a normal
+// binary registers it by default too, and it is selected only through the
+// BackendsSoftware mask (ADR-083 §2.3) — a hardware-only request never falls
+// back to it. The noop device itself is private and does not register anything.
 package wgputest
 
 import (

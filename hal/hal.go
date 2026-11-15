@@ -77,11 +77,10 @@ package hal
 // KindBrowser correspond to gputypes.BackendVulkan, gputypes.BackendMetal,
 // gputypes.BackendDX12, gputypes.BackendGL and gputypes.BackendBrowserWebGPU;
 // KindGLES is gputypes' GL, "OpenGL/OpenGL ES". KindSoftware corresponds to
-// gputypes.BackendSoftware where that value exists. KindNoop and KindWebGPU
-// have no gputypes counterpart — the no-op and software backends report
-// gputypes.BackendEmpty there — and KindWebGPU exists only in a build with the
-// "rust" tag. KindUnknown is the zero value where gputypes uses BackendEmpty
-// for a no-op adapter.
+// gputypes.BackendSoftware. KindNoop has no gputypes counterpart — the no-op
+// backend reports gputypes.BackendEmpty — and KindWebGPU exists only in a
+// build with the "rust" tag. KindUnknown is the zero value where gputypes uses
+// BackendEmpty for a no-op adapter.
 type BackendKind uint8
 
 const (

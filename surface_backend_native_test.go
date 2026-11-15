@@ -53,15 +53,14 @@ func newSoftwareSurfaceTestInstance(t *testing.T) *Instance {
 	// Software-only instance. These tests drive synthetic platform targets (a
 	// fake HWND, Xlib window or CAMetalLayer pointer); handing one to a real
 	// hardware backend is invalid input that crashes instead of erroring on
-	// macOS, where Metal retains the layer pointer. Mask 0 admits only the
-	// explicitly registered BackendEmpty backend until v0.35.0, which replaces
-	// it with the BackendsSoftware bit and removes the bypass (ADR-083 2.3).
-	instance, err := CreateInstance(&InstanceDescriptor{Backends: 0})
+	// macOS, where Metal retains the layer pointer. The mask names the software
+	// backend (ADR-083 §2.3).
+	instance, err := CreateInstance(&InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 	t.Cleanup(instance.Release)
-	if instance.core.HALInstanceForBackend(gputypes.BackendEmpty) == nil {
+	if instance.core.HALInstanceForBackend(gputypes.BackendSoftware) == nil {
 		t.Fatal("software HAL instance was not registered")
 	}
 	return instance
@@ -97,7 +96,7 @@ func TestCreateHALSurfacesTriesEveryBackendAndSucceedsIfAny(t *testing.T) {
 	surfaces, firstBackend, err := createHALSurfaces([]core.HALInstanceEntry{
 		{Backend: gputypes.BackendGL, Instance: unsupported},
 		{Backend: gputypes.BackendVulkan, Instance: vulkan},
-		{Backend: gputypes.BackendEmpty, Instance: softwareInstance},
+		{Backend: gputypes.BackendSoftware, Instance: softwareInstance},
 	}, target)
 	if err != nil {
 		t.Fatalf("createHALSurfaces: %v", err)
@@ -111,7 +110,7 @@ func TestCreateHALSurfacesTriesEveryBackendAndSucceedsIfAny(t *testing.T) {
 	if surfaces[gputypes.BackendVulkan] != vulkanSurface {
 		t.Fatal("Vulkan surface was not retained under the Vulkan backend")
 	}
-	if surfaces[gputypes.BackendEmpty] != softwareSurface {
+	if surfaces[gputypes.BackendSoftware] != softwareSurface {
 		t.Fatal("software surface was not retained under the software backend")
 	}
 	for name, instance := range map[string]*surfaceCreateTestInstance{
@@ -312,7 +311,7 @@ func TestTypedSurfaceCreationPathsUseBackendMap(t *testing.T) {
 	if safeSurface.targetSource != provider {
 		t.Fatal("safe surface did not retain its provider")
 	}
-	if safeSurface.halSurfaces[gputypes.BackendEmpty] == nil {
+	if safeSurface.halSurfaces[gputypes.BackendSoftware] == nil {
 		t.Fatal("safe surface did not retain the software backend surface")
 	}
 
@@ -456,23 +455,23 @@ func TestCreateAndEnsureHALSurfaceCoverDeferredPaths(t *testing.T) {
 		t.Fatal("createHALSurface succeeded without a matching HAL instance")
 	}
 	surface.target = SurfaceTargetFromWebCanvasID(1)
-	if _, err := surface.createHALSurface(gputypes.BackendEmpty); !errors.Is(err, ErrUnsupportedSurfaceTarget) {
+	if _, err := surface.createHALSurface(gputypes.BackendSoftware); !errors.Is(err, ErrUnsupportedSurfaceTarget) {
 		t.Fatalf("createHALSurface(web target) = %v, want ErrUnsupportedSurfaceTarget", err)
 	}
 	surface.target = target
-	raw, err := surface.createHALSurface(gputypes.BackendEmpty)
+	raw, err := surface.createHALSurface(gputypes.BackendSoftware)
 	if err != nil {
 		t.Fatalf("createHALSurface(software): %v", err)
 	}
 	raw.Destroy()
 
-	if err := surface.ensureHALSurface(gputypes.BackendEmpty); err != nil {
+	if err := surface.ensureHALSurface(gputypes.BackendSoftware); err != nil {
 		t.Fatalf("ensureHALSurface(software): %v", err)
 	}
-	if surface.halSurfaces[gputypes.BackendEmpty] == nil {
+	if surface.halSurfaces[gputypes.BackendSoftware] == nil {
 		t.Fatal("ensureHALSurface did not retain the lazily created surface")
 	}
-	if surface.currentBackend != gputypes.BackendEmpty || !surface.surfaceCreated {
+	if surface.currentBackend != gputypes.BackendSoftware || !surface.surfaceCreated {
 		t.Fatalf("active surface = (%v, %v), want software/created", surface.currentBackend, surface.surfaceCreated)
 	}
 	surface.Release()

@@ -6,6 +6,7 @@
 package core
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -144,32 +145,37 @@ func TestInstanceHardwarePickAcrossRegisteredBackends(t *testing.T) {
 	}
 }
 
-// TestInstanceExplicitSoftwareRegistration documents the Phase 0 behavior for
-// a program that imports the software backend itself: the pre-v0.35.0 mask
-// bypass admits it (ADR-083 §2.3). v0.35.0 removes the bypass; this test must
-// then expect the same error as TestInstanceRequestedBackendWithoutAdapter.
-func TestInstanceExplicitSoftwareRegistration(t *testing.T) {
+// TestInstanceExplicitSoftwareSelection pins v0.35.0's selection contract
+// (ADR-083 §2.3): software is registered under its own variant, a Vulkan-only
+// mask does not admit it (the pre-v0.35.0 BackendEmpty bypass is gone), and a
+// BackendsSoftware mask selects it.
+func TestInstanceExplicitSoftwareSelection(t *testing.T) {
 	GetGlobal().Clear()
 	useProviders(t, &testProvider{
-		variant:   gputypes.BackendEmpty,
+		variant:   gputypes.BackendSoftware,
 		available: true,
 		instance: &fakeHALInstance{adapters: []hal.ExposedAdapter{
-			fakeExposed("Software Renderer", gputypes.BackendEmpty, gputypes.DeviceTypeCPU),
+			fakeExposed("Software Renderer", gputypes.BackendSoftware, gputypes.DeviceTypeCPU),
 		}},
 	})
 
-	instance := NewInstance(&gputypes.InstanceDescriptor{Backends: gputypes.BackendsVulkan})
-	t.Cleanup(instance.Destroy)
+	outOfMask := NewInstance(&gputypes.InstanceDescriptor{Backends: gputypes.BackendsVulkan})
+	t.Cleanup(outOfMask.Destroy)
+	if _, err := outOfMask.RequestAdapter(nil); !errors.Is(err, ErrNoBackendRegistered) {
+		t.Fatalf("Vulkan-only mask error = %v, want ErrNoBackendRegistered; software is outside the mask", err)
+	}
 
-	id, err := instance.RequestAdapter(nil)
+	explicit := NewInstance(&gputypes.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
+	t.Cleanup(explicit.Destroy)
+	id, err := explicit.RequestAdapter(nil)
 	if err != nil {
-		t.Fatalf("RequestAdapter: %v", err)
+		t.Fatalf("BackendsSoftware RequestAdapter: %v", err)
 	}
 	adapter, err := GetGlobal().Hub().GetAdapter(id)
 	if err != nil {
 		t.Fatalf("GetAdapter: %v", err)
 	}
-	if adapter.Info.Backend != gputypes.BackendEmpty {
-		t.Errorf("pick = %q (%v), want the explicitly registered software adapter", adapter.Info.Name, adapter.Info.Backend)
+	if adapter.Info.Backend != gputypes.BackendSoftware {
+		t.Errorf("pick = %q (%v), want the software adapter", adapter.Info.Name, adapter.Info.Backend)
 	}
 }

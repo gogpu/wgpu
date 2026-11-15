@@ -165,13 +165,14 @@ func ProbeBackend(variant gputypes.Backend) (*BackendInfo, error) {
 }
 
 // SelectBestBackend chooses the most capable available backend.
-// Priority: Vulkan > Metal > DX12 > OpenGL > Noop
+// Priority: Vulkan > Metal > DX12 > OpenGL > Software > Noop
 func SelectBestBackend() (Backend, error) {
 	priority := []gputypes.Backend{
 		gputypes.BackendVulkan,
 		gputypes.BackendMetal,
 		gputypes.BackendDX12,
 		gputypes.BackendGL,
+		gputypes.BackendSoftware,
 		gputypes.BackendEmpty, // noop
 	}
 

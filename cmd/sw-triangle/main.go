@@ -103,9 +103,9 @@ func run() error {
 
 	// Use software-only backend mask. Creating Vulkan/DX12 instances (even without
 	// surfaces) loads GPU drivers that interfere with GDI StretchDIBits on some
-	// systems (Intel Iris Xe). 1 << BackendEmpty filters to software only.
+	// systems (Intel Iris Xe). BackendsSoftware filters to software only.
 	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{
-		Backends: gputypes.Backends(1 << gputypes.BackendEmpty),
+		Backends: gputypes.BackendsSoftware,
 	})
 	if err != nil {
 		return fmt.Errorf("instance: %w", err)

@@ -40,11 +40,11 @@ var overrideBackends = []overrideBackend{
 	{name: backendDX12DXIL, backends: gputypes.BackendsDX12, backend: gputypes.BackendDX12, dxil: true},
 	{name: backendGLES, backends: gputypes.BackendsGL, backend: gputypes.BackendGL},
 	{name: backendMetal, backends: gputypes.BackendsMetal, backend: gputypes.BackendMetal},
-	// Primary, not All: with GL in the mask every software subtest would also
-	// create and destroy a GLES instance, and destroying another GLES
-	// instance in one process can crash in wglDeleteContext (an existing GLES
-	// bug, not one of these tests).
-	{name: backendSoftware, backends: gputypes.BackendsPrimary, software: true},
+	// The software mask selects the software backend alone. A wider mask would
+	// also create a GLES instance, and destroying another GLES instance in one
+	// process can crash in wglDeleteContext (an existing GLES bug, not one of
+	// these tests).
+	{name: backendSoftware, backends: gputypes.BackendsSoftware, software: true},
 }
 
 // forEachOverrideBackend runs fn with a device of every backend that has an
@@ -136,7 +136,7 @@ func openBackendDeviceFeatures(t *testing.T, b overrideBackend, required gputype
 // a GPU does, so skipping them left that code untested there.
 func isOverrideTarget(b overrideBackend, info gputypes.AdapterInfo) bool {
 	if b.software {
-		return info.DeviceType == gputypes.DeviceTypeCPU && info.Backend == gputypes.BackendEmpty
+		return info.DeviceType == gputypes.DeviceTypeCPU && info.Backend == gputypes.BackendSoftware
 	}
 	return info.Backend == b.backend
 }
@@ -144,7 +144,7 @@ func isOverrideTarget(b overrideBackend, info gputypes.AdapterInfo) bool {
 func TestOverrideTargetAdapter(t *testing.T) {
 	warp := gputypes.AdapterInfo{Name: "Microsoft Basic Render Driver", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendDX12}
 	iris := gputypes.AdapterInfo{Name: "Intel(R) Iris(R) Xe Graphics", DeviceType: gputypes.DeviceTypeIntegratedGPU, Backend: gputypes.BackendDX12}
-	soft := gputypes.AdapterInfo{Name: "Software Renderer", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendEmpty}
+	soft := gputypes.AdapterInfo{Name: "Software Renderer", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendSoftware}
 	lavapipe := gputypes.AdapterInfo{Name: "llvmpipe", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendVulkan}
 	llvmpipeGL := gputypes.AdapterInfo{Name: "llvmpipe (LLVM 17.0.6, 256 bits)", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendGL}
 	byName := map[backendName]overrideBackend{}

@@ -11,13 +11,13 @@ import (
 
 // Adapter fixtures for the selection policy. WARP is the DX12 software
 // adapter (DXGI_ADAPTER_FLAG_SOFTWARE, DeviceTypeCPU); "software" is our CPU
-// backend (Backend Empty, DeviceTypeCPU).
+// backend (BackendSoftware, DeviceTypeCPU).
 var (
 	selDiscrete   = gputypes.AdapterInfo{Name: "GTX 1660 SUPER", DeviceType: gputypes.DeviceTypeDiscreteGPU, Backend: gputypes.BackendDX12}
 	selIntegrated = gputypes.AdapterInfo{Name: "Iris Xe", DeviceType: gputypes.DeviceTypeIntegratedGPU, Backend: gputypes.BackendDX12}
 	selWARP       = gputypes.AdapterInfo{Name: "Microsoft Basic Render Driver", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendDX12}
 	selLavapipe   = gputypes.AdapterInfo{Name: "llvmpipe", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendVulkan}
-	selSoftware   = gputypes.AdapterInfo{Name: "Software Renderer", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendEmpty}
+	selSoftware   = gputypes.AdapterInfo{Name: "Software Renderer", DeviceType: gputypes.DeviceTypeCPU, Backend: gputypes.BackendSoftware}
 )
 
 func TestSelectAdapterIDsOrder(t *testing.T) {

@@ -25,11 +25,11 @@ func (emptyHALInstance) EnumerateAdapters(hal.Surface) []hal.ExposedAdapter { re
 
 func (emptyHALInstance) Destroy() {}
 
-// emptyProvider stands in for a backend that is linked into the binary but has
-// no adapter on this machine.
+// emptyProvider stands in for the software backend with no adapter on this
+// machine: it keeps the software variant so the mask admits it.
 type emptyProvider struct{}
 
-func (emptyProvider) Variant() gputypes.Backend { return gputypes.BackendEmpty }
+func (emptyProvider) Variant() gputypes.Backend { return gputypes.BackendSoftware }
 
 func (emptyProvider) CreateInstance(*hal.InstanceDescriptor) (hal.Instance, error) {
 	return emptyHALInstance{}, nil
@@ -43,14 +43,13 @@ func (emptyProvider) IsAvailable() bool { return true }
 // backend is registered and admitted by the mask but has no adapter on this
 // machine", which names ErrNoHardwareAdapter and nothing else.
 //
-// The test binary links the software backend, and core's mask filter admits the
-// BackendEmpty provider for every mask, so that provider is swapped for one
-// without an adapter for the duration of the test and restored afterwards.
+// The test binary links the software backend, so that provider is swapped for
+// one without an adapter for the duration of the test and restored afterwards.
 func TestRequestAdapterNoAdapterSentinelPublicPath(t *testing.T) {
 	core.RegisterHALBackends() // fire the one-shot registration before replacing it
-	saved, ok := core.GetBackendProvider(gputypes.BackendEmpty)
+	saved, ok := core.GetBackendProvider(gputypes.BackendSoftware)
 	if !ok {
-		t.Fatal("no BackendEmpty provider registered in the test binary")
+		t.Fatal("no software backend provider registered in the test binary")
 	}
 	core.RegisterBackendProvider(emptyProvider{})
 	t.Cleanup(func() { core.RegisterBackendProvider(saved) })
