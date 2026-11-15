@@ -43,7 +43,7 @@ func TestCreateTextureViewPassesResolvedDimension(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	rec := &viewDescRecorder{Device: open.Device}
-	device, err := wgpu.NewDeviceFromHAL(rec, open.Queue, 0, gputypes.DefaultLimits(), "recorder")
+	device, err := wgpu.NewDeviceFromHALForTest(rec, open.Queue, 0, gputypes.DefaultLimits(), "recorder")
 	if err != nil {
 		t.Fatalf("NewDeviceFromHAL: %v", err)
 	}

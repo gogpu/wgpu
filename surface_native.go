@@ -439,11 +439,6 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 //   - Windows: handle WM_DPICHANGED
 //   - Wayland: read wl_output.scale
 //
-// Pass nil to remove the hook.
-func (s *Surface) SetPrepareFrame(fn core.PrepareFrameFunc) {
-	s.core.SetPrepareFrame(fn)
-}
-
 // SetPresentsWithTransaction toggles Core Animation transaction-based present
 // on Metal surfaces. Enable during macOS live window resize so the drawable
 // swap commits atomically with the resize CA transaction (Flutter/wgpu #3756

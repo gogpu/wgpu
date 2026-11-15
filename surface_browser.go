@@ -287,10 +287,6 @@ func (s *Surface) WritePixels(_ []byte, _, _ uint32) error {
 	return errors.New("wgpu: WritePixels is not supported on the browser backend")
 }
 
-// SetPrepareFrame is a no-op on browser backend.
-// Browser surfaces use requestAnimationFrame for frame timing.
-func (s *Surface) SetPrepareFrame(_ any) {}
-
 // SetPresentsWithTransaction is a no-op on browser backend.
 // Core Animation transactions are macOS-only.
 func (s *Surface) SetPresentsWithTransaction(_ bool) {}

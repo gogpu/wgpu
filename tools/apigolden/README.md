@@ -58,14 +58,14 @@ context has its own floor, and a context that is not listed is refused:
 
 | Context | Packages | Identifiers |
 |---|---:|---:|
-| `windows/amd64` | 20 | 8200 |
-| `windows/amd64 -tags rust` | 20 | 8200 |
-| `js/wasm` | 7 | 5200 |
+| `windows/amd64` | 3 | 258 |
+| `windows/amd64 -tags rust` | 3 | 246 |
+| `js/wasm` | 3 | 241 |
 
 `-min-packages` and `-min-identifiers` override the context floor when **both** are passed (a half-set override is
-refused). They exist for the v0.35.0 window: after the internal-layout move the public set shrinks to three packages,
-and the A5 commit regenerates with the same binary and pins the post-window floors to the exact generated values; the
-layoutcheck gate then uses those.
+refused). They exist for the v0.35.0 window: after the internal-layout move the public set shrank to three packages,
+and the A5 commit regenerated with the same binary and pinned these floors to the exact generated values; the
+layoutcheck gate then uses them.
 
 ## Baselines
 

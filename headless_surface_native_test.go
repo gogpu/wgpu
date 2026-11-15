@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	_ "github.com/gogpu/wgpu/internal/hal/software"
@@ -186,11 +187,8 @@ func (f *headlessSoftwareFixture) submitAndPresent(t *testing.T, texture *Surfac
 func newConfiguredWrappedSurface(t *testing.T, raw hal.Surface) *Surface {
 	t.Helper()
 
-	device, err := NewDeviceFromHAL(&noop.Device{}, &noop.Queue{}, 0, DefaultLimits(), "readback-wrapper")
-	if err != nil {
-		t.Fatalf("NewDeviceFromHAL: %v", err)
-	}
-	surface := NewSurfaceFromHAL(raw, "readback-wrapper")
+	device := newDeviceFromHAL(&noop.Device{}, &noop.Queue{}, 0, DefaultLimits(), "readback-wrapper")
+	surface := &Surface{core: core.NewSurface(raw, "readback-wrapper")}
 	// The wrapper owns an already-created raw surface. Set the same internal
 	// creation fact that Instance-created surfaces carry before Configure.
 	surface.surfaceCreated = true

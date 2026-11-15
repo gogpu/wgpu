@@ -21,7 +21,7 @@ func (qs *QuerySet) Type() QueryType {
 	if qs == nil || qs.core == nil {
 		return QueryTypeOcclusion
 	}
-	return qs.core.QueryType()
+	return QueryType(qs.core.QueryType())
 }
 
 // Count returns the number of queries in the set.

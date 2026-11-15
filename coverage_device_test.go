@@ -514,7 +514,7 @@ func TestGetSurfaceCapabilitiesCoreOnlyPath(t *testing.T) {
 
 	// With a non-nil surface (from HAL wrap) on a mock adapter, this tests
 	// the core-only path which returns default capabilities.
-	surface := wgpu.NewSurfaceFromHAL(nil, "test-surface")
+	surface := wgpu.NewSurfaceFromHALForTest(nil, "test-surface")
 	caps := adapter.GetSurfaceCapabilities(surface)
 	// On mock adapter without HAL, expect the core-only defaults.
 	if caps != nil {

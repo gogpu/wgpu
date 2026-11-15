@@ -67,10 +67,7 @@ func finishWithTextureUse(t *testing.T, device *Device, label string, tex *Textu
 // Rust: queue.rs submit — per baked command buffer a Transit pass +
 // close_and_push_front; pending writes at index 0.
 func TestAssembleSubmission_TransitBeforeEachCommandBuffer(t *testing.T) {
-	device, err := NewDeviceFromHAL(&labelingDevice{}, &noop.Queue{}, 0, DefaultLimits(), "order")
-	if err != nil {
-		t.Fatalf("NewDeviceFromHAL: %v", err)
-	}
+	device := newDeviceFromHAL(&labelingDevice{}, &noop.Queue{}, 0, DefaultLimits(), "order")
 	defer device.Release()
 	q := device.Queue()
 

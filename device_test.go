@@ -576,7 +576,7 @@ func TestDeviceCreateTextureViewWithDescriptor(t *testing.T) {
 // =============================================================================
 
 func TestNewDeviceFromHALNilDevice(t *testing.T) {
-	_, err := wgpu.NewDeviceFromHAL(nil, nil, 0, wgpu.DefaultLimits(), "test")
+	_, err := wgpu.NewDeviceFromHALForTest(nil, nil, 0, wgpu.DefaultLimits(), "test")
 	if err == nil {
 		t.Fatal("NewDeviceFromHAL(nil device) should fail")
 	}

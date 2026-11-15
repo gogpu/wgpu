@@ -158,12 +158,18 @@ func (d *SamplerDescriptor) toHAL() *hal.SamplerDescriptor {
 }
 
 // QueryType specifies the type of queries in a query set.
-type QueryType = hal.QueryType
+//
+// It is a defined type in this package (ADR-070 §15: a public API never
+// aliases an internal type); the underlying type is uint32, as it was.
+type QueryType uint32
 
 // Query type constants.
 const (
-	QueryTypeOcclusion = hal.QueryTypeOcclusion
-	QueryTypeTimestamp = hal.QueryTypeTimestamp
+	// QueryTypeOcclusion counts the number of samples that pass depth/stencil tests.
+	QueryTypeOcclusion QueryType = iota
+
+	// QueryTypeTimestamp writes GPU timestamps for profiling.
+	QueryTypeTimestamp
 )
 
 // QuerySetDescriptor describes query set creation parameters.
@@ -177,7 +183,7 @@ type QuerySetDescriptor struct {
 func (d *QuerySetDescriptor) toHAL() *hal.QuerySetDescriptor {
 	return &hal.QuerySetDescriptor{
 		Label: d.Label,
-		Type:  d.Type,
+		Type:  hal.QueryType(d.Type),
 		Count: d.Count,
 	}
 }

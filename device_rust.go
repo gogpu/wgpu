@@ -516,9 +516,6 @@ func (d *Device) Poll(pollType PollType) bool {
 // FreeCommandBuffer is a no-op on Rust backend.
 func (d *Device) FreeCommandBuffer(_ *CommandBuffer) {}
 
-// HalDevice returns nil on Rust backend. There is no HAL layer.
-func (d *Device) HalDevice() any { return nil }
-
 // Release releases the device and all associated resources.
 func (d *Device) Release() {
 	if d.released {

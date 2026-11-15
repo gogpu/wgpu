@@ -1205,13 +1205,17 @@ func (d *Device) FreeCommandBuffer(cb *CommandBuffer) {
 // filters, and pushes nothing then: the spec throws a TypeError for that value
 // (pushErrorScope step 1), and a Go API reports it as an error.
 func (d *Device) PushErrorScope(filter ErrorFilter) error {
-	return d.core.PushErrorScope(filter)
+	return d.core.PushErrorScope(core.ErrorFilter(filter))
 }
 
 // PopErrorScope pops the most recently pushed error scope.
 // Returns the captured error, or nil if no error occurred.
 func (d *Device) PopErrorScope() *GPUError {
-	return d.core.PopErrorScope()
+	e := d.core.PopErrorScope()
+	if e == nil {
+		return nil
+	}
+	return &GPUError{Type: ErrorFilter(e.Type), Message: e.Message}
 }
 
 // WaitIdle waits for all GPU work to complete.

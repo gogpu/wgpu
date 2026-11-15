@@ -16,7 +16,7 @@ import (
 // =============================================================================
 
 func TestNewDeviceFromHALBothNil(t *testing.T) {
-	_, err := wgpu.NewDeviceFromHAL(nil, nil, 0, wgpu.DefaultLimits(), "both-nil")
+	_, err := wgpu.NewDeviceFromHALForTest(nil, nil, 0, wgpu.DefaultLimits(), "both-nil")
 	if err == nil {
 		t.Fatal("NewDeviceFromHAL(nil, nil) should fail")
 	}
@@ -39,7 +39,7 @@ func TestNewTextureFromHALFormats(t *testing.T) {
 
 	for _, tt := range formats {
 		t.Run(tt.name, func(t *testing.T) {
-			tex := wgpu.NewTextureFromHAL(nil, nil, tt.format)
+			tex := wgpu.NewTextureFromHALForTest(nil, nil, tt.format)
 			if tex == nil {
 				t.Fatal("NewTextureFromHAL returned nil")
 			}
@@ -56,14 +56,14 @@ func TestNewTextureFromHALFormats(t *testing.T) {
 // =============================================================================
 
 func TestNewTextureViewFromHALNilArgs(t *testing.T) {
-	view := wgpu.NewTextureViewFromHAL(nil, nil)
+	view := wgpu.NewTextureViewFromHALForTest(nil, nil)
 	if view == nil {
 		t.Fatal("NewTextureViewFromHAL returned nil")
 	}
 }
 
 func TestNewSamplerFromHALNilArgs(t *testing.T) {
-	sampler := wgpu.NewSamplerFromHAL(nil, nil)
+	sampler := wgpu.NewSamplerFromHALForTest(nil, nil)
 	if sampler == nil {
 		t.Fatal("NewSamplerFromHAL returned nil")
 	}
@@ -75,7 +75,7 @@ func TestNewSamplerFromHALNilArgs(t *testing.T) {
 // =============================================================================
 
 func TestNewSurfaceFromHALWithLabel(t *testing.T) {
-	surface := wgpu.NewSurfaceFromHAL(nil, "labeled-surface")
+	surface := wgpu.NewSurfaceFromHALForTest(nil, "labeled-surface")
 	if surface == nil {
 		t.Fatal("NewSurfaceFromHAL returned nil")
 	}
@@ -90,7 +90,7 @@ func TestHalDeviceOnLiveDevice(t *testing.T) {
 	defer device.Release()
 	requireHAL(t, device)
 
-	hal := device.HalDevice()
+	hal := wgpu.DeviceHalDeviceForTest(device)
 	if hal == nil {
 		t.Error("HalDevice() should return non-nil on live device")
 	}
@@ -100,7 +100,7 @@ func TestHalDeviceOnReleasedDevice(t *testing.T) {
 	_, _, device := newDevice(t)
 	device.Release()
 
-	hal := device.HalDevice()
+	hal := wgpu.DeviceHalDeviceForTest(device)
 	if hal != nil {
 		t.Error("HalDevice() on released device should return nil")
 	}

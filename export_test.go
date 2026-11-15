@@ -3,8 +3,11 @@
 package wgpu
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // SetTestRequiredVertexBuffers sets the requiredVertexBuffers field for testing.
@@ -125,3 +128,49 @@ func NewTestCommandEncoderForDevice(device *Device) *CommandEncoder {
 		core:   &core.CoreCommandEncoder{},
 	}
 }
+
+// The HAL wrapping constructors and the HAL device handle are not public since
+// v0.35.0 (ADR-070 §15: no internal type in a public signature). Package
+// wgpu_test builds objects around HAL doubles through these hooks; the
+// wgputest factory uses newDeviceFromHAL directly.
+
+// NewDeviceFromHALForTest wraps HAL device and queue objects in a Device; both
+// must be non-nil, as the removed public constructor required.
+func NewDeviceFromHALForTest(
+	halDevice hal.Device,
+	halQueue hal.Queue,
+	features gputypes.Features,
+	limits gputypes.Limits,
+	label string,
+) (*Device, error) {
+	if halDevice == nil {
+		return nil, fmt.Errorf("wgpu: halDevice is nil")
+	}
+	if halQueue == nil {
+		return nil, fmt.Errorf("wgpu: halQueue is nil")
+	}
+	return newDeviceFromHAL(halDevice, halQueue, features, limits, label), nil
+}
+
+// NewSurfaceFromHALForTest wraps a HAL surface in a Surface.
+func NewSurfaceFromHALForTest(halSurface hal.Surface, label string) *Surface {
+	return &Surface{core: core.NewSurface(halSurface, label)}
+}
+
+// NewTextureFromHALForTest wraps a HAL texture in a Texture.
+func NewTextureFromHALForTest(halTexture hal.Texture, device *Device, format gputypes.TextureFormat) *Texture {
+	return &Texture{hal: halTexture, device: device, format: format}
+}
+
+// NewTextureViewFromHALForTest wraps a HAL texture view in a TextureView.
+func NewTextureViewFromHALForTest(halView hal.TextureView, device *Device) *TextureView {
+	return &TextureView{hal: halView, device: device}
+}
+
+// NewSamplerFromHALForTest wraps a HAL sampler in a Sampler.
+func NewSamplerFromHALForTest(halSampler hal.Sampler, device *Device) *Sampler {
+	return &Sampler{hal: halSampler, device: device}
+}
+
+// DeviceHalDeviceForTest returns the HAL device behind d.
+func DeviceHalDeviceForTest(d *Device) hal.Device { return d.halDevice() }

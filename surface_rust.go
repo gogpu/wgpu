@@ -206,11 +206,6 @@ func (s *Surface) ActualExtent() (width, height uint32) {
 	return s.configWidth, s.configHeight
 }
 
-// SetPrepareFrame registers a platform hook called before each GetCurrentTexture.
-// On Rust backend, this is a no-op — wgpu-native handles HiDPI internally.
-// The function signature uses any to avoid importing core in the rust build path.
-func (s *Surface) SetPrepareFrame(_ any) {}
-
 // DiscardTexture discards the acquired surface texture without presenting it.
 // On Rust backend, this is a no-op.
 func (s *Surface) DiscardTexture() {

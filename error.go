@@ -4,6 +4,7 @@ package wgpu
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
@@ -199,12 +200,52 @@ var (
 	ErrSubmitCommandBufferInvalid = errors.New("wgpu: Submit: command buffer is invalid (already submitted or encoding error)")
 )
 
-// Re-export error types from core.
-type GPUError = core.GPUError
-type ErrorFilter = core.ErrorFilter
+// GPUError represents a captured GPU error from an error scope.
+//
+// It is a defined type in this package (ADR-070 §15: a public API never
+// aliases an internal type); the shape is the one the core type had.
+type GPUError struct {
+	// Type identifies the category of the error.
+	Type ErrorFilter
+
+	// Message provides a human-readable description of the error.
+	Message string
+}
+
+// Error implements the error interface.
+func (e *GPUError) Error() string {
+	return fmt.Sprintf("GPU %s error: %s", e.Type, e.Message)
+}
+
+// ErrorFilter selects which errors an error scope captures.
+type ErrorFilter int
 
 const (
-	ErrorFilterValidation  = core.ErrorFilterValidation
-	ErrorFilterOutOfMemory = core.ErrorFilterOutOfMemory
-	ErrorFilterInternal    = core.ErrorFilterInternal
+	// ErrorFilterValidation captures validation errors.
+	// These occur when API usage violates the WebGPU specification
+	// (e.g., invalid descriptors, missing resources, state errors).
+	ErrorFilterValidation ErrorFilter = iota
+
+	// ErrorFilterOutOfMemory captures out-of-memory errors.
+	// These occur when GPU memory allocation fails.
+	ErrorFilterOutOfMemory
+
+	// ErrorFilterInternal captures internal errors.
+	// These occur due to implementation bugs or unexpected GPU behavior.
+	ErrorFilterInternal
 )
+
+// String returns a human-readable name for the error filter. It keeps the
+// method set the core alias exposed publicly before v0.35.0.
+func (f ErrorFilter) String() string {
+	switch f {
+	case ErrorFilterValidation:
+		return "Validation"
+	case ErrorFilterOutOfMemory:
+		return "OutOfMemory"
+	case ErrorFilterInternal:
+		return "Internal"
+	default:
+		return fmt.Sprintf("ErrorFilter(%d)", int(f))
+	}
+}
