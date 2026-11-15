@@ -121,4 +121,37 @@ func TestHALNativeReleasedObjects(t *testing.T) {
 			t.Fatalf("released instance HAL() = %+v, want zero Handles", got)
 		}
 	})
+
+	// A cached adapter is instance-owned: releasing the wrapper and releasing
+	// the owning instance both make its native pointers stale, so both paths
+	// must yield the zero Handles. The live check proves the guard is scoped.
+	t.Run("Adapter", func(t *testing.T) {
+		instance := newSoftwareSurfaceTestInstance(t)
+		adapter, err := instance.RequestAdapter(nil)
+		if err != nil {
+			t.Fatalf("RequestAdapter: %v", err)
+		}
+		if got := adapter.HAL(); got.Kind != publichal.KindSoftware {
+			t.Fatalf("live software adapter HAL() = %+v, want KindSoftware", got)
+		}
+		adapter.Release()
+		if got := adapter.HAL(); got != (publichal.Handles{}) {
+			t.Fatalf("released adapter HAL() = %+v, want zero Handles", got)
+		}
+	})
+
+	t.Run("AdapterAfterInstanceRelease", func(t *testing.T) {
+		instance := newSoftwareSurfaceTestInstance(t)
+		adapter, err := instance.RequestAdapter(nil)
+		if err != nil {
+			t.Fatalf("RequestAdapter: %v", err)
+		}
+		if got := adapter.HAL(); got.Kind != publichal.KindSoftware {
+			t.Fatalf("live software adapter HAL() = %+v, want KindSoftware", got)
+		}
+		instance.Release()
+		if got := adapter.HAL(); got != (publichal.Handles{}) {
+			t.Fatalf("adapter of a released instance HAL() = %+v, want zero Handles", got)
+		}
+	})
 }

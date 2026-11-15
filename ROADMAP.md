@@ -233,7 +233,7 @@ bus id, which Rust leaves to the application.
 - [ ] Systematic GL error checking layer — `checkGL()` after every call (ADR-046)
 
 **Public API Quality (#218):**
-- [ ] Remove HAL leaks from public API (`Surface.HAL()`, `Surface.SetPrepareFrame()`)
+- [x] Remove HAL leaks from public API — public accessors return only `hal.Handles`; no `core`/`hal` implementation type is public (ADR-070)
 - [x] `Device.CreateQuerySet` public wrapper
 - [ ] Document Surface single-thread requirement
 

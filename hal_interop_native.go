@@ -14,7 +14,11 @@ func (i *Instance) halHandles() hal.Handles {
 
 // halHandles is the native-build body of Adapter.HAL.
 func (a *Adapter) halHandles() hal.Handles {
-	if a == nil || a.core == nil {
+	// A cached adapter is instance-owned: Adapter.Release only marks the
+	// wrapper, and releasing the instance destroys the HAL object underneath.
+	// Report nothing once either is gone, so a caller never receives a stale
+	// native pointer; hal_interop.go promises the zero Handles after release.
+	if a == nil || a.core == nil || a.released || (a.instance != nil && a.instance.isReleased()) {
 		return hal.Handles{}
 	}
 	return a.core.HALHandles()
