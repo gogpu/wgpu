@@ -98,6 +98,19 @@ func copyViewFormats(formats []gputypes.TextureFormat) *[]gputypes.TextureFormat
 	return &c
 }
 
+// newDetachedTexture returns a texture that carries the descriptor's metadata
+// (its format and view formats) and nothing else: no device and no HAL object.
+// It backs the public wgputest.NewDetachedTexture; see newDetachedTextureFactory.
+// desc may be nil: the handle then carries zero metadata.
+func newDetachedTexture(desc *TextureDescriptor) *Texture {
+	t := &Texture{}
+	if desc != nil {
+		t.format = desc.Format
+		t.viewFormats = copyViewFormats(desc.ViewFormats)
+	}
+	return t
+}
+
 // Release drops the application's reference to the texture. The HAL texture
 // is destroyed once nothing references it any more — no bind group,
 // unfinished command encoder, unsubmitted command buffer or pending queue
@@ -111,6 +124,13 @@ func (t *Texture) Release() {
 	// Surface textures are borrowed swapchain images. The wrapper never owns
 	// their HAL lifetime, even while the acquisition is still active.
 	if t.surface != nil {
+		t.released = true
+		return
+	}
+	// A detached texture (wgputest.NewDetachedTexture) has no device and no
+	// HAL object: Release only marks it released. Reaching
+	// t.device.destroyTextureDeferred would dereference the nil device.
+	if t.device == nil {
 		t.released = true
 		return
 	}

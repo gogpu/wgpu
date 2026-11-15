@@ -1,13 +1,17 @@
-//go:build !(js && wasm)
-
 // Package wgputestbridge is the internal seam behind the public wgputest
 // package.
 //
 // Go does not let a package construct a type with unexported fields from
-// another package, so wgputest cannot build a *wgpu.Device itself. The root
-// package registers a Factory here at init; wgputest calls New and
-// type-asserts the opaque result. This keeps the root package's public API
-// free of test-only names and needs no //go:linkname.
+// another package, so wgputest cannot build a *wgpu.Device or a *wgpu.Texture
+// itself. The root package registers a Factory and a TextureFactory here at
+// init; wgputest calls New / NewTexture and type-asserts the opaque results.
+// This keeps the root package's public API free of test-only names and needs
+// no //go:linkname.
+//
+// The package has no build constraint: every build registers the texture
+// factory, so wgputest.NewDetachedTexture exists on every platform, while the
+// device factory stays native-only and the constructors report ErrUnavailable
+// elsewhere.
 package wgputestbridge
 
 import (
@@ -99,6 +103,37 @@ func New(opts *Options) (device, queue any, cleanup func(), err error) {
 		return nil, nil, nil, ErrNoFactory
 	}
 	return f(opts)
+}
+
+// TextureFactory builds a *wgpu.Texture with no device and no backend object,
+// for the public wgputest.NewDetachedTexture. desc is a
+// *wgpu.TextureDescriptor or nil; the result is returned as any and
+// type-asserted by wgputest, so this package stays free of the root import.
+type TextureFactory func(desc any) (any, error)
+
+var (
+	textureMu      sync.RWMutex
+	textureFactory TextureFactory
+)
+
+// RegisterTextureFactory installs the texture factory. Root calls it from
+// init in every build, so the registration is always present once package wgpu
+// is imported.
+func RegisterTextureFactory(f TextureFactory) {
+	textureMu.Lock()
+	textureFactory = f
+	textureMu.Unlock()
+}
+
+// NewTexture calls the registered texture factory, or returns ErrNoFactory.
+func NewTexture(desc any) (any, error) {
+	textureMu.RLock()
+	f := textureFactory
+	textureMu.RUnlock()
+	if f == nil {
+		return nil, ErrNoFactory
+	}
+	return f(desc)
 }
 
 // Hooks is the per-device recorder state shared by the wrappers.
