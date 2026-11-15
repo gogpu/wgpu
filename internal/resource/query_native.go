@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package resource
 
 import (
 	"github.com/gogpu/wgpu/internal/core"
@@ -12,6 +12,27 @@ type QuerySet struct {
 	core     *core.QuerySet
 	device   core.DeviceView
 	released bool
+}
+
+// NewQuerySet builds a query set over core state and the shared device view.
+func NewQuerySet(core *core.QuerySet, device core.DeviceView) *QuerySet {
+	return &QuerySet{core: core, device: device}
+}
+
+// Core returns the core query set, or nil.
+func (qs *QuerySet) Core() *core.QuerySet {
+	if qs == nil {
+		return nil
+	}
+	return qs.core
+}
+
+// Device returns the shared device view the query set was created on.
+func (qs *QuerySet) Device() core.DeviceView {
+	if qs == nil {
+		return nil
+	}
+	return qs.device
 }
 
 // Type returns the query set type.
@@ -30,9 +51,9 @@ func (qs *QuerySet) Count() uint32 {
 	return qs.core.Count()
 }
 
-// halQuerySet returns the underlying HAL query set while holding the device
+// HALQuerySet returns the underlying HAL query set while holding the device
 // snatch lock, or nil after the query set or its device has been released.
-func (qs *QuerySet) halQuerySet() hal.QuerySet {
+func (qs *QuerySet) HALQuerySet() hal.QuerySet {
 	if qs == nil || qs.core == nil || qs.device == nil || qs.device.Core() == nil || qs.released {
 		return nil
 	}
@@ -43,10 +64,10 @@ func (qs *QuerySet) halQuerySet() hal.QuerySet {
 	return qs.core.Raw(guard)
 }
 
-// liveCore returns the core query set, or nil when the query set is nil or
+// LiveCore returns the core query set, or nil when the query set is nil or
 // released, so core validation rejects it. Release defers the core
 // destruction, so the core object alone does not show a released set.
-func (qs *QuerySet) liveCore() *core.QuerySet {
+func (qs *QuerySet) LiveCore() *core.QuerySet {
 	if qs == nil || qs.released {
 		return nil
 	}

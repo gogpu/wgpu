@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // lateBufferBinding tracks a single buffer binding that requires late validation.
@@ -26,7 +27,7 @@ type lateBufferBinding struct {
 // slot, its dynamic offsets and its late buffer bindings.
 // Matches Rust wgpu-core's EntryPayload (command/bind.rs).
 type binderPayload struct {
-	group *BindGroup
+	group *resource.BindGroup
 	// dynamicOffsets is a copy of the offsets given to SetBindGroup. Every
 	// assignment allocates a new slice: a backend may keep the slice it was
 	// bound with until the command buffer is played back (GLES records it).
@@ -63,11 +64,11 @@ type bindGroupSetter interface {
 type binder struct {
 	// assigned holds the layout of the bind group set at each slot via SetBindGroup.
 	// nil means no bind group has been assigned to that slot.
-	assigned [MaxBindGroups]*BindGroupLayout
+	assigned [MaxBindGroups]*resource.BindGroupLayout
 
 	// expected holds the layout expected at each slot by the current pipeline.
 	// nil means the pipeline does not use that slot.
-	expected [MaxBindGroups]*BindGroupLayout
+	expected [MaxBindGroups]*resource.BindGroupLayout
 
 	// maxSlots is the number of bind group slots expected by the current pipeline.
 	// This equals len(pipelineLayout.BindGroupLayouts).
@@ -88,8 +89,8 @@ type binder struct {
 // reset clears all binder state: the pass has no pipeline and no bind groups.
 // Called after ExecuteBundles (Rust wgpu-core State::reset_bundle).
 func (b *binder) reset() {
-	b.assigned = [MaxBindGroups]*BindGroupLayout{}
-	b.expected = [MaxBindGroups]*BindGroupLayout{}
+	b.assigned = [MaxBindGroups]*resource.BindGroupLayout{}
+	b.expected = [MaxBindGroups]*resource.BindGroupLayout{}
 	b.maxSlots = 0
 	for i := range b.payloads {
 		b.payloads[i].reset()
@@ -104,18 +105,18 @@ func (b *binder) reset() {
 // A slot that gains an expected layout, or whose expected layout changes to an
 // incompatible one, lowers rebindStart to it; losing an expectation does not.
 // Matches Rust wgpu-core's BoundBindGroupLayouts::update_expectations.
-func (b *binder) updateExpectations(layouts []*BindGroupLayout) {
+func (b *binder) updateExpectations(layouts []*resource.BindGroupLayout) {
 	if len(layouts) > MaxBindGroups {
 		layouts = layouts[:MaxBindGroups]
 	}
 	b.maxSlots = uint32(len(layouts)) //nolint:gosec // at most MaxBindGroups
 
-	var next [MaxBindGroups]*BindGroupLayout
+	var next [MaxBindGroups]*resource.BindGroupLayout
 	copy(next[:], layouts)
 	for i, layout := range next {
 		old := b.expected[i]
 		b.expected[i] = layout
-		if layout != nil && (old == nil || !old.isCompatibleWith(layout)) {
+		if layout != nil && (old == nil || !old.IsCompatibleWith(layout)) {
 			b.updateRebindStart(uint32(i))
 		}
 	}
@@ -131,11 +132,11 @@ func (b *binder) updateRebindStart(index uint32) {
 // setGroup records the bind group set at index with a copy of its dynamic
 // offsets. The backend gets it at the next flush. Matches Rust wgpu-core's
 // Binder::assign_group.
-func (b *binder) setGroup(index uint32, group *BindGroup, offsets []uint32) {
+func (b *binder) setGroup(index uint32, group *resource.BindGroup, offsets []uint32) {
 	if index >= MaxBindGroups {
 		return
 	}
-	b.assign(index, group.layout)
+	b.assign(index, group.Layout())
 	b.assignBindGroup(index, group)
 	payload := &b.payloads[index]
 	payload.group = group
@@ -149,7 +150,7 @@ func (b *binder) setGroup(index uint32, group *BindGroup, offsets []uint32) {
 // the current pipeline expects there (Rust compat Entry::is_valid).
 func (b *binder) isValid(i uint32) bool {
 	exp, asg := b.expected[i], b.assigned[i]
-	return exp != nil && asg != nil && b.payloads[i].group != nil && asg.isCompatibleWith(exp)
+	return exp != nil && asg != nil && b.payloads[i].group != nil && asg.IsCompatibleWith(exp)
 }
 
 // flush binds to the backend every valid slot from rebindStart up, with its
@@ -166,9 +167,9 @@ func (b *binder) bindValid(raw bindGroupSetter, start uint32) {
 	if raw == nil {
 		return
 	}
-	b.listValid(start, func(i uint32, group *BindGroup, offsets []uint32) {
-		if group.hal != nil {
-			raw.SetBindGroup(i, group.hal, offsets)
+	b.listValid(start, func(i uint32, group *resource.BindGroup, offsets []uint32) {
+		if group.HAL() != nil {
+			raw.SetBindGroup(i, group.HAL(), offsets)
 		}
 	})
 }
@@ -184,7 +185,7 @@ func (b *binder) takeRebindStart() uint32 {
 // listValid calls fn with every valid slot from start up, its group and its
 // dynamic offsets (Rust Binder::list_valid_with_start). A render bundle
 // records these as its SetBindGroup commands; a pass binds them.
-func (b *binder) listValid(start uint32, fn func(i uint32, group *BindGroup, offsets []uint32)) {
+func (b *binder) listValid(start uint32, fn func(i uint32, group *resource.BindGroup, offsets []uint32)) {
 	for i := start; i < MaxBindGroups; i++ {
 		if b.isValid(i) {
 			fn(i, b.payloads[i].group, b.payloads[i].dynamicOffsets)
@@ -194,7 +195,7 @@ func (b *binder) listValid(start uint32, fn func(i uint32, group *BindGroup, off
 
 // activeGroup returns the group set at slot i if the current pipeline uses
 // the slot, or nil (Rust compat Entry::is_active).
-func (b *binder) activeGroup(i uint32) *BindGroup {
+func (b *binder) activeGroup(i uint32) *resource.BindGroup {
 	if i >= MaxBindGroups || b.expected[i] == nil {
 		return nil
 	}
@@ -234,13 +235,13 @@ func (b *binder) updateLateBufferBindingsFromPipeline(lateGroups [MaxBindGroups]
 // was set first, entries already have ShaderExpectSize filled.
 //
 // Matches the late binding part of Rust wgpu-core's Binder::assign_group.
-func (b *binder) assignBindGroup(index uint32, bindGroup *BindGroup) {
+func (b *binder) assignBindGroup(index uint32, bindGroup *resource.BindGroup) {
 	if index >= MaxBindGroups {
 		return
 	}
 	payload := &b.payloads[index]
 
-	infos := bindGroup.lateBufferBindingInfos
+	infos := bindGroup.LateBufferBindingInfos()
 
 	// Update existing entries (pipeline was set before bind group).
 	for j := 0; j < len(payload.lateBufferBindings) && j < len(infos); j++ {
@@ -262,7 +263,7 @@ func (b *binder) assignBindGroup(index uint32, bindGroup *BindGroup) {
 // assign records a bind group assignment at the given slot.
 // The layout pointer is stored for later compatibility checks, and the slot's
 // backend binding becomes stale (Rust BoundBindGroupLayouts::assign).
-func (b *binder) assign(index uint32, layout *BindGroupLayout) {
+func (b *binder) assign(index uint32, layout *resource.BindGroupLayout) {
 	if index < MaxBindGroups {
 		b.assigned[index] = layout
 		b.updateRebindStart(index)
@@ -275,7 +276,7 @@ func (b *binder) assign(index uint32, layout *BindGroupLayout) {
 // The index is checked against the device's maxBindGroups limit, not against
 // the current pipeline: WebGPU allows setting a group the current pipeline
 // does not use, for a later pipeline (Rust wgpu-core pass.rs set_bind_group).
-func validateSetBindGroup(passName string, index uint32, group *BindGroup, offsets []uint32, limits *gputypes.Limits) error {
+func validateSetBindGroup(passName string, index uint32, group *resource.BindGroup, offsets []uint32, limits *gputypes.Limits) error {
 	if group == nil {
 		return fmt.Errorf("wgpu: %s.SetBindGroup: bind group is nil", passName)
 	}
@@ -357,7 +358,7 @@ func (b *binder) checkCompatibility() error {
 				i, errBindGroupMissing,
 			)
 		}
-		if !asg.isCompatibleWith(exp) {
+		if !asg.IsCompatibleWith(exp) {
 			return fmt.Errorf(
 				"wgpu: bind group at index %d has incompatible layout (assigned layout %p != expected layout %p): %w",
 				i, asg, exp, errBindGroupIncompatible,

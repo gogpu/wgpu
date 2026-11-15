@@ -23,10 +23,10 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 
 // SetBindGroup sets a bind group for the given index.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if group == nil || group.browser == nil {
+	if group == nil || group.impl.Browser() == nil {
 		return
 	}
-	p.browser.SetBindGroup(index, group.browser.Ref(), offsets)
+	p.browser.SetBindGroup(index, group.impl.Browser().Ref(), offsets)
 }
 
 // Dispatch dispatches compute work.

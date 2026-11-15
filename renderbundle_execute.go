@@ -84,7 +84,7 @@ func (b *RenderBundle) replay(raw hal.RenderPassEncoder) error {
 		case bundleSetPipeline:
 			raw.SetPipeline(cmd.pipeline.hal)
 		case bundleSetBindGroup:
-			raw.SetBindGroup(cmd.slot, cmd.group.hal, cmd.offsets)
+			raw.SetBindGroup(cmd.slot, cmd.group.HAL(), cmd.offsets)
 		case bundleSetVertexBuffer:
 			buffer := cmd.buffer.impl.HALBuffer()
 			if buffer == nil {

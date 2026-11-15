@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 type testHALResource struct{}
@@ -94,20 +95,20 @@ func newCaptureDevice(h *captureDevice) *Device {
 }
 
 func newTestQuerySet(raw hal.QuerySet, device *Device) *QuerySet {
-	return &QuerySet{
-		core:   core.NewQuerySet(raw, device.core, hal.QueryTypeTimestamp, 4, "test query set"),
-		device: device.seamView(),
-	}
+	return &QuerySet{impl: resource.NewQuerySet(
+		core.NewQuerySet(raw, device.core, hal.QueryTypeTimestamp, 4, "test query set"),
+		device.seamView(),
+	)}
 }
 
 func TestBeginRenderPassTimestampWrites(t *testing.T) {
 	begin, end := uint32(2), uint32(3)
-	resource := &testHALResource{}
+	raw := &testHALResource{}
 	h := &captureDevice{Device: &noop.Device{}}
 	device := newCaptureDevice(h)
-	active := newTestQuerySet(resource, device)
-	released := newTestQuerySet(resource, device)
-	released.released = true
+	active := newTestQuerySet(raw, device)
+	released := newTestQuerySet(raw, device)
+	released.Release()
 
 	tests := []struct {
 		name    string
@@ -163,7 +164,7 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 				}
 				return
 			}
-			if got == nil || got.QuerySet != resource || got.BeginningOfPassWriteIndex != &begin || got.EndOfPassWriteIndex != &end {
+			if got == nil || got.QuerySet != raw || got.BeginningOfPassWriteIndex != &begin || got.EndOfPassWriteIndex != &end {
 				t.Fatalf("TimestampWrites = %+v", got)
 			}
 		})
@@ -175,18 +176,18 @@ func TestBeginRenderPassTimestampWrites(t *testing.T) {
 // HAL pass begins, as Rust wgpu-core validate_pass_timestamp_writes does.
 func TestBeginComputePassTimestampWrites(t *testing.T) {
 	begin, end, outOfRange := uint32(0), uint32(3), uint32(4)
-	resource := &testHALResource{}
+	raw := &testHALResource{}
 	h := &captureDevice{Device: &noop.Device{}}
 	device := newCaptureDevice(h)
-	active := newTestQuerySet(resource, device)
-	released := newTestQuerySet(resource, device)
-	released.released = true
-	occlusion := &QuerySet{
-		core:   core.NewQuerySet(resource, device.core, hal.QueryTypeOcclusion, 4, "occlusion"),
-		device: device.seamView(),
-	}
+	active := newTestQuerySet(raw, device)
+	released := newTestQuerySet(raw, device)
+	released.Release()
+	occlusion := &QuerySet{impl: resource.NewQuerySet(
+		core.NewQuerySet(raw, device.core, hal.QueryTypeOcclusion, 4, "occlusion"),
+		device.seamView(),
+	)}
 	other := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
-	foreign := newTestQuerySet(resource, other)
+	foreign := newTestQuerySet(raw, other)
 
 	tests := []struct {
 		name    string
@@ -238,7 +239,7 @@ func TestBeginComputePassTimestampWrites(t *testing.T) {
 				}
 				return
 			}
-			if got == nil || got.QuerySet != resource ||
+			if got == nil || got.QuerySet != raw ||
 				got.BeginningOfPassWriteIndex != tt.writes.BeginningOfPassWriteIndex ||
 				got.EndOfPassWriteIndex != tt.writes.EndOfPassWriteIndex {
 				t.Fatalf("TimestampWrites = %+v", got)
@@ -251,10 +252,10 @@ func TestBeginComputePassTimestampWrites(t *testing.T) {
 // a device without FeatureTimestampQuery rejects timestampWrites.
 func TestBeginComputePassTimestampWritesNeedsFeature(t *testing.T) {
 	end := uint32(1)
-	resource := &testHALResource{}
+	raw := &testHALResource{}
 	h := &captureDevice{Device: &noop.Device{}, commandEncoder: &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}}
 	device := &Device{core: core.NewDevice(h, nil, 0, DefaultLimits(), "no-timestamp-feature")}
-	querySet := newTestQuerySet(resource, device)
+	querySet := newTestQuerySet(raw, device)
 	encoder, err := device.CreateCommandEncoder(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +291,7 @@ type periodQueue struct {
 func (q *periodQueue) GetTimestampPeriod() float32 { return q.period }
 
 func TestResolveQuerySetDelegates(t *testing.T) {
-	resource := &testHALResource{}
+	raw := &testHALResource{}
 	command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
 	h := &captureDevice{Device: &noop.Device{}, commandEncoder: command}
 	device := newCaptureDevice(h)
@@ -303,15 +304,15 @@ func TestResolveQuerySetDelegates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder() error = %v", err)
 	}
-	querySet := newTestQuerySet(resource, device)
+	querySet := newTestQuerySet(raw, device)
 	encoder.ResolveQuerySet(querySet, 0, 1, buffer, 0)
-	if command.resolved != 1 || command.querySet != resource || command.buffer == nil {
+	if command.resolved != 1 || command.querySet != raw || command.buffer == nil {
 		t.Fatalf("ResolveQuerySet delegation = (%d, %v, %v)", command.resolved, command.querySet, command.buffer)
 	}
 }
 
 func TestResolveQuerySetGuards(t *testing.T) {
-	resource := &testHALResource{}
+	raw := &testHALResource{}
 	command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}
 	h := &captureDevice{Device: &noop.Device{}, commandEncoder: command}
 	device := newCaptureDevice(h)
@@ -319,9 +320,9 @@ func TestResolveQuerySetGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder() error = %v", err)
 	}
-	querySet := newTestQuerySet(resource, device)
-	releasedQuerySet := newTestQuerySet(resource, device)
-	releasedQuerySet.released = true
+	querySet := newTestQuerySet(raw, device)
+	releasedQuerySet := newTestQuerySet(raw, device)
+	releasedQuerySet.Release()
 	activeDestination := NewTestBufferFromCore(nil)
 	releasedDestination := NewTestBufferFromCore(nil)
 	releasedDestination.Release()
@@ -365,26 +366,26 @@ func TestResolveQuerySetGuards(t *testing.T) {
 }
 
 func TestResolveQuerySetRecordsErrors(t *testing.T) {
-	resource := &testHALResource{}
+	raw := &testHALResource{}
 	tests := []struct {
 		name        string
 		querySet    func(*Device) *QuerySet
 		destination *Buffer
 	}{
 		{name: "nil query set", destination: NewTestBufferFromCore(nil)},
-		{name: "nil destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }},
+		{name: "nil destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(raw, d) }},
 		{name: "released query set", querySet: func(d *Device) *QuerySet {
-			q := newTestQuerySet(resource, d)
-			q.released = true
+			q := newTestQuerySet(raw, d)
+			q.Release()
 			return q
 		}, destination: NewTestBufferFromCore(nil)},
-		{name: "released destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }, destination: func() *Buffer {
+		{name: "released destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(raw, d) }, destination: func() *Buffer {
 			b := NewTestBufferFromCore(nil)
 			b.Release()
 			return b
 		}()},
 		{name: "nil HAL query set", querySet: func(*Device) *QuerySet { return &QuerySet{} }, destination: NewTestBufferFromCore(nil)},
-		{name: "nil HAL destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(resource, d) }, destination: NewTestBufferFromCore(nil)},
+		{name: "nil HAL destination", querySet: func(d *Device) *QuerySet { return newTestQuerySet(raw, d) }, destination: NewTestBufferFromCore(nil)},
 	}
 
 	for _, tt := range tests {
@@ -429,11 +430,11 @@ func TestCreationWithoutHALDevice(t *testing.T) {
 
 func TestRenderPassDescriptorTimestampWritesToHAL(t *testing.T) {
 	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
-	resource := &testHALResource{}
-	active := newTestQuerySet(resource, device)
+	raw := &testHALResource{}
+	active := newTestQuerySet(raw, device)
 	defer device.destroyQueue().FlushAll()
 	defer active.Release()
-	released := newTestQuerySet(resource, device)
+	released := newTestQuerySet(raw, device)
 	released.Release()
 	begin, end := uint32(1), uint32(3)
 	tests := []struct {
@@ -460,7 +461,7 @@ func TestRenderPassDescriptorTimestampWritesToHAL(t *testing.T) {
 				return
 			}
 			writes := got.TimestampWrites
-			if writes == nil || writes.QuerySet != resource || writes.BeginningOfPassWriteIndex != tt.writes.BeginningOfPassWriteIndex || writes.EndOfPassWriteIndex != tt.writes.EndOfPassWriteIndex {
+			if writes == nil || writes.QuerySet != raw || writes.BeginningOfPassWriteIndex != tt.writes.BeginningOfPassWriteIndex || writes.EndOfPassWriteIndex != tt.writes.EndOfPassWriteIndex {
 				t.Fatalf("TimestampWrites = %+v, want %+v", writes, tt.writes)
 			}
 		})

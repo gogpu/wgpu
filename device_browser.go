@@ -75,22 +75,24 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		return nil, fmt.Errorf("wgpu: texture descriptor is nil")
 	}
 	bt := d.browser.CreateTextureFromDesc(convertTextureDescriptor(desc))
-	return &Texture{
-		browser:  bt,
-		format:   desc.Format,
-		released: false,
-	}, nil
+	impl := resource.NewTexture(bt, desc.Format)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex, nil
 }
 
 // newDetachedTexture returns a texture that carries the descriptor's format
 // and no backend object. It backs the public wgputest.NewDetachedTexture; see
 // newDetachedTextureFactory. desc may be nil.
 func newDetachedTexture(desc *TextureDescriptor) *Texture {
-	t := &Texture{}
+	var format gputypes.TextureFormat
 	if desc != nil {
-		t.format = desc.Format
+		format = desc.Format
 	}
-	return t
+	impl := resource.NewDetachedTexture(format)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex
 }
 
 // convertTextureDescriptor converts a texture descriptor to a
@@ -112,7 +114,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	if d.released {
 		return nil, ErrReleased
 	}
-	if texture == nil || texture.browser == nil {
+	if texture == nil || texture.impl.Browser() == nil {
 		return nil, ErrReleased
 	}
 	if desc == nil {
@@ -124,12 +126,8 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		desc.BaseMipLevel, desc.MipLevelCount,
 		desc.BaseArrayLayer, desc.ArrayLayerCount,
 	)
-	bv := texture.browser.CreateView(jsDesc)
-	return &TextureView{
-		browser:  bv,
-		texture:  texture,
-		released: false,
-	}, nil
+	bv := texture.impl.Browser().CreateView(jsDesc)
+	return &TextureView{impl: resource.NewTextureView(bv, texture.impl)}, nil
 }
 
 // CreateSampler creates a texture sampler from the given descriptor.
@@ -150,10 +148,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		desc.Compare, normalizeAnisotropy(desc.Anisotropy),
 	)
 	bs := d.browser.CreateSamplerFromDesc(jsDesc)
-	return &Sampler{
-		browser:  bs,
-		released: false,
-	}, nil
+	return &Sampler{impl: resource.NewSampler(bs)}, nil
 }
 
 // CreateShaderModule creates a shader module from the given descriptor.
@@ -168,10 +163,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	}
 	jsDesc := browser.BuildShaderModuleDescriptor(desc.Label, desc.WGSL)
 	bm := d.browser.CreateShaderModuleFromDesc(jsDesc)
-	return &ShaderModule{
-		browser:  bm,
-		released: false,
-	}, nil
+	return &ShaderModule{impl: resource.NewShaderModule(bm)}, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout from the given descriptor.
@@ -185,10 +177,7 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 	entries := convertBindGroupLayoutEntries(desc.Entries)
 	jsDesc := browser.BuildBindGroupLayoutDescriptor(desc.Label, entries)
 	bl := d.browser.CreateBindGroupLayoutFromDesc(jsDesc)
-	return &BindGroupLayout{
-		browser:  bl,
-		released: false,
-	}, nil
+	return &BindGroupLayout{impl: resource.NewBindGroupLayout(bl)}, nil
 }
 
 // CreatePipelineLayout creates a pipeline layout from the given descriptor.
@@ -201,18 +190,15 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 	}
 	refs := make([]js.Value, len(desc.BindGroupLayouts))
 	for i, bgl := range desc.BindGroupLayouts {
-		if bgl != nil && bgl.browser != nil {
-			refs[i] = bgl.browser.Ref()
+		if bgl != nil && bgl.impl.Browser() != nil {
+			refs[i] = bgl.impl.Browser().Ref()
 		} else {
 			refs[i] = js.Undefined()
 		}
 	}
 	jsDesc := browser.BuildPipelineLayoutDescriptor(desc.Label, refs)
 	bp := d.browser.CreatePipelineLayoutFromDesc(jsDesc)
-	return &PipelineLayout{
-		browser:  bp,
-		released: false,
-	}, nil
+	return &PipelineLayout{impl: resource.NewPipelineLayout(bp)}, nil
 }
 
 // CreateBindGroup creates a bind group from the given descriptor.
@@ -224,18 +210,15 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		return nil, fmt.Errorf("wgpu: bind group descriptor is nil")
 	}
 	var layoutRef js.Value
-	if desc.Layout != nil && desc.Layout.browser != nil {
-		layoutRef = desc.Layout.browser.Ref()
+	if desc.Layout != nil && desc.Layout.impl.Browser() != nil {
+		layoutRef = desc.Layout.impl.Browser().Ref()
 	} else {
 		layoutRef = js.Undefined()
 	}
 	entries := convertBindGroupEntries(desc.Entries)
 	jsDesc := browser.BuildBindGroupDescriptor(desc.Label, layoutRef, entries)
 	bg := d.browser.CreateBindGroupFromDesc(jsDesc)
-	return &BindGroup{
-		browser:  bg,
-		released: false,
-	}, nil
+	return &BindGroup{impl: resource.NewBindGroup(bg)}, nil
 }
 
 // CreateRenderPipeline creates a render pipeline from the given descriptor.
@@ -269,14 +252,14 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, err
 	}
 	var layoutRef js.Value
-	if desc.Layout != nil && desc.Layout.browser != nil {
-		layoutRef = desc.Layout.browser.Ref()
+	if desc.Layout != nil && desc.Layout.impl.Browser() != nil {
+		layoutRef = desc.Layout.impl.Browser().Ref()
 	} else {
 		layoutRef = js.Undefined()
 	}
 	var moduleRef js.Value
-	if desc.Module != nil && desc.Module.browser != nil {
-		moduleRef = desc.Module.browser.Ref()
+	if desc.Module != nil && desc.Module.impl.Browser() != nil {
+		moduleRef = desc.Module.impl.Browser().Ref()
 	} else {
 		moduleRef = js.Undefined()
 	}
@@ -315,7 +298,7 @@ func (d *Device) CreateFence() (*Fence, error) {
 	if d.released {
 		return nil, ErrReleased
 	}
-	return &Fence{}, nil
+	return &Fence{impl: &resource.Fence{}}, nil
 }
 
 // DestroyFence destroys a fence. No-op on browser — fences are JS-managed.
@@ -435,11 +418,11 @@ func convertBindGroupEntries(entries []BindGroupEntry) []browser.BindGroupEntryJ
 			entry.BufferOffset = e.Offset
 			entry.BufferSize = e.Size
 		}
-		if e.Sampler != nil && e.Sampler.browser != nil {
-			entry.SamplerRef = e.Sampler.browser.Ref()
+		if e.Sampler != nil && e.Sampler.impl.Browser() != nil {
+			entry.SamplerRef = e.Sampler.impl.Browser().Ref()
 		}
-		if e.TextureView != nil && e.TextureView.browser != nil {
-			entry.TextureViewRef = e.TextureView.browser.Ref()
+		if e.TextureView != nil && e.TextureView.impl.Browser() != nil {
+			entry.TextureViewRef = e.TextureView.impl.Browser().Ref()
 		}
 		result[i] = entry
 	}
@@ -476,8 +459,8 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 	}
 
 	// Layout
-	if desc.Layout != nil && desc.Layout.browser != nil {
-		rpd.LayoutRef = desc.Layout.browser.Ref()
+	if desc.Layout != nil && desc.Layout.impl.Browser() != nil {
+		rpd.LayoutRef = desc.Layout.impl.Browser().Ref()
 	} else {
 		rpd.LayoutRef = js.Undefined()
 	}
@@ -487,8 +470,8 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 		EntryPoint: desc.Vertex.EntryPoint,
 		Constants:  desc.Vertex.Constants,
 	}
-	if desc.Vertex.Module != nil && desc.Vertex.Module.browser != nil {
-		rpd.Vertex.ModuleRef = desc.Vertex.Module.browser.Ref()
+	if desc.Vertex.Module != nil && desc.Vertex.Module.impl.Browser() != nil {
+		rpd.Vertex.ModuleRef = desc.Vertex.Module.impl.Browser().Ref()
 	} else {
 		rpd.Vertex.ModuleRef = js.Undefined()
 	}
@@ -614,8 +597,8 @@ func convertFragmentState(fs *FragmentState) *browser.FragmentStateJS {
 		EntryPoint: fs.EntryPoint,
 		Constants:  fs.Constants,
 	}
-	if fs.Module != nil && fs.Module.browser != nil {
-		result.ModuleRef = fs.Module.browser.Ref()
+	if fs.Module != nil && fs.Module.impl.Browser() != nil {
+		result.ModuleRef = fs.Module.impl.Browser().Ref()
 	} else {
 		result.ModuleRef = js.Undefined()
 	}

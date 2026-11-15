@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // bindCall is one SetBindGroup the binder made on the backend pass.
@@ -41,16 +42,16 @@ func (r *recordingBindPass) take() []uint32 {
 
 // rebindLayout returns a layout with one uniform buffer entry; layouts made
 // with the same dynamic flag are compatible, entry by entry.
-func rebindLayout(dynamic bool) *BindGroupLayout {
-	return &BindGroupLayout{entries: []gputypes.BindGroupLayoutEntry{{
+func rebindLayout(dynamic bool) *resource.BindGroupLayout {
+	return resource.NewBindGroupLayout(nil, nil, []gputypes.BindGroupLayoutEntry{{
 		Binding:    0,
 		Visibility: gputypes.ShaderStageCompute,
 		Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, HasDynamicOffset: dynamic},
-	}}}
+	}})
 }
 
-func rebindGroup(layout *BindGroupLayout) *BindGroup {
-	return &BindGroup{hal: &testHALResource{}, layout: layout}
+func rebindGroup(layout *resource.BindGroupLayout) *resource.BindGroup {
+	return resource.NewBindGroup(&resource.BindGroupInit{HAL: &testHALResource{}, Layout: layout})
 }
 
 func expectBound(t *testing.T, step string, pass *recordingBindPass, want ...uint32) {
@@ -75,7 +76,7 @@ func TestBinderFlushRebind(t *testing.T) {
 	b.flush(pass)
 	expectBound(t, "group set before any pipeline", pass)
 
-	b.updateExpectations([]*BindGroupLayout{la})
+	b.updateExpectations([]*resource.BindGroupLayout{la})
 	b.setGroup(1, gB, []uint32{0})
 	b.flush(pass)
 	expectBound(t, "pipeline with group 0 only", pass, 0)
@@ -83,11 +84,11 @@ func TestBinderFlushRebind(t *testing.T) {
 	b.flush(pass)
 	expectBound(t, "second draw, nothing changed", pass)
 
-	b.updateExpectations([]*BindGroupLayout{la, lb})
+	b.updateExpectations([]*resource.BindGroupLayout{la, lb})
 	b.flush(pass)
 	expectBound(t, "pipeline gains group 1", pass, 1)
 
-	b.updateExpectations([]*BindGroupLayout{laTwin, lc})
+	b.updateExpectations([]*resource.BindGroupLayout{laTwin, lc})
 	b.flush(pass)
 	expectBound(t, "equal layout at 0, other layout at 1 (gB does not fit it)", pass)
 
@@ -95,18 +96,18 @@ func TestBinderFlushRebind(t *testing.T) {
 	b.flush(pass)
 	expectBound(t, "gC set at 1", pass, 1)
 
-	b.updateExpectations([]*BindGroupLayout{la, lb})
+	b.updateExpectations([]*resource.BindGroupLayout{la, lb})
 	b.setGroup(1, gB, []uint32{512})
 	b.flush(pass)
 	expectBound(t, "gB set again at 1", pass, 1)
 
-	b.updateExpectations([]*BindGroupLayout{ld, lb})
+	b.updateExpectations([]*resource.BindGroupLayout{ld, lb})
 	b.setGroup(0, gD, nil)
 	b.flush(pass)
 	expectBound(t, "change at 0 takes 1 with it", pass, 0, 1)
 
 	b.reset()
-	b.updateExpectations([]*BindGroupLayout{ld, lb})
+	b.updateExpectations([]*resource.BindGroupLayout{ld, lb})
 	b.flush(pass)
 	expectBound(t, "after reset (ExecuteBundles)", pass)
 }
@@ -123,7 +124,7 @@ func TestBinderFlushOffsets(t *testing.T) {
 	offsets := []uint32{256}
 	b.setGroup(0, g, offsets)
 	offsets[0] = 768
-	b.updateExpectations([]*BindGroupLayout{l})
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 	b.flush(pass)
 
 	offsets[0] = 512
@@ -138,8 +139,8 @@ func TestBinderFlushOffsets(t *testing.T) {
 		if got := fmt.Sprint(c.offsets); got != fmt.Sprint([]uint32{want}) {
 			t.Errorf("bind %d: offsets %s, want [%d]", i, got, want)
 		}
-		if c.group != g.hal {
-			t.Errorf("bind %d: group %v, want %v", i, c.group, g.hal)
+		if c.group != g.HAL() {
+			t.Errorf("bind %d: group %v, want %v", i, c.group, g.HAL())
 		}
 	}
 }
@@ -151,7 +152,7 @@ func TestBinderBindValidRestores(t *testing.T) {
 	l0, l1 := rebindLayout(true), rebindLayout(false)
 	var b binder
 	pass := &recordingBindPass{}
-	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	b.updateExpectations([]*resource.BindGroupLayout{l0, l1})
 	b.setGroup(0, rebindGroup(l0), []uint32{0})
 	b.setGroup(1, rebindGroup(l1), nil)
 	b.setGroup(2, rebindGroup(l1), nil) // not used by the pipeline
@@ -186,7 +187,7 @@ func TestExecuteBundlesResetsPassState(t *testing.T) {
 	}
 	l := rebindLayout(false)
 	renderPass.pipelineSet = true
-	renderPass.binder.updateExpectations([]*BindGroupLayout{l})
+	renderPass.binder.updateExpectations([]*resource.BindGroupLayout{l})
 	renderPass.binder.setGroup(0, rebindGroup(l), nil)
 
 	renderPass.ExecuteBundles(newEmptyBundle(device))

@@ -1,15 +1,15 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package resource
 
 import (
+	"log/slog"
 	"runtime"
 	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
-	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
@@ -23,11 +23,39 @@ type BindGroupLayout struct {
 	entries []gputypes.BindGroupLayoutEntry
 }
 
-// isCompatibleWith returns true if two layouts have identical entries.
+// NewBindGroupLayout builds a bind group layout over a HAL object and the
+// shared device view.
+func NewBindGroupLayout(hal hal.BindGroupLayout, device core.DeviceView, entries []gputypes.BindGroupLayoutEntry) *BindGroupLayout {
+	return &BindGroupLayout{hal: hal, device: device, entries: entries}
+}
+
+// HAL returns the HAL bind group layout, or nil.
+func (l *BindGroupLayout) HAL() hal.BindGroupLayout {
+	if l == nil {
+		return nil
+	}
+	return l.hal
+}
+
+// Entries returns the layout entries, the basis of entry-by-entry
+// compatibility.
+func (l *BindGroupLayout) Entries() []gputypes.BindGroupLayoutEntry {
+	if l == nil {
+		return nil
+	}
+	return l.entries
+}
+
+// IsReleased reports whether Release has run on the layout.
+func (l *BindGroupLayout) IsReleased() bool {
+	return l != nil && l.released
+}
+
+// IsCompatibleWith returns true if two layouts have identical entries.
 // This matches Rust wgpu-core's entry-by-entry compatibility check in
 // binder.check_compatibility(), allowing equivalent layouts created via
 // separate CreateBindGroupLayout calls to be considered compatible.
-func (l *BindGroupLayout) isCompatibleWith(other *BindGroupLayout) bool {
+func (l *BindGroupLayout) IsCompatibleWith(other *BindGroupLayout) bool {
 	if l == other {
 		return true // pointer equality fast path
 	}
@@ -126,6 +154,49 @@ type PipelineLayout struct {
 	ref *core.ResourceRef
 }
 
+// NewPipelineLayout builds a pipeline layout over a HAL object and the shared
+// device view.
+func NewPipelineLayout(hal hal.PipelineLayout, device core.DeviceView, bindGroupCount uint32, bindGroupLayouts []*BindGroupLayout, ref *core.ResourceRef) *PipelineLayout {
+	return &PipelineLayout{hal: hal, device: device, bindGroupCount: bindGroupCount, bindGroupLayouts: bindGroupLayouts, ref: ref}
+}
+
+// HAL returns the HAL pipeline layout, or nil.
+func (l *PipelineLayout) HAL() hal.PipelineLayout {
+	if l == nil {
+		return nil
+	}
+	return l.hal
+}
+
+// BindGroupCount returns the number of bind group layouts.
+func (l *PipelineLayout) BindGroupCount() uint32 {
+	if l == nil {
+		return 0
+	}
+	return l.bindGroupCount
+}
+
+// BindGroupLayouts returns the layouts used to create this pipeline layout.
+func (l *PipelineLayout) BindGroupLayouts() []*BindGroupLayout {
+	if l == nil {
+		return nil
+	}
+	return l.bindGroupLayouts
+}
+
+// Ref returns the layout's reference count, or nil for one without it.
+func (l *PipelineLayout) Ref() *core.ResourceRef {
+	if l == nil {
+		return nil
+	}
+	return l.ref
+}
+
+// IsReleased reports whether Release has run on the layout.
+func (l *PipelineLayout) IsReleased() bool {
+	return l != nil && l.released
+}
+
 // Release drops the application's reference to the pipeline layout. The HAL
 // layout is destroyed once no pipeline created with it exists any more and the
 // GPU has completed every submission that may use it: a layout released after
@@ -198,7 +269,7 @@ type BindGroup struct {
 	// Used at Submit time to verify that referenced buffers are still alive
 	// and not mapped. Matches Rust wgpu-core's pattern where
 	// validate_command_buffer iterates cmd_buf_data.trackers.buffers.
-	boundBuffers []*resource.Buffer
+	boundBuffers []*Buffer
 	// boundTextures holds references to textures bound in this bind group (VAL-A6).
 	// Used at Submit time to verify that referenced textures are still alive.
 	boundTextures []*Texture
@@ -208,6 +279,154 @@ type BindGroup struct {
 	// so the resources are transitioned into these usages (Rust
 	// BindGroup.used).
 	usages *core.BindGroupUsages
+}
+
+// bindGroupCleanupRef holds the data needed to destroy a bind group's HAL
+// resources from a runtime.AddCleanup callback. This struct must NOT reference
+// the BindGroup itself — runtime.AddCleanup requires the callback argument to
+// be independent of the cleaned-up object.
+type bindGroupCleanupRef struct {
+	label    string
+	released *atomic.Bool
+	ref      *core.ResourceRef // for ref.Drop() in GC path (ADR-056)
+}
+
+// BindGroupInit is the construction value for NewBindGroup. It is decomposed
+// into the group's fields on entry and never stored.
+type BindGroupInit struct {
+	Label                  string
+	HAL                    hal.BindGroup
+	Device                 core.DeviceView
+	Layout                 *BindGroupLayout
+	LateBufferBindingInfos []LateBufferBindingInfo
+	DynamicBindings        []core.DynamicBinding
+	Ref                    *core.ResourceRef
+	BoundBuffers           []*Buffer
+	BoundTextures          []*Texture
+	Usages                 *core.BindGroupUsages
+}
+
+// NewBindGroup builds a bind group over the HAL object and the shared device
+// view, and arms its GC cleanup. The device that creates a bind group is the
+// only caller.
+func NewBindGroup(init *BindGroupInit) *BindGroup {
+	g := &BindGroup{
+		hal:                    init.HAL,
+		device:                 init.Device,
+		released:               new(atomic.Bool),
+		layout:                 init.Layout,
+		lateBufferBindingInfos: init.LateBufferBindingInfos,
+		dynamicBindings:        init.DynamicBindings,
+		ref:                    init.Ref,
+		boundBuffers:           init.BoundBuffers,
+		boundTextures:          init.BoundTextures,
+		usages:                 init.Usages,
+	}
+	g.armCleanup(init.Label)
+	return g
+}
+
+// armCleanup registers a runtime.AddCleanup handler on the bind group. When GC
+// collects the bind group without an explicit Release(), the cleanup drops the
+// ResourceRef — the same refcount-driven path as Release() (ADR-056). It is a
+// method, not a package function, so the device that builds the group can arm
+// it without naming this file's unexported declarations across a package
+// boundary (ADR-070 §11 grain note).
+func (g *BindGroup) armCleanup(label string) {
+	g.cleanup = runtime.AddCleanup(g, func(ref bindGroupCleanupRef) {
+		if !ref.released.CompareAndSwap(false, true) {
+			return
+		}
+		slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
+		if ref.ref != nil {
+			ref.ref.Drop()
+		}
+	}, bindGroupCleanupRef{
+		label:    label,
+		released: g.released,
+		ref:      g.ref,
+	})
+}
+
+// HAL returns the HAL bind group, or nil.
+func (g *BindGroup) HAL() hal.BindGroup {
+	if g == nil {
+		return nil
+	}
+	return g.hal
+}
+
+// Ref returns the bind group's reference count, or nil for one without it.
+func (g *BindGroup) Ref() *core.ResourceRef {
+	if g == nil {
+		return nil
+	}
+	return g.ref
+}
+
+// IsReleased reports whether Release has run on the bind group.
+func (g *BindGroup) IsReleased() bool {
+	return g != nil && g.released != nil && g.released.Load()
+}
+
+// Layout returns the bind group layout the group was created with.
+func (g *BindGroup) Layout() *BindGroupLayout {
+	if g == nil {
+		return nil
+	}
+	return g.layout
+}
+
+// Device returns the shared device view the group was created on.
+func (g *BindGroup) Device() core.DeviceView {
+	if g == nil {
+		return nil
+	}
+	return g.device
+}
+
+// LateBufferBindingInfos returns the recorded late buffer binding sizes, in
+// layout entry order.
+func (g *BindGroup) LateBufferBindingInfos() []LateBufferBindingInfo {
+	if g == nil {
+		return nil
+	}
+	return g.lateBufferBindingInfos
+}
+
+// DynamicBindings returns the bindings with a dynamic offset, sorted by
+// binding number.
+func (g *BindGroup) DynamicBindings() []core.DynamicBinding {
+	if g == nil {
+		return nil
+	}
+	return g.dynamicBindings
+}
+
+// BoundBuffers returns the buffers bound in the group, for submit-time
+// validation.
+func (g *BindGroup) BoundBuffers() []*Buffer {
+	if g == nil {
+		return nil
+	}
+	return g.boundBuffers
+}
+
+// BoundTextures returns the textures bound in the group, for submit-time
+// validation.
+func (g *BindGroup) BoundTextures() []*Texture {
+	if g == nil {
+		return nil
+	}
+	return g.boundTextures
+}
+
+// Usages returns the buffer and texture usages of the bound resources.
+func (g *BindGroup) Usages() *core.BindGroupUsages {
+	if g == nil {
+		return nil
+	}
+	return g.usages
 }
 
 // Release marks the bind group for destruction. Drops the application's

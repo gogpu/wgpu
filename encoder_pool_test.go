@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 func TestEncoderPool_AcquireCreatesNew(t *testing.T) {
@@ -223,8 +224,8 @@ func createNoopDeviceForTest(t *testing.T) (hal.Device, hal.Queue, func()) {
 func TestCommandBufferReleaseDropsUsedSets(t *testing.T) {
 	cb := &CommandBuffer{
 		usedBuffers:    map[*Buffer]struct{}{{}: {}},
-		usedTextures:   map[*Texture]struct{}{{}: {}},
-		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
+		usedTextures:   map[*resource.Texture]struct{}{{}: {}},
+		usedBindGroups: map[*resource.BindGroup]struct{}{{}: {}},
 	}
 
 	cb.Release()
@@ -247,8 +248,8 @@ func TestPostSubmitDropsSetsWithoutDestroyQueue(t *testing.T) {
 
 	cb := &CommandBuffer{
 		usedBuffers:    map[*Buffer]struct{}{{}: {}},
-		usedTextures:   map[*Texture]struct{}{{}: {}},
-		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
+		usedTextures:   map[*resource.Texture]struct{}{{}: {}},
+		usedBindGroups: map[*resource.BindGroup]struct{}{{}: {}},
 	}
 
 	q.postSubmit(1, []*CommandBuffer{cb})

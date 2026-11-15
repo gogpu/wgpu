@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // =============================================================================
@@ -68,7 +69,7 @@ func TestInjectTextureBarriers_EmptyScope(t *testing.T) {
 	cb := &CommandBuffer{
 		core:         coreCB,
 		device:       device,
-		usedTextures: make(map[*Texture]struct{}),
+		usedTextures: make(map[*resource.Texture]struct{}),
 	}
 
 	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
@@ -99,7 +100,7 @@ func TestInjectTextureBarriers_WithTransition(t *testing.T) {
 	}
 
 	// Register texture in device tracker with initial RESOURCE state
-	td := tex.coreTexture.TrackingData()
+	td := tex.impl.CoreTexture().TrackingData()
 	if td == nil || !td.Index().IsValid() {
 		t.Fatal("texture should have valid tracker index")
 	}
@@ -127,7 +128,7 @@ func TestInjectTextureBarriers_WithTransition(t *testing.T) {
 	cb := &CommandBuffer{
 		core:         coreCB,
 		device:       device,
-		usedTextures: map[*Texture]struct{}{tex: {}},
+		usedTextures: map[*resource.Texture]struct{}{tex.impl: {}},
 	}
 
 	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
@@ -159,7 +160,7 @@ func TestInjectTextureBarriers_NoTransitionSameState(t *testing.T) {
 	defer tex.Release()
 
 	tracker := device.core.Tracker()
-	td := tex.coreTexture.TrackingData()
+	td := tex.impl.CoreTexture().TrackingData()
 	tracker.InsertTexture(td.Index(), track.TextureUsesResource)
 
 	// CB uses texture as Resource (same ordered state)
@@ -178,7 +179,7 @@ func TestInjectTextureBarriers_NoTransitionSameState(t *testing.T) {
 	cb := &CommandBuffer{
 		core:         coreCB,
 		device:       device,
-		usedTextures: map[*Texture]struct{}{tex: {}},
+		usedTextures: map[*resource.Texture]struct{}{tex.impl: {}},
 	}
 
 	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
@@ -205,8 +206,8 @@ func TestInjectTextureBarriers_MultipleTextures(t *testing.T) {
 	defer tex2.Release()
 
 	tracker := device.core.Tracker()
-	td1 := tex1.coreTexture.TrackingData()
-	td2 := tex2.coreTexture.TrackingData()
+	td1 := tex1.impl.CoreTexture().TrackingData()
+	td2 := tex2.impl.CoreTexture().TrackingData()
 
 	tracker.InsertTexture(td1.Index(), track.TextureUsesResource)
 	tracker.InsertTexture(td2.Index(), track.TextureUsesResource)
@@ -228,7 +229,7 @@ func TestInjectTextureBarriers_MultipleTextures(t *testing.T) {
 	cb1 := &CommandBuffer{
 		core:         coreCB1,
 		device:       device,
-		usedTextures: map[*Texture]struct{}{tex1: {}, tex2: {}},
+		usedTextures: map[*resource.Texture]struct{}{tex1.impl: {}, tex2.impl: {}},
 	}
 
 	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb1})
@@ -285,7 +286,7 @@ func TestInjectTextureBarriers_NoEncoderPool(t *testing.T) {
 	tex := createTrackedTexture(t, device, "no-pool")
 	defer tex.Release()
 	tracker := device.core.Tracker()
-	td := tex.coreTexture.TrackingData()
+	td := tex.impl.CoreTexture().TrackingData()
 	tracker.InsertTexture(td.Index(), track.TextureUsesResource)
 
 	coreEncoder, err := device.core.CreateCommandEncoder("test")
@@ -303,7 +304,7 @@ func TestInjectTextureBarriers_NoEncoderPool(t *testing.T) {
 	cb := &CommandBuffer{
 		core:         coreCB,
 		device:       device,
-		usedTextures: map[*Texture]struct{}{tex: {}},
+		usedTextures: map[*resource.Texture]struct{}{tex.impl: {}},
 	}
 
 	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
@@ -331,7 +332,7 @@ func TestInjectTextureBarriers_TextureWithoutCoreTexture(t *testing.T) {
 	q := device.Queue()
 
 	// Create a texture without coreTexture (simulates browser or test stub)
-	tex := &Texture{device: device.seamView()}
+	tex := resource.NewTexture(nil, device.seamView(), TextureFormatRGBA8Unorm, nil, nil)
 
 	coreEncoder, err := device.core.CreateCommandEncoder("test")
 	if err != nil {
@@ -345,7 +346,7 @@ func TestInjectTextureBarriers_TextureWithoutCoreTexture(t *testing.T) {
 	cb := &CommandBuffer{
 		core:         coreCB,
 		device:       device,
-		usedTextures: map[*Texture]struct{}{tex: {}},
+		usedTextures: map[*resource.Texture]struct{}{tex: {}},
 	}
 
 	barrierCB, err := q.injectBarriers([]*CommandBuffer{cb})
@@ -381,11 +382,11 @@ func TestCreateTexture_HasCoreTexture(t *testing.T) {
 	}
 	defer tex.Release()
 
-	if tex.coreTexture == nil {
+	if tex.impl.CoreTexture() == nil {
 		t.Fatal("CreateTexture should allocate a coreTexture")
 	}
 
-	td := tex.coreTexture.TrackingData()
+	td := tex.impl.CoreTexture().TrackingData()
 	if td == nil {
 		t.Fatal("coreTexture should have TrackingData")
 	}
@@ -420,7 +421,7 @@ func TestCoreTextureViewFrom_WiresParent(t *testing.T) {
 	}
 	defer view.Release()
 
-	cv := coreTextureViewFrom(view)
+	cv := coreTextureViewFrom(view.impl)
 	if cv == nil {
 		t.Fatal("coreTextureViewFrom should not return nil")
 	}
@@ -429,7 +430,7 @@ func TestCoreTextureViewFrom_WiresParent(t *testing.T) {
 	}
 
 	// Parent's TrackerIndex should match the texture's
-	if cv.Parent.TrackingData().Index() != tex.coreTexture.TrackingData().Index() {
+	if cv.Parent.TrackingData().Index() != tex.impl.CoreTexture().TrackingData().Index() {
 		t.Error("core.TextureView.Parent TrackerIndex should match texture's")
 	}
 }
@@ -437,7 +438,7 @@ func TestCoreTextureViewFrom_WiresParent(t *testing.T) {
 // TestCoreTextureViewFrom_NilTexture verifies that coreTextureViewFrom
 // handles a view with no texture gracefully.
 func TestCoreTextureViewFrom_NilTexture(t *testing.T) {
-	v := &TextureView{}
+	v := &resource.TextureView{}
 	cv := coreTextureViewFrom(v)
 	if cv == nil {
 		t.Fatal("coreTextureViewFrom should not return nil")
@@ -509,7 +510,7 @@ func createTrackedTexture(t *testing.T, device *Device, label string) *Texture {
 	if err != nil {
 		t.Fatalf("CreateTexture(%s): %v", label, err)
 	}
-	if tex.coreTexture == nil {
+	if tex.impl.CoreTexture() == nil {
 		t.Fatalf("texture %s has no coreTexture", label)
 	}
 	return tex

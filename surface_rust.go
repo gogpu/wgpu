@@ -9,6 +9,7 @@ import (
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Compile-time assertion: Surface must implement all public API methods (ADR-047).
@@ -157,12 +158,12 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		return nil, false, fmt.Errorf("wgpu: %w", err)
 	}
 
+	impl := resource.NewTexture(rst.Texture, s.configFormat)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
 	return &SurfaceTexture{
-		r: rst,
-		texture: &Texture{
-			r:      rst.Texture,
-			format: s.configFormat,
-		},
+		r:       rst,
+		texture: tex,
 		surface: s,
 	}, suboptimal, nil
 }
@@ -251,7 +252,7 @@ func (st *SurfaceTexture) AsTexture() *Texture { return st.texture }
 
 // CreateView creates a texture view of this surface texture.
 func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) {
-	if st.texture == nil || st.texture.r == nil {
+	if st.texture == nil || st.texture.impl.Rust() == nil {
 		return nil, ErrReleased
 	}
 
@@ -269,12 +270,12 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		}
 	}
 
-	rv, err := st.texture.r.CreateView(rDesc)
+	rv, err := st.texture.impl.Rust().CreateView(rDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
 	}
 
-	return &TextureView{r: rv, texture: st.AsTexture()}, nil
+	return &TextureView{impl: resource.NewTextureView(rv, st.AsTexture().impl)}, nil
 }
 
 // Texture returns the underlying Texture.

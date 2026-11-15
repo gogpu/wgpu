@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package resource
 
 import (
 	"github.com/gogpu/gputypes"
@@ -22,6 +22,56 @@ type Sampler struct {
 	magFilter    gputypes.FilterMode
 	minFilter    gputypes.FilterMode
 	mipmapFilter gputypes.FilterMode
+}
+
+// NewSampler builds a sampler over a HAL object and the shared device view.
+func NewSampler(hal hal.Sampler, device core.DeviceView, ref *core.ResourceRef, mag, min, mipmap gputypes.FilterMode) *Sampler {
+	return &Sampler{hal: hal, device: device, ref: ref, magFilter: mag, minFilter: min, mipmapFilter: mipmap}
+}
+
+// HAL returns the HAL sampler, or nil.
+func (s *Sampler) HAL() hal.Sampler {
+	if s == nil {
+		return nil
+	}
+	return s.hal
+}
+
+// Ref returns the sampler's reference count, or nil for one without it.
+func (s *Sampler) Ref() *core.ResourceRef {
+	if s == nil {
+		return nil
+	}
+	return s.ref
+}
+
+// MagFilter returns the sampler's magnification filter mode.
+func (s *Sampler) MagFilter() gputypes.FilterMode {
+	if s == nil {
+		return 0
+	}
+	return s.magFilter
+}
+
+// MinFilter returns the sampler's minification filter mode.
+func (s *Sampler) MinFilter() gputypes.FilterMode {
+	if s == nil {
+		return 0
+	}
+	return s.minFilter
+}
+
+// MipmapFilter returns the sampler's mipmap filter mode.
+func (s *Sampler) MipmapFilter() gputypes.FilterMode {
+	if s == nil {
+		return 0
+	}
+	return s.mipmapFilter
+}
+
+// IsReleased reports whether Release has run on the sampler.
+func (s *Sampler) IsReleased() bool {
+	return s != nil && s.released
 }
 
 // Release drops the application's reference to the sampler. The HAL sampler

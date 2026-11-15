@@ -9,6 +9,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // pendingWrites accumulates WriteBuffer operations into a
@@ -84,7 +85,7 @@ type pendingWrites struct {
 	// texture. This matters for swapchains, which may reuse the same HAL texture
 	// across acquisitions: every recorded acquisition must still be live when
 	// the batch is flushed.
-	dstTextures map[hal.Texture][]*Texture
+	dstTextures map[hal.Texture][]*resource.Texture
 
 	// inflight tracks staging buffers and encoders from previous submissions,
 	// keyed by submission index. Cleaned up when PollCompleted advances past them.
@@ -138,7 +139,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPoo
 		halQueue:     halQueue,
 		tracker:      tracker,
 		dstBuffers:   make(map[hal.Buffer]struct{}),
-		dstTextures:  make(map[hal.Texture][]*Texture),
+		dstTextures:  make(map[hal.Texture][]*resource.Texture),
 		usesBatching: halQueue.SupportsCommandBufferCopies(),
 	}
 	if pw.usesBatching {
@@ -251,11 +252,11 @@ func (pw *pendingWrites) setBufferCopyDst(index track.TrackerIndex) (track.Pendi
 
 // textureTrackerIndex returns the device-tracker index of a public texture, or
 // InvalidTrackerIndex when it has none.
-func textureTrackerIndex(owner *Texture) track.TrackerIndex {
-	if owner == nil || owner.coreTexture == nil || owner.coreTexture.TrackingData() == nil {
+func textureTrackerIndex(owner *resource.Texture) track.TrackerIndex {
+	if owner == nil || owner.CoreTexture() == nil || owner.CoreTexture().TrackingData() == nil {
 		return track.InvalidTrackerIndex
 	}
-	return owner.coreTexture.TrackingData().Index()
+	return owner.CoreTexture().TrackingData().Index()
 }
 
 // pendingWritesRowPitchAlignment is the row pitch alignment used for staging
@@ -287,7 +288,7 @@ func (pw *pendingWrites) writeTexture(
 // lifetime authorized it. Queue.WriteTexture supplies owner; the ownerless
 // form above remains available to focused HAL-level tests.
 func (pw *pendingWrites) writeTextureFor(
-	owner *Texture,
+	owner *resource.Texture,
 	dst *hal.ImageCopyTexture,
 	data []byte,
 	layout *hal.ImageDataLayout,
@@ -378,14 +379,14 @@ func (pw *pendingWrites) writeTextureFor(
 	}
 	if owner != nil && !containsTextureOwner(owners, owner) {
 		owners = append(owners, owner)
-		pw.holdRef(owner.ref())
+		pw.holdRef(owner.Ref())
 	}
 	pw.dstTextures[dst.Texture] = owners
 
 	return nil
 }
 
-func containsTextureOwner(owners []*Texture, target *Texture) bool {
+func containsTextureOwner(owners []*resource.Texture, target *resource.Texture) bool {
 	for _, owner := range owners {
 		if owner == target {
 			return true
@@ -515,7 +516,7 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	// holds its reference (P1-CORE-020), so recordedHAL, not resolveHAL.
 	for raw, owners := range pw.dstTextures {
 		for _, owner := range owners {
-			if owner.recordedHAL() != raw {
+			if owner.RecordedHAL() != raw {
 				pw.discardRecording()
 				return nil, nil, nil, nil, fmt.Errorf("wgpu: pending writes: destination texture retired before submit: %w", ErrReleased)
 			}

@@ -28,7 +28,12 @@ func (p *ComputePipeline) TestRef() *core.ResourceRef { return p.ref }
 // moves to an extraction package cannot stay behind, while a function over the
 // type can (ADR-070 §11 grain note; the implementation's own white-box test
 // carries the same assertion once it moves).
-func BindGroupTestRef(g *BindGroup) *core.ResourceRef { return g.ref }
+func BindGroupTestRef(g *BindGroup) *core.ResourceRef {
+	if g == nil || g.impl == nil {
+		return nil
+	}
+	return g.impl.Ref()
+}
 
 // TestTrackedRefs returns the tracked refs of a CommandBuffer (testing only).
 func (cb *CommandBuffer) TestTrackedRefs() []*core.ResourceRef { return cb.trackedRefs }
@@ -82,34 +87,62 @@ func (d *Device) TestResourceCounts() map[string]uint64 {
 // BindGroupTestReleased returns true if the bind group has been released
 // (testing only). A free function for the reason BindGroupTestRef is one.
 func BindGroupTestReleased(g *BindGroup) bool {
-	if g.released == nil {
+	if g == nil || g.impl == nil {
 		return false
 	}
-	return g.released.Load()
+	return g.impl.IsReleased()
+}
+
+// testBindGroupLayoutImpl returns the layout's implementation. A zero-value
+// wrapper gets a fresh implementation over no entries: the tests build empty
+// layouts and only exercise their identity in the binder, and the wrapper has
+// no constructor of its own.
+func testBindGroupLayoutImpl(l *BindGroupLayout) *resource.BindGroupLayout {
+	if l == nil {
+		return nil
+	}
+	if l.impl == nil {
+		l.impl = resource.NewBindGroupLayout(nil, nil, nil)
+	}
+	return l.impl
 }
 
 // SetTestBindGroupLayouts sets the bindGroupLayouts field on a RenderPipeline for testing.
 func (p *RenderPipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
-	p.bindGroupLayouts = layouts
-	p.bindGroupCount = uint32(len(layouts))
+	impls := make([]*resource.BindGroupLayout, len(layouts))
+	for i, l := range layouts {
+		impls[i] = testBindGroupLayoutImpl(l)
+	}
+	p.bindGroupLayouts = impls
+	p.bindGroupCount = uint32(len(impls))
 }
 
 // SetTestBindGroupLayouts sets the bindGroupLayouts field on a ComputePipeline for testing.
 func (p *ComputePipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
-	p.bindGroupLayouts = layouts
-	p.bindGroupCount = uint32(len(layouts))
+	impls := make([]*resource.BindGroupLayout, len(layouts))
+	for i, l := range layouts {
+		impls[i] = testBindGroupLayoutImpl(l)
+	}
+	p.bindGroupLayouts = impls
+	p.bindGroupCount = uint32(len(impls))
 }
 
 // SetTestBindGroupLayoutEntries sets the entries field on a BindGroupLayout for
-// testing. A free function for the reason BindGroupTestRef is one.
+// testing. A free function for the reason BindGroupTestRef is one; the wrapper
+// gets a fresh implementation over the entries, so it works on a zero value.
 func SetTestBindGroupLayoutEntries(l *BindGroupLayout, entries []gputypes.BindGroupLayoutEntry) {
-	l.entries = entries
+	l.impl = resource.NewBindGroupLayout(nil, nil, entries)
 }
 
 // SetTestBindGroupLayout sets the layout field on a BindGroup for testing.
-// A free function for the reason BindGroupTestRef is one.
+// A free function for the reason BindGroupTestRef is one; the wrapper gets a
+// fresh implementation carrying the layout, so it works on a zero value.
 func SetTestBindGroupLayout(g *BindGroup, layout *BindGroupLayout) {
-	g.layout = layout
+	init := &resource.BindGroupInit{}
+	if layout != nil {
+		init.Layout = layout.impl
+	}
+	g.impl = resource.NewBindGroup(init)
 }
 
 // SetTestStripIndexFormat sets the stripIndexFormat field on a RenderPipeline for testing.
@@ -178,17 +211,20 @@ func NewSurfaceFromHALForTest(halSurface hal.Surface, label string) *Surface {
 
 // NewTextureFromHALForTest wraps a HAL texture in a Texture.
 func NewTextureFromHALForTest(halTexture hal.Texture, device *Device, format gputypes.TextureFormat) *Texture {
-	return &Texture{hal: halTexture, device: device.seamView(), format: format}
+	impl := resource.NewTexture(halTexture, device.seamView(), format, nil, nil)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex
 }
 
 // NewTextureViewFromHALForTest wraps a HAL texture view in a TextureView.
 func NewTextureViewFromHALForTest(halView hal.TextureView, device *Device) *TextureView {
-	return &TextureView{hal: halView, device: device.seamView()}
+	return &TextureView{impl: resource.NewTextureView(&resource.TextureViewInit{HAL: halView, Device: device.seamView()})}
 }
 
 // NewSamplerFromHALForTest wraps a HAL sampler in a Sampler.
 func NewSamplerFromHALForTest(halSampler hal.Sampler, device *Device) *Sampler {
-	return &Sampler{hal: halSampler, device: device.seamView()}
+	return &Sampler{impl: resource.NewSampler(halSampler, device.seamView(), nil, 0, 0, 0)}
 }
 
 // DeviceHalDeviceForTest returns the HAL device behind d.

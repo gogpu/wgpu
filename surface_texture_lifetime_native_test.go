@@ -724,10 +724,10 @@ func TestSurfaceTextureDerivedWrappersInvalidateAfterDeviceRelease(t *testing.T)
 	}
 
 	device.Release()
-	if texture.resolveHAL() != nil {
+	if texture.impl.ResolveHAL() != nil {
 		t.Fatal("surface texture wrapper remained usable after Device.Release")
 	}
-	if view.resolveHAL() != nil {
+	if view.impl.ResolveHAL() != nil {
 		t.Fatal("surface texture view remained usable after Device.Release")
 	}
 	if surfaceTexture.AsTexture() != nil {

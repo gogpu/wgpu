@@ -211,7 +211,7 @@ func (u *stencilUpload) tempCopy() ImageCopyTexture {
 func (u *stencilUpload) record(e *CommandEncoder) error {
 	d := e.device
 	layers := u.size.DepthOrArrayLayers
-	key := stencilblit.KeyFor(u.dst.format, layers)
+	key := stencilblit.KeyFor(u.dst.Format(), layers)
 	entry, err := d.stencilBlitPipelines(key)
 	if err != nil {
 		return err
@@ -293,7 +293,7 @@ func (u *stencilUpload) recordLayer(e *CommandEncoder, entry *stencilBlitEntry, 
 	e.own(group)
 	dstView, err := d.CreateTextureView(u.dst, &TextureViewDescriptor{
 		Label:           stencilUploadLabel + " destination",
-		Format:          u.dst.format,
+		Format:          u.dst.Format(),
 		Dimension:       gputypes.TextureViewDimension2D,
 		Aspect:          gputypes.TextureAspectAll,
 		BaseMipLevel:    u.mipLevel,
@@ -308,7 +308,7 @@ func (u *stencilUpload) recordLayer(e *CommandEncoder, entry *stencilBlitEntry, 
 	// The destination needs only COPY_DST: rendering into it is the
 	// frontend's own use (Dawn's internal usages). Every depth/stencil texture
 	// is created render-attachable in the backend (Device.CreateTexture).
-	dstView.internalUsage = gputypes.TextureUsageRenderAttachment
+	dstView.impl.SetInternalUsage(gputypes.TextureUsageRenderAttachment)
 
 	// Depth is loaded and stored as it is; the pipelines neither test nor
 	// write it. Stencil outside the scissor keeps its contents.

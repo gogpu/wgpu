@@ -65,12 +65,12 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if q.released {
 		return ErrReleased
 	}
-	if dst == nil || dst.Texture == nil || dst.Texture.r == nil {
+	if dst == nil || dst.Texture == nil || dst.Texture.impl.Rust() == nil {
 		return fmt.Errorf("wgpu: WriteTexture: destination is nil")
 	}
 
 	rDst := &rwgpu.ImageCopyTexture{
-		Texture:  dst.Texture.r,
+		Texture:  dst.Texture.impl.Rust(),
 		MipLevel: dst.MipLevel,
 		Origin:   rwgpu.Origin3D(dst.Origin),
 		Aspect:   rwgpu.TextureAspect(dst.Aspect),

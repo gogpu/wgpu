@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // RenderPassEncoder records draw commands within a render pass.
@@ -96,14 +97,18 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 // is bound to the backend at the next draw whose pipeline layout uses it.
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
 	limits := &p.encoder.device.core.Limits
-	if err := validateSetBindGroup("RenderPass", index, group, offsets, limits); err != nil {
+	if group == nil || group.impl == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: bind group is nil"))
+		return
+	}
+	if err := validateSetBindGroup("RenderPass", index, group.impl, offsets, limits); err != nil {
 		p.encoder.setError(err)
 		return
 	}
-	p.binder.setGroup(index, group, offsets)
-	p.trackBindGroup(group)
+	p.binder.setGroup(index, group.impl, offsets)
+	p.trackBindGroup(group.impl)
 	// A render pass is one usage scope: every bind group set in it counts.
-	if err := p.core.MergeBindGroup(group.usages); err != nil {
+	if err := p.core.MergeBindGroup(group.impl.Usages()); err != nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: index %d: %w", index, err))
 	}
 	if p.test != nil {
@@ -114,13 +119,13 @@ func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets
 // trackBindGroup keeps a bind group used in the pass and its buffers alive
 // until the GPU completes the submission, and records the group for
 // submit-time validation.
-func (p *RenderPassEncoder) trackBindGroup(group *BindGroup) {
-	p.trackRef(group.ref)
+func (p *RenderPassEncoder) trackBindGroup(group *resource.BindGroup) {
+	p.trackRef(group.Ref())
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
 	// Without this, Buffer.Release() before Submit can HAL-destroy buffers
 	// that are still referenced by a pending command buffer.
-	for _, buf := range group.boundBuffers {
+	for _, buf := range group.BoundBuffers() {
 		if cb := buf.CoreBuffer(); cb != nil && cb.Ref != nil {
 			p.trackRef(cb.Ref)
 		}

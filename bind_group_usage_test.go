@@ -79,22 +79,22 @@ func TestBindGroupUsagesFromLayoutEntries(t *testing.T) {
 		storage.impl.CoreBuffer():  track.BufferUsesStorageWrite,
 		readOnly.impl.CoreBuffer(): track.BufferUsesStorageRead,
 	}
-	if got := len(group.usages.Buffers); got != len(wantBuffers) {
+	if got := len(group.impl.Usages().Buffers); got != len(wantBuffers) {
 		t.Fatalf("buffer usages = %d, want %d", got, len(wantBuffers))
 	}
-	for _, use := range group.usages.Buffers {
+	for _, use := range group.impl.Usages().Buffers {
 		if want := wantBuffers[use.Buffer]; use.Usage != want {
 			t.Errorf("buffer %q usage = %v, want %v", use.Buffer.Label(), use.Usage, want)
 		}
 	}
 	wantTextures := map[*core.Texture]track.TextureUses{
-		sampled.coreTexture: track.TextureUsesResource,
-		written.coreTexture: track.TextureUsesStorageWrite,
+		sampled.impl.CoreTexture(): track.TextureUsesResource,
+		written.impl.CoreTexture(): track.TextureUsesStorageWrite,
 	}
-	if got := len(group.usages.Textures); got != len(wantTextures) {
+	if got := len(group.impl.Usages().Textures); got != len(wantTextures) {
 		t.Fatalf("texture usages = %d, want %d", got, len(wantTextures))
 	}
-	for _, use := range group.usages.Textures {
+	for _, use := range group.impl.Usages().Textures {
 		if want := wantTextures[use.Texture]; use.Usage != want {
 			t.Errorf("texture %q usage = %v, want %v", use.Texture.Label(), use.Usage, want)
 		}

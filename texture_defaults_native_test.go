@@ -30,7 +30,7 @@ func TestCreateTextureZeroDefaults(t *testing.T) {
 	}
 	defer tex.Release()
 
-	ct := tex.coreTexture
+	ct := tex.impl.CoreTexture()
 	if ct == nil {
 		t.Fatal("texture has no core texture")
 	}

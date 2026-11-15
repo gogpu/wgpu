@@ -6,8 +6,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"log/slog"
-	"runtime"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -188,7 +186,10 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	if d.test != nil {
 		d.test.TextureCreated(desc.Label)
 	}
-	return &Texture{hal: halTexture, device: d.seamView(), format: desc.Format, viewFormats: copyViewFormats(desc.ViewFormats), coreTexture: coreTexture}, nil
+	impl := resource.NewTexture(halTexture, d.seamView(), desc.Format, copyViewFormats(desc.ViewFormats), coreTexture)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex, nil
 }
 
 // destroyTextureDeferred destroys a HAL texture once the GPU has completed the
@@ -226,26 +227,30 @@ func copyViewFormats(formats []gputypes.TextureFormat) *[]gputypes.TextureFormat
 // newDetachedTextureFactory. desc may be nil: the handle then carries zero
 // metadata.
 func newDetachedTexture(desc *TextureDescriptor) *Texture {
-	t := &Texture{}
+	var format gputypes.TextureFormat
+	var viewFormats *[]gputypes.TextureFormat
 	if desc != nil {
-		t.format = desc.Format
-		t.viewFormats = copyViewFormats(desc.ViewFormats)
+		format = desc.Format
+		viewFormats = copyViewFormats(desc.ViewFormats)
 	}
-	return t
+	impl := resource.NewDetachedTexture(format, viewFormats)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex
 }
 
 // resolveViewMipCount returns the number of mip levels a texture view covers:
 // the requested count, or the levels from baseMipLevel to the end of the
 // texture ("resolving GPUTextureViewDescriptor defaults"). 0 when the texture
 // is not known.
-func resolveViewMipCount(texture *Texture, base, requested uint32) uint32 {
+func resolveViewMipCount(texture *resource.Texture, base, requested uint32) uint32 {
 	if requested != 0 {
 		return requested
 	}
-	if texture == nil || texture.coreTexture == nil {
+	if texture == nil || texture.CoreTexture() == nil {
 		return 0
 	}
-	if mips := texture.coreTexture.MipLevelCount(); mips > base {
+	if mips := texture.CoreTexture().MipLevelCount(); mips > base {
 		return mips - base
 	}
 	return 0
@@ -256,7 +261,7 @@ func resolveViewMipCount(texture *Texture, base, requested uint32) uint32 {
 // GPUTextureViewDescriptor defaults"): 1 for a 1d, 2d or 3d view, 6 for a
 // cube, and the layers from baseArrayLayer to the end of the texture for a
 // 2d-array or cube-array view. 0 when the texture is not known.
-func resolveViewLayerCount(texture *Texture, dim gputypes.TextureViewDimension, base, requested uint32) uint32 {
+func resolveViewLayerCount(texture *resource.Texture, dim gputypes.TextureViewDimension, base, requested uint32) uint32 {
 	if requested != 0 {
 		return requested
 	}
@@ -266,10 +271,10 @@ func resolveViewLayerCount(texture *Texture, dim gputypes.TextureViewDimension, 
 	case gputypes.TextureViewDimensionCube:
 		return 6
 	}
-	if texture == nil || texture.coreTexture == nil {
+	if texture == nil || texture.CoreTexture() == nil {
 		return 0
 	}
-	if layers := texture.coreTexture.Size().DepthOrArrayLayers; layers > base {
+	if layers := texture.CoreTexture().Size().DepthOrArrayLayers; layers > base {
 		return layers - base
 	}
 	return 0
@@ -280,20 +285,20 @@ func resolveViewLayerCount(texture *Texture, dim gputypes.TextureViewDimension, 
 // GPUTextureViewDescriptor defaults"): 1d, 2d for a single-layer 2D texture,
 // 2d-array for a layered one, 3d. Undefined when the texture's own dimension
 // is not known (a texture wrapped from a HAL handle).
-func resolveViewDimension(texture *Texture, requested gputypes.TextureViewDimension) gputypes.TextureViewDimension {
+func resolveViewDimension(texture *resource.Texture, requested gputypes.TextureViewDimension) gputypes.TextureViewDimension {
 	if requested != gputypes.TextureViewDimensionUndefined {
 		return requested
 	}
-	if texture == nil || texture.coreTexture == nil {
+	if texture == nil || texture.CoreTexture() == nil {
 		return gputypes.TextureViewDimensionUndefined
 	}
-	switch texture.coreTexture.Dimension() {
+	switch texture.CoreTexture().Dimension() {
 	case gputypes.TextureDimension1D:
 		return gputypes.TextureViewDimension1D
 	case gputypes.TextureDimension3D:
 		return gputypes.TextureViewDimension3D
 	default:
-		if texture.coreTexture.Size().DepthOrArrayLayers > 1 {
+		if texture.CoreTexture().Size().DepthOrArrayLayers > 1 {
 			return gputypes.TextureViewDimension2DArray
 		}
 		return gputypes.TextureViewDimension2D
@@ -308,7 +313,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	if texture == nil {
 		return nil, fmt.Errorf("wgpu: texture is nil")
 	}
-	halTexture := texture.resolveHAL()
+	halTexture := texture.impl.ResolveHAL()
 	if halTexture == nil {
 		return nil, ErrReleased
 	}
@@ -321,8 +326,8 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	halDesc := &hal.TextureViewDescriptor{}
 	if desc != nil {
 		// A texture without a known format (a bare wrapper) cannot be checked.
-		if texture.format != gputypes.TextureFormatUndefined {
-			if err := core.ValidateTextureViewFormat(texture.format, texture.viewFormatList(), desc.Aspect, desc.Format); err != nil {
+		if texture.impl.Format() != gputypes.TextureFormatUndefined {
+			if err := core.ValidateTextureViewFormat(texture.impl.Format(), texture.impl.ViewFormatList(), desc.Aspect, desc.Format); err != nil {
 				return nil, fmt.Errorf("wgpu: CreateTextureView: %w", err)
 			}
 		}
@@ -341,10 +346,10 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	// a default view of a layered 2D texture a 2d view, and a 2d view with no
 	// layer count a view of every remaining layer. Undefined and 0 stay for a
 	// texture whose descriptor is not known (wrapped from a HAL handle).
-	halDesc.Dimension = resolveViewDimension(texture, halDesc.Dimension)
-	halDesc.ArrayLayerCount = resolveViewLayerCount(texture, halDesc.Dimension,
+	halDesc.Dimension = resolveViewDimension(texture.impl, halDesc.Dimension)
+	halDesc.ArrayLayerCount = resolveViewLayerCount(texture.impl, halDesc.Dimension,
 		halDesc.BaseArrayLayer, halDesc.ArrayLayerCount)
-	halDesc.MipLevelCount = resolveViewMipCount(texture, halDesc.BaseMipLevel, halDesc.MipLevelCount)
+	halDesc.MipLevelCount = resolveViewMipCount(texture.impl, halDesc.BaseMipLevel, halDesc.MipLevelCount)
 
 	halView, err := halDevice.CreateTextureView(halTexture, halDesc)
 	if err != nil {
@@ -360,8 +365,8 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	// (VUID-vkDestroyImage-image-01000, P1-CORE-020). Surface textures are
 	// borrowed and have no reference to hold.
 	var textureRef *core.ResourceRef
-	if texture.surface == nil {
-		textureRef = texture.ref()
+	if texture.impl.Surface() == nil {
+		textureRef = texture.impl.Ref()
 	}
 	if textureRef != nil {
 		textureRef.Clone()
@@ -369,26 +374,27 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	if d.test != nil {
 		d.test.TextureViewCreated(halDesc.Label)
 	}
-	return &TextureView{
-		hal:          halView,
-		device:       d.seamView(),
-		texture:      texture,
-		surface:      texture.surface,
-		surfaceLease: texture.surfaceLease,
-		ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
+	impl := resource.NewTextureView(&resource.TextureViewInit{
+		HAL:          halView,
+		Device:       d.seamView(),
+		Parent:       texture.impl,
+		Surface:      texture.impl.Surface(),
+		SurfaceLease: texture.impl.SurfaceLease(),
+		Ref: core.NewResourceRef("TextureView:"+halDesc.Label, func() {
 			d.destroyTextureViewDeferred(halView)
 			if textureRef != nil {
 				textureRef.Drop()
 			}
 		}),
-		dimension:       halDesc.Dimension,
-		baseMipLevel:    halDesc.BaseMipLevel,
-		baseArrayLayer:  halDesc.BaseArrayLayer,
-		arrayLayerCount: halDesc.ArrayLayerCount,
-		mipLevelCount:   halDesc.MipLevelCount,
-		format:          halDesc.Format,
-		aspect:          halDesc.Aspect,
-	}, nil
+		Dimension:       halDesc.Dimension,
+		BaseMipLevel:    halDesc.BaseMipLevel,
+		BaseArrayLayer:  halDesc.BaseArrayLayer,
+		ArrayLayerCount: halDesc.ArrayLayerCount,
+		MipLevelCount:   halDesc.MipLevelCount,
+		Format:          halDesc.Format,
+		Aspect:          halDesc.Aspect,
+	})
+	return &TextureView{impl: impl}, nil
 }
 
 // CreateSampler creates a texture sampler.
@@ -418,14 +424,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		return nil, fmt.Errorf("wgpu: failed to create sampler: %w", err)
 	}
 
-	return &Sampler{
-		hal:          halSampler,
-		device:       d.seamView(),
-		ref:          newSamplerRef(d.seamView(), halDevice, halSampler, desc.Label),
-		magFilter:    halDesc.MagFilter,
-		minFilter:    halDesc.MinFilter,
-		mipmapFilter: halDesc.MipmapFilter,
-	}, nil
+	return &Sampler{impl: resource.NewSampler(halSampler, d.seamView(), newSamplerRef(d.seamView(), halDevice, halSampler, desc.Label), halDesc.MagFilter, halDesc.MinFilter, halDesc.MipmapFilter)}, nil
 }
 
 // CreateShaderModule creates a shader module.
@@ -462,14 +461,11 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 	// Keep the IR core validated for pipeline introspection, as Rust
 	// wgpu-core keeps the naga module and its info on the ShaderModule for
 	// Interface::check_stage. SPIR-V modules have none.
-	module := &ShaderModule{hal: halModule, device: d.seamView(), irModule: halDesc.IR}
-	if halDesc.IR != nil {
-		info := halDesc.Info
-		module.irInfo = &info
-	} else if len(desc.SPIRV) > 0 {
-		module.armSPIRVWorkgroups(desc.SPIRV)
+	module := resource.NewShaderModule(halModule, d.seamView(), halDesc.IR, halDesc.Info)
+	if halDesc.IR == nil && len(desc.SPIRV) > 0 {
+		module.ArmSPIRVWorkgroups(desc.SPIRV)
 	}
-	return module, nil
+	return &ShaderModule{impl: module}, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -505,7 +501,7 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 	entriesCopy := make([]gputypes.BindGroupLayoutEntry, len(desc.Entries))
 	copy(entriesCopy, desc.Entries)
 
-	return &BindGroupLayout{hal: halLayout, device: d.seamView(), entries: entriesCopy}, nil
+	return &BindGroupLayout{impl: resource.NewBindGroupLayout(halLayout, d.seamView(), entriesCopy)}, nil
 }
 
 // CreatePipelineLayout creates a pipeline layout.
@@ -529,10 +525,10 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		}
 		// A released layout may already be queued for destruction; its HAL
 		// handle must not back a new pipeline layout (P2-CORE-023).
-		if layout.released {
+		if layout.impl.IsReleased() {
 			return nil, ErrReleased
 		}
-		halLayouts[i] = layout.hal
+		halLayouts[i] = layout.impl.HAL()
 	}
 
 	halDesc := &hal.PipelineLayoutDescriptor{
@@ -550,16 +546,12 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 	}
 
 	// Store a copy of the bind group layouts slice for binder validation.
-	bgLayouts := make([]*BindGroupLayout, len(desc.BindGroupLayouts))
-	copy(bgLayouts, desc.BindGroupLayouts)
+	bgLayouts := make([]*resource.BindGroupLayout, len(desc.BindGroupLayouts))
+	for i, layout := range desc.BindGroupLayouts {
+		bgLayouts[i] = layout.impl
+	}
 
-	return &PipelineLayout{
-		hal:              halLayout,
-		device:           d.seamView(),
-		bindGroupCount:   uint32(len(desc.BindGroupLayouts)), //nolint:gosec // layout count fits uint32
-		bindGroupLayouts: bgLayouts,
-		ref:              newPipelineLayoutRef(d.seamView(), halDevice, halLayout, desc.Label),
-	}, nil
+	return &PipelineLayout{impl: resource.NewPipelineLayout(halLayout, d.seamView(), uint32(len(desc.BindGroupLayouts)), bgLayouts, newPipelineLayoutRef(d.seamView(), halDevice, halLayout, desc.Label))}, nil
 }
 
 // CreateBindGroup creates a bind group.
@@ -587,18 +579,18 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	// not keep the layout — Rust wgpu-hal's Vulkan BindGroup holds only the
 	// descriptor set — so a group created while the layout was alive is
 	// unaffected by a later Release.
-	if desc.Layout.released {
+	if desc.Layout.impl.IsReleased() {
 		return nil, ErrReleased
 	}
 
 	halEntries := make([]gputypes.BindGroupEntry, len(desc.Entries))
 	for i, entry := range desc.Entries {
-		if entry.TextureView != nil && entry.TextureView.resolveHAL() == nil {
+		if entry.TextureView != nil && entry.TextureView.impl.ResolveHAL() == nil {
 			return nil, ErrReleased
 		}
 		// A released sampler may already be queued for destruction; binding
 		// it would revive its reference count and name a dying sampler.
-		if entry.Sampler != nil && entry.Sampler.released {
+		if entry.Sampler != nil && entry.Sampler.impl.IsReleased() {
 			return nil, ErrReleased
 		}
 		halEntries[i] = entry.toHAL()
@@ -606,13 +598,13 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 
 	halDesc := &hal.BindGroupDescriptor{
 		Label:   desc.Label,
-		Layout:  desc.Layout.hal,
+		Layout:  desc.Layout.impl.HAL(),
 		Entries: halEntries,
 	}
 
 	bufferInfos, samplerInfos, textureInfos := buildBindGroupValidationInfos(desc.Entries)
 
-	if err := core.ValidateBindGroupDescriptor(halDesc, desc.Layout.entries, bufferInfos, samplerInfos, textureInfos, d.core.Limits, d.core.Features); err != nil {
+	if err := core.ValidateBindGroupDescriptor(halDesc, desc.Layout.impl.Entries(), bufferInfos, samplerInfos, textureInfos, d.core.Limits, d.core.Features); err != nil {
 		return nil, err
 	}
 
@@ -631,7 +623,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	// to be validated against shader requirements at draw/dispatch time.
 	// Matches Rust wgpu-core's BindGroup.late_buffer_binding_infos population
 	// in Device::create_bind_group (binding_model.rs:1187-1189).
-	lateInfos := buildLateBufferBindingInfos(desc.Layout.entries, desc.Entries)
+	lateInfos := buildLateBufferBindingInfos(desc.Layout.impl.Entries(), desc.Entries)
 
 	// Collect buffer and texture references for submit-time validation (VAL-A6).
 	boundBuffers, boundTextures := collectBindGroupResources(desc.Entries)
@@ -663,24 +655,20 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		}
 	}
 
-	bg := &BindGroup{
-		hal:                    halGroup,
-		device:                 d.seamView(),
-		released:               new(atomic.Bool),
-		layout:                 desc.Layout,
-		lateBufferBindingInfos: lateInfos,
-		dynamicBindings:        buildDynamicBindings(desc.Layout.entries, desc.Entries),
-		ref:                    core.NewResourceRef("BindGroup:"+desc.Label, bgOnZero),
-		boundBuffers:           boundBuffers,
-		boundTextures:          boundTextures,
-		usages:                 buildBindGroupUsages(desc.Layout.entries, desc.Entries),
-	}
+	bg := resource.NewBindGroup(&resource.BindGroupInit{
+		Label:                  desc.Label,
+		HAL:                    halGroup,
+		Device:                 d.seamView(),
+		Layout:                 desc.Layout.impl,
+		LateBufferBindingInfos: lateInfos,
+		DynamicBindings:        buildDynamicBindings(desc.Layout.impl.Entries(), desc.Entries),
+		Ref:                    core.NewResourceRef("BindGroup:"+desc.Label, bgOnZero),
+		BoundBuffers:           boundBuffers,
+		BoundTextures:          boundTextures,
+		Usages:                 buildBindGroupUsages(desc.Layout.impl.Entries(), desc.Entries),
+	})
 
-	// Safety net: if the bind group is garbage collected without Release(),
-	// schedule deferred destruction via DestroyQueue (BUG-WGPU-RESOURCE-LIFECYCLE-001).
-	bg.cleanup = registerBindGroupCleanup(bg, desc.Label)
-
-	return bg, nil
+	return &BindGroup{impl: bg}, nil
 }
 
 func buildBindGroupValidationInfos(entries []BindGroupEntry) (
@@ -705,25 +693,25 @@ func buildBindGroupValidationInfos(entries []BindGroupEntry) (
 			samplerInfos = append(samplerInfos, core.BindGroupSamplerInfo{
 				Binding: entry.Binding,
 				Desc: &hal.SamplerDescriptor{
-					MagFilter:    entry.Sampler.magFilter,
-					MinFilter:    entry.Sampler.minFilter,
-					MipmapFilter: entry.Sampler.mipmapFilter,
+					MagFilter:    entry.Sampler.impl.MagFilter(),
+					MinFilter:    entry.Sampler.impl.MinFilter(),
+					MipmapFilter: entry.Sampler.impl.MipmapFilter(),
 				},
 			})
 		}
-		if entry.TextureView != nil && entry.TextureView.texture != nil {
+		if entry.TextureView != nil && entry.TextureView.impl != nil && entry.TextureView.impl.Parent() != nil {
 			textureInfos = append(textureInfos, core.BindGroupTextureInfo{
 				Binding: entry.Binding,
-				Format:  entry.TextureView.texture.Format(),
+				Format:  entry.TextureView.impl.Parent().Format(),
 			})
 		}
 	}
 	return bufferInfos, samplerInfos, textureInfos
 }
 
-func buildLateBufferBindingInfos(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) []LateBufferBindingInfo {
+func buildLateBufferBindingInfos(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) []resource.LateBufferBindingInfo {
 	entryMap := buildBindGroupEntryMap(entries)
-	var lateInfos []LateBufferBindingInfo
+	var lateInfos []resource.LateBufferBindingInfo
 	for _, layoutEntry := range layoutEntries {
 		if layoutEntry.Buffer == nil || layoutEntry.Buffer.MinBindingSize != 0 {
 			continue
@@ -738,7 +726,7 @@ func buildLateBufferBindingInfos(layoutEntries []gputypes.BindGroupLayoutEntry, 
 				}
 			}
 		}
-		lateInfos = append(lateInfos, LateBufferBindingInfo{
+		lateInfos = append(lateInfos, resource.LateBufferBindingInfo{
 			BindingIndex: layoutEntry.Binding,
 			Size:         boundSize,
 		})
@@ -762,25 +750,25 @@ func cloneBindGroupResourceRefs(entries []BindGroupEntry) []*core.ResourceRef {
 		}
 	}
 	for i := range entries {
-		if view := entries[i].TextureView; view != nil {
-			hold(view.ref)
+		if view := entries[i].TextureView; view != nil && view.impl != nil {
+			hold(view.impl.Ref())
 		}
-		if sampler := entries[i].Sampler; sampler != nil {
-			hold(sampler.ref)
+		if sampler := entries[i].Sampler; sampler != nil && sampler.impl != nil {
+			hold(sampler.impl.Ref())
 		}
 	}
 	return refs
 }
 
-func collectBindGroupResources(entries []BindGroupEntry) ([]*resource.Buffer, []*Texture) {
+func collectBindGroupResources(entries []BindGroupEntry) ([]*resource.Buffer, []*resource.Texture) {
 	var buffers []*resource.Buffer
-	var textures []*Texture
+	var textures []*resource.Texture
 	for i := range entries {
 		if entries[i].Buffer != nil && entries[i].Buffer.impl != nil {
 			buffers = append(buffers, entries[i].Buffer.impl)
 		}
-		if entries[i].TextureView != nil && entries[i].TextureView.texture != nil {
-			textures = append(textures, entries[i].TextureView.texture)
+		if entries[i].TextureView != nil && entries[i].TextureView.impl != nil && entries[i].TextureView.impl.Parent() != nil {
+			textures = append(textures, entries[i].TextureView.impl.Parent())
 		}
 	}
 	return buffers, textures
@@ -823,18 +811,18 @@ func buildBindGroupUsages(layoutEntries []gputypes.BindGroupLayoutEntry, entries
 				Usage:  bufferBindingUses(layoutEntry.Buffer.Type),
 			})
 		case layoutEntry.Texture != nil || layoutEntry.StorageTexture != nil:
-			if entry.TextureView == nil || entry.TextureView.texture == nil || entry.TextureView.texture.coreTexture == nil {
+			if entry.TextureView == nil || entry.TextureView.impl == nil || entry.TextureView.impl.Parent() == nil || entry.TextureView.impl.Parent().CoreTexture() == nil {
 				continue
 			}
-			texture := entry.TextureView.texture
+			texture := entry.TextureView.impl.Parent()
 			usage := track.TextureUsesResource
 			if layoutEntry.StorageTexture != nil {
 				usage = storageTextureUses(layoutEntry.StorageTexture.Access)
 			}
 			usages.Textures = append(usages.Textures, core.BindGroupTextureUse{
-				Texture: texture.coreTexture,
+				Texture: texture.CoreTexture(),
 				Usage:   usage,
-				Resolve: texture.resolveHAL,
+				Resolve: texture.ResolveHAL,
 			})
 		}
 	}
@@ -923,13 +911,14 @@ func dynamicOffsetAlignment(bindingType gputypes.BufferBindingType, limits *gput
 // one per dynamic binding, each aligned to the limit of its binding type and
 // keeping the binding inside its buffer. Matches Rust wgpu-core's
 // BindGroup::validate_dynamic_bindings (W3C WebGPU setBindGroup validation).
-func validateDynamicOffsets(index uint32, group *BindGroup, offsets []uint32, limits *gputypes.Limits) error {
-	if len(offsets) != len(group.dynamicBindings) {
+func validateDynamicOffsets(index uint32, group *resource.BindGroup, offsets []uint32, limits *gputypes.Limits) error {
+	dynamic := group.DynamicBindings()
+	if len(offsets) != len(dynamic) {
 		return fmt.Errorf("bind group at index %d has %d dynamic binding(s), got %d offset(s): %w",
-			index, len(group.dynamicBindings), len(offsets), errDynamicOffsetCount)
+			index, len(dynamic), len(offsets), errDynamicOffsetCount)
 	}
 	for i, offset := range offsets {
-		info := &group.dynamicBindings[i]
+		info := &dynamic[i]
 		alignment, limitName := dynamicOffsetAlignment(info.BindingType, limits)
 		if alignment != 0 && offset%alignment != 0 {
 			return fmt.Errorf("bind group at index %d, binding %d: dynamic offset[%d]=%d is not a multiple of %s (%d): %w",
@@ -981,35 +970,6 @@ func newPipelineLayoutRef(d core.DeviceView, halDevice hal.Device, halLayout hal
 	})
 }
 
-// bindGroupCleanupRef holds the data needed to destroy a bind group's HAL
-// resources from a runtime.AddCleanup callback. This struct must NOT reference
-// the BindGroup itself — runtime.AddCleanup requires the callback argument to
-// be independent of the cleaned-up object.
-type bindGroupCleanupRef struct {
-	label    string
-	released *atomic.Bool
-	ref      *core.ResourceRef // for ref.Drop() in GC path (ADR-056)
-}
-
-// registerBindGroupCleanup registers a runtime.AddCleanup handler on the bind group.
-// When GC collects the bind group without an explicit Release(), the cleanup
-// drops the ResourceRef — the same refcount-driven path as Release(). ADR-056.
-func registerBindGroupCleanup(bg *BindGroup, label string) runtime.Cleanup {
-	return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
-		if !ref.released.CompareAndSwap(false, true) {
-			return
-		}
-		slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
-		if ref.ref != nil {
-			ref.ref.Drop()
-		}
-	}, bindGroupCleanupRef{
-		label:    label,
-		released: bg.released,
-		ref:      bg.ref,
-	})
-}
-
 // CreateRenderPipeline creates a render pipeline.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
 	if d.released.Load() {
@@ -1021,7 +981,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	// A released layout may already be queued for destruction; the pipeline
 	// would be created from a dying HAL layout and would later revive its
 	// reference count (P2-CORE-022).
-	if desc.Layout != nil && desc.Layout.released {
+	if desc.Layout != nil && desc.Layout.impl.IsReleased() {
 		return nil, ErrReleased
 	}
 
@@ -1047,19 +1007,19 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	}
 
 	var bgCount uint32
-	var bgLayouts []*BindGroupLayout
+	var bgLayouts []*resource.BindGroupLayout
 	var layoutRef *core.ResourceRef
 	if desc.Layout != nil {
 		// The pipeline keeps its layout alive until its own HAL pipeline is
 		// destroyed: every later SetBindGroup passes the layout to
 		// vkCmdBindDescriptorSets. Rust wgpu-core holds an Arc<PipelineLayout>
 		// in the pipeline (pipeline.rs:496).
-		layoutRef = desc.Layout.ref
+		layoutRef = desc.Layout.impl.Ref()
 		if layoutRef != nil {
 			layoutRef.Clone()
 		}
-		bgCount = desc.Layout.bindGroupCount
-		bgLayouts = desc.Layout.bindGroupLayouts
+		bgCount = desc.Layout.impl.BindGroupCount()
+		bgLayouts = desc.Layout.impl.BindGroupLayouts()
 	}
 	// Check if any color target uses blend constant factors.
 	// Matches Rust wgpu-core PipelineFlags::BLEND_CONSTANT (resource.rs:4562-4569).
@@ -1079,7 +1039,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	// Matches Rust wgpu-core's check_stage calls that accumulate shader_binding_sizes
 	// with max across stages for the same binding (validation.rs:1126-1139).
 	shaderBindingSizes := mergeShaderBindingSizes(
-		desc.Vertex.Module.bindingSizes(ir.StageVertex, desc.Vertex.EntryPoint),
+		desc.Vertex.Module.impl.BindingSizes(ir.StageVertex, desc.Vertex.EntryPoint),
 		fragmentBindingSizes(desc.Fragment),
 	)
 
@@ -1131,7 +1091,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 // default is a *core.CreateRenderPipelineError whose Cause is naga's error.
 // A module without IR (SPIR-V) is not checked.
 func validateRenderStageOverrides(desc *RenderPipelineDescriptor) error {
-	if _, _, _, err := desc.Vertex.Module.specializedEntryPoint(ir.StageVertex, desc.Vertex.EntryPoint, desc.Vertex.Constants); err != nil {
+	if _, _, _, err := desc.Vertex.Module.impl.SpecializedEntryPoint(ir.StageVertex, desc.Vertex.EntryPoint, desc.Vertex.Constants); err != nil {
 		return &core.CreateRenderPipelineError{
 			Kind:  core.CreateRenderPipelineErrorPipelineConstants,
 			Label: desc.Label,
@@ -1143,7 +1103,7 @@ func validateRenderStageOverrides(desc *RenderPipelineDescriptor) error {
 	if fs == nil {
 		return nil
 	}
-	if _, _, _, err := fs.Module.specializedEntryPoint(ir.StageFragment, fs.EntryPoint, fs.Constants); err != nil {
+	if _, _, _, err := fs.Module.impl.SpecializedEntryPoint(ir.StageFragment, fs.EntryPoint, fs.Constants); err != nil {
 		return &core.CreateRenderPipelineError{
 			Kind:  core.CreateRenderPipelineErrorPipelineConstants,
 			Label: desc.Label,
@@ -1160,7 +1120,7 @@ func fragmentBindingSizes(fs *FragmentState) map[ir.ResourceBinding]uint64 {
 	if fs == nil {
 		return nil
 	}
-	return fs.Module.bindingSizes(ir.StageFragment, fs.EntryPoint)
+	return fs.Module.impl.BindingSizes(ir.StageFragment, fs.EntryPoint)
 }
 
 // mergeShaderBindingSizes merges the binding sizes of the vertex and fragment
@@ -1192,7 +1152,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	// A released layout may already be queued for destruction; the pipeline
 	// would be created from a dying HAL layout and would later revive its
 	// reference count (P2-CORE-022).
-	if desc.Layout != nil && desc.Layout.released {
+	if desc.Layout != nil && desc.Layout.impl.IsReleased() {
 		return nil, ErrReleased
 	}
 
@@ -1223,23 +1183,23 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	}
 
 	var bgCount uint32
-	var bgLayouts []*BindGroupLayout
+	var bgLayouts []*resource.BindGroupLayout
 	var layoutRef *core.ResourceRef
 	if desc.Layout != nil {
 		// The pipeline keeps its layout alive until its own HAL pipeline is
 		// destroyed: every later SetBindGroup passes the layout to
 		// vkCmdBindDescriptorSets. Rust wgpu-core holds an Arc<PipelineLayout>
 		// in the pipeline (pipeline.rs:1155).
-		layoutRef = desc.Layout.ref
+		layoutRef = desc.Layout.impl.Ref()
 		if layoutRef != nil {
 			layoutRef.Clone()
 		}
-		bgCount = desc.Layout.bindGroupCount
-		bgLayouts = desc.Layout.bindGroupLayouts
+		bgCount = desc.Layout.impl.BindGroupCount()
+		bgLayouts = desc.Layout.impl.BindGroupLayouts()
 	}
 
 	// Shader binding sizes of the compute entry point.
-	shaderBindingSizes := desc.Module.bindingSizes(ir.StageCompute, desc.EntryPoint)
+	shaderBindingSizes := desc.Module.impl.BindingSizes(ir.StageCompute, desc.EntryPoint)
 
 	lateGroups := makeLateSizedBufferGroups(shaderBindingSizes, bgLayouts)
 
@@ -1281,13 +1241,13 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 // workgroup-size checks). A module given as SPIR-V has no IR: its LocalSize
 // is checked; workgroup storage is not.
 func (d *Device) validateComputeShader(desc *ComputePipelineDescriptor) error {
-	if desc.Module.irModule == nil {
-		if size, ok := desc.Module.spirvWorkgroupSize(desc.EntryPoint); ok {
+	if desc.Module.impl.IRModule() == nil {
+		if size, ok := desc.Module.impl.SPIRVWorkgroupSize(desc.EntryPoint); ok {
 			return d.validateComputeWorkgroupSize(desc.Label, size)
 		}
 		return nil
 	}
-	irMod, info, index, err := desc.Module.specializedEntryPoint(ir.StageCompute, desc.EntryPoint, desc.Constants)
+	irMod, info, index, err := desc.Module.impl.SpecializedEntryPoint(ir.StageCompute, desc.EntryPoint, desc.Constants)
 	if err != nil {
 		return &core.CreateComputePipelineError{
 			Kind:  core.CreateComputePipelineErrorPipelineConstants,
@@ -1458,7 +1418,7 @@ func (d *Device) CreateFence() (*Fence, error) {
 		return nil, fmt.Errorf("wgpu: failed to create fence: %w", err)
 	}
 
-	return &Fence{hal: halFence, device: d.seamView()}, nil
+	return &Fence{impl: resource.NewFence(halFence, d.seamView())}, nil
 }
 
 // CreateQuerySet creates a query set for occlusion or timestamp queries.
@@ -1487,7 +1447,7 @@ func (d *Device) CreateQuerySet(desc *QuerySetDescriptor) (*QuerySet, error) {
 
 	coreQS := core.NewQuerySet(halQS, d.core, halDesc.Type, halDesc.Count, desc.Label)
 	coreQS.Ref = newQuerySetRef(d, coreQS, desc.Label)
-	return &QuerySet{core: coreQS, device: d.seamView()}, nil
+	return &QuerySet{impl: resource.NewQuerySet(coreQS, d.seamView())}, nil
 }
 
 // newQuerySetRef returns the reference count of a HAL query set: when its last
@@ -1522,14 +1482,14 @@ func (d *Device) ResetFence(f *Fence) error {
 	if d.released.Load() {
 		return ErrReleased
 	}
-	if f == nil || f.released {
+	if f == nil || f.impl.IsReleased() {
 		return ErrReleased
 	}
 	halDevice := d.halDevice()
 	if halDevice == nil {
 		return ErrReleased
 	}
-	return halDevice.ResetFence(f.hal)
+	return halDevice.ResetFence(f.impl.HAL())
 }
 
 // GetFenceStatus returns true if the fence is signaled (non-blocking).
@@ -1538,14 +1498,14 @@ func (d *Device) GetFenceStatus(f *Fence) (bool, error) {
 	if d.released.Load() {
 		return false, ErrReleased
 	}
-	if f == nil || f.released {
+	if f == nil || f.impl.IsReleased() {
 		return false, ErrReleased
 	}
 	halDevice := d.halDevice()
 	if halDevice == nil {
 		return false, ErrReleased
 	}
-	return halDevice.GetFenceStatus(f.hal)
+	return halDevice.GetFenceStatus(f.impl.HAL())
 }
 
 // WaitForFence waits for a fence to reach the specified value.
@@ -1554,14 +1514,14 @@ func (d *Device) WaitForFence(f *Fence, value uint64, timeout time.Duration) (bo
 	if d.released.Load() {
 		return false, ErrReleased
 	}
-	if f == nil || f.released {
+	if f == nil || f.impl.IsReleased() {
 		return false, ErrReleased
 	}
 	halDevice := d.halDevice()
 	if halDevice == nil {
 		return false, ErrReleased
 	}
-	return halDevice.Wait(f.hal, value, timeout)
+	return halDevice.Wait(f.impl.HAL(), value, timeout)
 }
 
 // FreeCommandBuffer returns a command buffer to the command pool.

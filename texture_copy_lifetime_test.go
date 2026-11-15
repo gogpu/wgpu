@@ -87,7 +87,7 @@ func TestBindGroupHoldsTextureViewRefs(t *testing.T) {
 		t.Fatalf("CreateBindGroup: %v", err)
 	}
 
-	refs := map[string]*core.ResourceRef{"view": view.ref, "texture": texture.ref()}
+	refs := map[string]*core.ResourceRef{"view": view.impl.Ref(), "texture": texture.impl.Ref()}
 	checkRefCounts := func(when string, want int32) {
 		t.Helper()
 		for name, ref := range refs {
@@ -163,7 +163,7 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 			texture := createCopyScopeTexture(t, device, "texture-copy-lifetime", tt.textureUse)
 			defer texture.Release()
 
-			refs := map[string]*core.ResourceRef{"buffer": buffer.impl.CoreBuffer().Ref, "texture": texture.ref()}
+			refs := map[string]*core.ResourceRef{"buffer": buffer.impl.CoreBuffer().Ref, "texture": texture.impl.Ref()}
 			checkRefCounts := func(when string, want int32) {
 				t.Helper()
 				for name, ref := range refs {

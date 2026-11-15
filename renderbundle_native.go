@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Render bundles are recorded and replayed by core, not by the backends:
@@ -49,7 +50,7 @@ type bundleCommand struct {
 	// slot is the bind group index or the vertex buffer slot.
 	slot     uint32
 	pipeline *RenderPipeline
-	group    *BindGroup
+	group    *resource.BindGroup
 	// offsets is the command's own copy of the dynamic offsets.
 	offsets     []uint32
 	buffer      *Buffer
@@ -160,7 +161,11 @@ func (e *RenderBundleEncoder) SetBindGroup(index uint32, group *BindGroup, offse
 	if len(offsets) > 0 {
 		copied = append(copied, offsets...)
 	}
-	e.record(bundleCommand{kind: bundleSetBindGroup, slot: index, group: group, offsets: copied})
+	var impl *resource.BindGroup
+	if group != nil {
+		impl = group.impl
+	}
+	e.record(bundleCommand{kind: bundleSetBindGroup, slot: index, group: impl, offsets: copied})
 }
 
 // SetVertexBuffer sets a vertex buffer for the given slot.
@@ -231,7 +236,7 @@ type bundleContents struct {
 	refs []*core.ResourceRef
 	// groups and buffers are recorded on the command encoder of every pass
 	// that executes the bundle, for submit-time validation.
-	groups  []*BindGroup
+	groups  []*resource.BindGroup
 	buffers []*Buffer
 }
 

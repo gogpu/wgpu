@@ -70,7 +70,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 			r.BufferLayout.RowsPerImage,
 		)
 		dstObj := browser.BuildImageCopyTexture(
-			dst.browser.Ref(),
+			dst.impl.Browser().Ref(),
 			r.TextureBase.MipLevel,
 			r.TextureBase.Origin.X, r.TextureBase.Origin.Y, r.TextureBase.Origin.Z,
 		)
@@ -94,7 +94,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	}
 	for _, r := range regions {
 		srcObj := browser.BuildImageCopyTexture(
-			src.browser.Ref(),
+			src.impl.Browser().Ref(),
 			r.TextureBase.MipLevel,
 			r.TextureBase.Origin.X, r.TextureBase.Origin.Y, r.TextureBase.Origin.Z,
 		)
@@ -116,12 +116,12 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 	}
 	for _, r := range regions {
 		srcObj := browser.BuildImageCopyTexture(
-			src.browser.Ref(),
+			src.impl.Browser().Ref(),
 			r.Source.MipLevel,
 			r.Source.Origin.X, r.Source.Origin.Y, r.Source.Origin.Z,
 		)
 		dstObj := browser.BuildImageCopyTexture(
-			dst.browser.Ref(),
+			dst.impl.Browser().Ref(),
 			r.Destination.MipLevel,
 			r.Destination.Origin.X, r.Destination.Origin.Y, r.Destination.Origin.Z,
 		)
@@ -189,13 +189,13 @@ func buildRenderPassDescriptorJS(desc *RenderPassDescriptor) js.Value {
 			ClearB:  ca.ClearValue.B,
 			ClearA:  ca.ClearValue.A,
 		}
-		if ca.View != nil && ca.View.browser != nil {
-			att.View = ca.View.browser.Ref()
+		if ca.View != nil && ca.View.impl.Browser() != nil {
+			att.View = ca.View.impl.Browser().Ref()
 		} else {
 			att.View = js.Undefined()
 		}
-		if ca.ResolveTarget != nil && ca.ResolveTarget.browser != nil {
-			att.ResolveTarget = ca.ResolveTarget.browser.Ref()
+		if ca.ResolveTarget != nil && ca.ResolveTarget.impl.Browser() != nil {
+			att.ResolveTarget = ca.ResolveTarget.impl.Browser().Ref()
 		} else {
 			att.ResolveTarget = js.Undefined()
 		}
@@ -219,8 +219,8 @@ func buildRenderPassDescriptorJS(desc *RenderPassDescriptor) js.Value {
 			StencilClearValue: dsa.StencilClearValue,
 			StencilReadOnly:   dsa.StencilReadOnly,
 		}
-		if dsa.View != nil && dsa.View.browser != nil {
-			ds.View = dsa.View.browser.Ref()
+		if dsa.View != nil && dsa.View.impl.Browser() != nil {
+			ds.View = dsa.View.impl.Browser().Ref()
 		} else {
 			ds.View = js.Undefined()
 		}

@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Compile-time assertion: Surface must implement all public API methods (ADR-047).
@@ -744,14 +745,10 @@ func (st *SurfaceTexture) borrowedTexture() *Texture {
 	} else if cfg := st.surface.core.Config(); cfg != nil {
 		format = cfg.Format
 	}
-	return &Texture{
-		hal:          st.hal,
-		device:       st.device.seamView(),
-		format:       format,
-		surface:      st.surface.core,
-		surfaceLease: st.lease,
-		coreTexture:  st.coreTexture,
-	}
+	impl := resource.NewSurfaceTexture(st.hal, st.device.seamView(), format, st.surface.core, st.lease, st.coreTexture)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex
 }
 
 // CreateView creates a texture view of this surface texture.
@@ -784,17 +781,24 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 	}
 
 	// A surface texture is a single-layer 2D texture with one mip level.
-	view := &TextureView{hal: halView, device: st.device.seamView(), texture: st.borrowedTexture(), surface: st.surface.core, surfaceLease: st.lease,
-		dimension: gputypes.TextureViewDimension2D}
-	if halDesc != nil {
-		view.dimension = resolveViewDimension(nil, halDesc.Dimension)
-		if view.dimension == gputypes.TextureViewDimensionUndefined {
-			view.dimension = gputypes.TextureViewDimension2D
-		}
-		view.baseMipLevel = halDesc.BaseMipLevel
-		view.mipLevelCount = halDesc.MipLevelCount
-		view.format = halDesc.Format
-		view.aspect = halDesc.Aspect
+	parent := st.borrowedTexture()
+	init := &resource.TextureViewInit{
+		HAL:          halView,
+		Device:       st.device.seamView(),
+		Parent:       parent.impl,
+		Surface:      st.surface.core,
+		SurfaceLease: st.lease,
+		Dimension:    gputypes.TextureViewDimension2D,
 	}
-	return view, nil
+	if halDesc != nil {
+		init.Dimension = resolveViewDimension(nil, halDesc.Dimension)
+		if init.Dimension == gputypes.TextureViewDimensionUndefined {
+			init.Dimension = gputypes.TextureViewDimension2D
+		}
+		init.BaseMipLevel = halDesc.BaseMipLevel
+		init.MipLevelCount = halDesc.MipLevelCount
+		init.Format = halDesc.Format
+		init.Aspect = halDesc.Aspect
+	}
+	return &TextureView{impl: resource.NewTextureView(init)}, nil
 }

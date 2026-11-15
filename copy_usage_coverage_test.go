@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // copyBarrierCaptureEncoder records the barriers a copy command emits.
@@ -48,9 +49,9 @@ func TestCopyUsageHelpersSkipUntrackedResources(t *testing.T) {
 
 	textures, err := prepareCopyTextureUsages([]copyTextureUsage{
 		{texture: nil, usage: track.TextureUsesCopySrc},
-		{texture: &Texture{}, usage: track.TextureUsesCopySrc},
-		{texture: &Texture{coreTexture: &core.Texture{}}, usage: track.TextureUsesCopySrc},
-		{texture: &Texture{coreTexture: invalidCoreTexture}, usage: track.TextureUsesCopySrc},
+		{texture: resource.NewTexture(nil, nil, gputypes.TextureFormatRGBA8Unorm, nil, nil), usage: track.TextureUsesCopySrc},
+		{texture: resource.NewTexture(nil, nil, gputypes.TextureFormatRGBA8Unorm, nil, &core.Texture{}), usage: track.TextureUsesCopySrc},
+		{texture: resource.NewTexture(nil, nil, gputypes.TextureFormatRGBA8Unorm, nil, invalidCoreTexture), usage: track.TextureUsesCopySrc},
 	})
 	if err != nil {
 		t.Fatalf("prepareCopyTextureUsages: %v", err)
@@ -89,8 +90,8 @@ func TestCopyUsageScopeIsPerCommand(t *testing.T) {
 	defer buffer.Release()
 
 	textures, err := prepareCopyTextureUsages([]copyTextureUsage{
-		{texture: texture, usage: track.TextureUsesCopySrc},
-		{texture: texture, usage: track.TextureUsesResource},
+		{texture: texture.impl, usage: track.TextureUsesCopySrc},
+		{texture: texture.impl, usage: track.TextureUsesResource},
 	})
 	if err != nil {
 		t.Fatalf("compatible texture roles rejected: %v", err)
@@ -99,8 +100,8 @@ func TestCopyUsageScopeIsPerCommand(t *testing.T) {
 		t.Fatalf("prepared texture roles = %+v, want one CopySrc|Resource entry", textures)
 	}
 	_, err = prepareCopyTextureUsages([]copyTextureUsage{
-		{texture: texture, usage: track.TextureUsesCopySrc},
-		{texture: texture, usage: track.TextureUsesCopyDst},
+		{texture: texture.impl, usage: track.TextureUsesCopySrc},
+		{texture: texture.impl, usage: track.TextureUsesCopyDst},
 	})
 	var textureConflict *track.TextureUsageConflictError
 	if !errors.As(err, &textureConflict) {
@@ -146,11 +147,11 @@ func TestCopyRecordsTransitionsFromEarlierCommands(t *testing.T) {
 	}
 	defer encoder.DiscardEncoding()
 
-	texIndex := texture.coreTexture.TrackingData().Index()
+	texIndex := texture.impl.CoreTexture().TrackingData().Index()
 	bufIndex := buffer.impl.CoreBuffer().TrackingData().Index()
 	request := func(raw hal.CommandEncoder) bool {
 		return encoder.recordCopyUsages(raw,
-			[]copyTextureUsage{{texture: texture, usage: track.TextureUsesCopySrc}},
+			[]copyTextureUsage{{texture: texture.impl, usage: track.TextureUsesCopySrc}},
 			[]copyBufferUsage{{buffer: buffer, usage: track.BufferUsesCopyDst}})
 	}
 
@@ -233,7 +234,7 @@ func TestTransitionTexturesUpdatesEncoderTracker(t *testing.T) {
 			NewUsage: TextureUsageCopySrc,
 		},
 	}})
-	idx := texture.coreTexture.TrackingData().Index()
+	idx := texture.impl.CoreTexture().TrackingData().Index()
 	tracker := encoder.core.Mutable().TextureScope()
 	if got := tracker.StartUsage(idx); got != track.TextureUsesColorTarget {
 		t.Errorf("start usage = %v, want ColorTarget (explicit barrier's old usage)", got)
@@ -244,7 +245,7 @@ func TestTransitionTexturesUpdatesEncoderTracker(t *testing.T) {
 
 	capture := &copyBarrierCaptureEncoder{}
 	if !encoder.recordCopyUsages(capture,
-		[]copyTextureUsage{{texture: texture, usage: track.TextureUsesCopySrc}}, nil) {
+		[]copyTextureUsage{{texture: texture.impl, usage: track.TextureUsesCopySrc}}, nil) {
 		t.Fatal("copy after explicit transition rejected")
 	}
 	if len(capture.textureBarriers) != 0 {

@@ -109,7 +109,7 @@ func TestRenderPassThenCopyTextureToBufferSameEncoder(t *testing.T) {
 	}})
 	cb := mustFinish(t, enc)
 
-	idx := tex.coreTexture.TrackingData().Index()
+	idx := tex.impl.CoreTexture().TrackingData().Index()
 	tracker := cb.core.TextureScope()
 	if got := tracker.StartUsage(idx); got != track.TextureUsesColorTarget {
 		t.Errorf("first usage in command buffer = %v, want ColorTarget", got)
@@ -142,7 +142,7 @@ func TestCopyBufferToTextureThenRenderAttachmentSameEncoder(t *testing.T) {
 	runColorPass(t, enc, view, gputypes.LoadOpLoad, nil)
 	cb := mustFinish(t, enc)
 
-	idx := tex.coreTexture.TrackingData().Index()
+	idx := tex.impl.CoreTexture().TrackingData().Index()
 	tracker := cb.core.TextureScope()
 	if got := tracker.StartUsage(idx); got != track.TextureUsesCopyDst {
 		t.Errorf("first usage in command buffer = %v, want CopyDst", got)
@@ -257,7 +257,7 @@ func TestRenderCopyRenderSameTextureSameEncoder(t *testing.T) {
 	runColorPass(t, enc, view, gputypes.LoadOpLoad, nil)
 	cb := mustFinish(t, enc)
 
-	idx := tex.coreTexture.TrackingData().Index()
+	idx := tex.impl.CoreTexture().TrackingData().Index()
 	tracker := cb.core.TextureScope()
 	if got := tracker.StartUsage(idx); got != track.TextureUsesColorTarget {
 		t.Errorf("first usage = %v, want ColorTarget", got)

@@ -1,18 +1,20 @@
 //go:build rust
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
-// Fence is a GPU synchronization primitive.
-// On Rust backend, fences are no-ops — wgpu-native handles synchronization
-// internally via device polling. This type exists for API compatibility.
+import "github.com/gogpu/wgpu/internal/resource"
+
+// Fence is a GPU synchronization primitive. Under -tags rust it is a no-op,
+// but the public type still exists for API compatibility.
+//
+// The implementation lives in internal/resource (ADR-070); Release is one
+// delegation.
 type Fence struct {
-	released bool
+	impl *resource.Fence
 }
 
 // Release destroys the fence.
-func (f *Fence) Release() {
-	if f.released {
-		return
-	}
-	f.released = true
-}
+func (f *Fence) Release() { f.impl.Release() }

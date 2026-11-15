@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // computeCall is one state or dispatch call on a HAL compute pass.
@@ -76,9 +77,9 @@ func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 	}
 
 	l := rebindLayout(false)
-	userPipeline := &ComputePipeline{hal: &testHALResource{}, bindGroupLayouts: []*BindGroupLayout{l}}
+	userPipeline := &ComputePipeline{hal: &testHALResource{}, bindGroupLayouts: []*resource.BindGroupLayout{l}}
 	pass.SetPipeline(userPipeline)
-	pass.SetBindGroup(0, rebindGroup(l), nil)
+	pass.SetBindGroup(0, &BindGroup{impl: rebindGroup(l)}, nil)
 	pass.DispatchIndirect(indirect, 0)
 	if err := pass.End(); err != nil {
 		t.Fatalf("End() error = %v", err)

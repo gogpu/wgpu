@@ -1,23 +1,19 @@
 //go:build rust
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
-import rwgpu "github.com/go-webgpu/webgpu/wgpu"
+import "github.com/gogpu/wgpu/internal/resource"
 
 // Sampler represents a texture sampler.
-// On Rust backend, this wraps go-webgpu/webgpu Sampler.
+//
+// The implementation lives in internal/resource (ADR-070); Release is one
+// delegation.
 type Sampler struct {
-	r        *rwgpu.Sampler
-	released bool
+	impl *resource.Sampler
 }
 
 // Release destroys the sampler.
-func (s *Sampler) Release() {
-	if s.released {
-		return
-	}
-	s.released = true
-	if s.r != nil {
-		s.r.Release()
-	}
-}
+func (s *Sampler) Release() { s.impl.Release() }

@@ -2,7 +2,10 @@
 
 package wgpu
 
-import "github.com/gogpu/wgpu/internal/browser"
+import (
+	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/resource"
+)
 
 // LateSizedBufferGroup holds the shader-required minimum buffer sizes for
 // bind group entries whose layout specifies MinBindingSize == 0.
@@ -23,9 +26,7 @@ func (p *RenderPipeline) GetBindGroupLayout(index uint32) *BindGroupLayout {
 		return nil
 	}
 	bl := p.browser.GetBindGroupLayout(index)
-	return &BindGroupLayout{
-		browser: bl,
-	}
+	return &BindGroupLayout{impl: resource.NewBindGroupLayout(bl)}
 }
 
 // Release destroys the render pipeline.
@@ -49,9 +50,7 @@ func (p *ComputePipeline) GetBindGroupLayout(index uint32) *BindGroupLayout {
 		return nil
 	}
 	bl := p.browser.GetBindGroupLayout(index)
-	return &BindGroupLayout{
-		browser: bl,
-	}
+	return &BindGroupLayout{impl: resource.NewBindGroupLayout(bl)}
 }
 
 // Release destroys the compute pipeline.

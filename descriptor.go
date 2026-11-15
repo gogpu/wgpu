@@ -272,8 +272,8 @@ func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
 		Binding: e.Binding,
 	}
 	var halView hal.TextureView
-	if e.TextureView != nil {
-		halView = e.TextureView.resolveHAL()
+	if e.TextureView != nil && e.TextureView.impl != nil {
+		halView = e.TextureView.impl.ResolveHAL()
 	}
 
 	switch {
@@ -286,9 +286,9 @@ func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
 				Size:   e.Size,
 			}
 		}
-	case e.Sampler != nil && e.Sampler.hal != nil:
+	case e.Sampler != nil && e.Sampler.impl != nil && e.Sampler.impl.HAL() != nil:
 		entry.Resource = gputypes.SamplerBinding{
-			Sampler: e.Sampler.hal.NativeHandle(),
+			Sampler: e.Sampler.impl.HAL().NativeHandle(),
 		}
 	case halView != nil:
 		entry.Resource = gputypes.TextureViewBinding{
@@ -436,22 +436,22 @@ func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 		DepthStencil: normalizeDepthStencilState(d.DepthStencil).toHAL(),
 	}
 
-	if d.Layout != nil {
-		halDesc.Layout = d.Layout.hal
+	if d.Layout != nil && d.Layout.impl != nil {
+		halDesc.Layout = d.Layout.impl.HAL()
 	}
 
-	if d.Vertex.Module != nil {
+	if d.Vertex.Module != nil && d.Vertex.Module.impl != nil {
 		halDesc.Vertex = hal.VertexState{
-			Module:     d.Vertex.Module.hal,
+			Module:     d.Vertex.Module.impl.HAL(),
 			EntryPoint: d.Vertex.EntryPoint,
 			Constants:  d.Vertex.Constants,
 			Buffers:    d.Vertex.Buffers,
 		}
 	}
 
-	if d.Fragment != nil && d.Fragment.Module != nil {
+	if d.Fragment != nil && d.Fragment.Module != nil && d.Fragment.Module.impl != nil {
 		halDesc.Fragment = &hal.FragmentState{
-			Module:     d.Fragment.Module.hal,
+			Module:     d.Fragment.Module.impl.HAL(),
 			EntryPoint: d.Fragment.EntryPoint,
 			Constants:  d.Fragment.Constants,
 			Targets:    normalizeColorTargets(d.Fragment.Targets),
@@ -493,8 +493,8 @@ func (d *ComputePipelineDescriptor) toHAL() *hal.ComputePipelineDescriptor {
 		Label: d.Label,
 	}
 
-	if d.Layout != nil {
-		halDesc.Layout = d.Layout.hal
+	if d.Layout != nil && d.Layout.impl != nil {
+		halDesc.Layout = d.Layout.impl.HAL()
 	}
 
 	// WebGPU spec: zero_initialize_workgroup_memory defaults to true.
@@ -504,9 +504,9 @@ func (d *ComputePipelineDescriptor) toHAL() *hal.ComputePipelineDescriptor {
 		zeroInit = *d.ZeroInitializeWorkgroupMemory
 	}
 
-	if d.Module != nil {
+	if d.Module != nil && d.Module.impl != nil {
 		halDesc.Compute = hal.ComputeState{
-			Module:                        d.Module.hal,
+			Module:                        d.Module.impl.HAL(),
 			EntryPoint:                    d.EntryPoint,
 			Constants:                     d.Constants,
 			ZeroInitializeWorkgroupMemory: zeroInit,
@@ -576,11 +576,11 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			slice := *ca.DepthSlice
 			halCA.DepthSlice = &slice
 		}
-		if ca.View != nil {
-			halCA.View = ca.View.resolveHAL()
+		if ca.View != nil && ca.View.impl != nil {
+			halCA.View = ca.View.impl.ResolveHAL()
 		}
-		if ca.ResolveTarget != nil {
-			halCA.ResolveTarget = ca.ResolveTarget.resolveHAL()
+		if ca.ResolveTarget != nil && ca.ResolveTarget.impl != nil {
+			halCA.ResolveTarget = ca.ResolveTarget.impl.ResolveHAL()
 		}
 		halDesc.ColorAttachments = append(halDesc.ColorAttachments, halCA)
 	}
@@ -597,14 +597,17 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			StencilClearValue: ds.StencilClearValue,
 			StencilReadOnly:   ds.StencilReadOnly,
 		}
-		if ds.View != nil {
-			halDS.View = ds.View.resolveHAL()
+		if ds.View != nil && ds.View.impl != nil {
+			halDS.View = ds.View.impl.ResolveHAL()
 		}
 		halDesc.DepthStencilAttachment = halDS
 	}
 
 	if writes := d.TimestampWrites; writes != nil {
-		halQuerySet := writes.QuerySet.halQuerySet()
+		var halQuerySet hal.QuerySet
+		if writes.QuerySet != nil && writes.QuerySet.impl != nil {
+			halQuerySet = writes.QuerySet.impl.HALQuerySet()
+		}
 		if halQuerySet == nil {
 			return halDesc
 		}
@@ -641,7 +644,11 @@ func (d *ComputePassDescriptor) toHAL() *hal.ComputePassDescriptor {
 		Label: d.Label,
 	}
 	if writes := d.TimestampWrites; writes != nil {
-		if halQuerySet := writes.QuerySet.halQuerySet(); halQuerySet != nil {
+		var halQuerySet hal.QuerySet
+		if writes.QuerySet != nil && writes.QuerySet.impl != nil {
+			halQuerySet = writes.QuerySet.impl.HALQuerySet()
+		}
+		if halQuerySet != nil {
 			halDesc.TimestampWrites = &hal.ComputePassTimestampWrites{
 				QuerySet:                  halQuerySet,
 				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
@@ -683,12 +690,12 @@ type ImageCopyTexture struct {
 }
 
 func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
-	if i == nil || i.Texture == nil {
+	if i == nil || i.Texture == nil || i.Texture.impl == nil {
 		return nil
 	}
 
 	return &hal.ImageCopyTexture{
-		Texture:  i.Texture.resolveHAL(),
+		Texture:  i.Texture.impl.ResolveHAL(),
 		MipLevel: i.MipLevel,
 		Origin:   i.Origin.toHAL(),
 		Aspect:   i.Aspect,
@@ -737,8 +744,8 @@ type TextureBarrier struct {
 
 func (b TextureBarrier) toHAL() hal.TextureBarrier {
 	var t hal.Texture
-	if b.Texture != nil {
-		t = b.Texture.resolveHAL()
+	if b.Texture != nil && b.Texture.impl != nil {
+		t = b.Texture.impl.ResolveHAL()
 	}
 	return hal.TextureBarrier{
 		Texture: t,

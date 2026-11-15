@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // --- Mock types for batching backend tests ---
@@ -379,7 +380,7 @@ func trackedPendingWrites(t *testing.T) (*pendingWrites, *barrierCaptureDevice, 
 
 // writeTrackedTexture creates a 16x16x2 texture on coreDevice, leaves it in
 // state prior in the device tracker and writes one texel of layer 1.
-func writeTrackedTexture(t *testing.T, pw *pendingWrites, coreDevice *core.Device, usage gputypes.TextureUsage, prior track.TextureUses) (*Texture, track.TrackerIndex) {
+func writeTrackedTexture(t *testing.T, pw *pendingWrites, coreDevice *core.Device, usage gputypes.TextureUsage, prior track.TextureUses) (*resource.Texture, track.TrackerIndex) {
 	t.Helper()
 	halTexture := &noop.Texture{}
 	coreTexture := core.NewTexture(
@@ -390,7 +391,7 @@ func writeTrackedTexture(t *testing.T, pw *pendingWrites, coreDevice *core.Devic
 	)
 	idx := coreTexture.TrackingData().Index()
 	coreDevice.Tracker().InsertTexture(idx, prior)
-	texture := &Texture{hal: halTexture, device: (&Device{core: coreDevice}).seamView(), coreTexture: coreTexture}
+	texture := resource.NewTexture(halTexture, (&Device{core: coreDevice}).seamView(), gputypes.TextureFormatRGBA8Unorm, nil, coreTexture)
 	dst := &hal.ImageCopyTexture{Texture: halTexture, Origin: hal.Origin3D{Z: 1}, Aspect: gputypes.TextureAspectAll}
 	size := hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}
 	layout := &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}
@@ -645,7 +646,7 @@ func TestPendingWrites_DestinationRefsOutliveEncoding(t *testing.T) {
 		gputypes.TextureDimension2D, gputypes.TextureUsageCopyDst,
 		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}, 1, 1, "texture")
 	coreTexture.Ref = core.NewResourceRef("texture", dropped("texture-drop"))
-	texture := &Texture{hal: halTexture, device: (&Device{core: coreDevice}).seamView(), coreTexture: coreTexture}
+	texture := resource.NewTexture(halTexture, (&Device{core: coreDevice}).seamView(), gputypes.TextureFormatRGBA8Unorm, nil, coreTexture)
 	if err := pw.writeTextureFor(texture, &hal.ImageCopyTexture{Texture: halTexture, Aspect: gputypes.TextureAspectAll},
 		make([]byte, 4), &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1},
 		&hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}); err != nil {
@@ -808,9 +809,9 @@ func TestPendingWrites_HasPendingWork(t *testing.T) {
 }
 
 func TestContainsTextureOwnerUsesWrapperIdentity(t *testing.T) {
-	first := &Texture{}
-	second := &Texture{}
-	owners := []*Texture{nil, first}
+	first := &resource.Texture{}
+	second := &resource.Texture{}
+	owners := []*resource.Texture{nil, first}
 	if !containsTextureOwner(owners, first) {
 		t.Fatal("containsTextureOwner missed the retained wrapper")
 	}

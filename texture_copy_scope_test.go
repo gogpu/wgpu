@@ -88,9 +88,9 @@ func TestCopyCommandsPopulateTextureScope(t *testing.T) {
 
 			scope := cb.core.TextureScope()
 			for tex, want := range tt.want {
-				idx := tex.coreTexture.TrackingData().Index()
+				idx := tex.impl.CoreTexture().TrackingData().Index()
 				if got := scope.EndUsage(idx); got != want {
-					t.Errorf("texture %q usage = %v, want %v", tex.coreTexture.Label(), got, want)
+					t.Errorf("texture %q usage = %v, want %v", tex.impl.CoreTexture().Label(), got, want)
 				}
 			}
 		})
@@ -147,7 +147,7 @@ func TestCopyCommandTextureScopeDrivesBarriers(t *testing.T) {
 			}
 			defer buffer.Release()
 
-			idx := tex.coreTexture.TrackingData().Index()
+			idx := tex.impl.CoreTexture().TrackingData().Index()
 			device.core.Tracker().InsertTexture(idx, tt.before)
 			enc, err := device.CreateCommandEncoder(nil)
 			if err != nil {
@@ -205,7 +205,7 @@ func TestFailedCopyDoesNotPopulateTextureScope(t *testing.T) {
 		}
 		enc.CopyTextureToBuffer(tex, buffer, nil)
 
-		idx := tex.coreTexture.TrackingData().Index()
+		idx := tex.impl.CoreTexture().TrackingData().Index()
 		if scope := enc.core.Mutable().TextureScope(); scope.IsUsed(idx) {
 			t.Fatalf("failed copy recorded texture usage %v", scope.EndUsage(idx))
 		}
@@ -231,7 +231,7 @@ func TestFailedCopyDoesNotPopulateTextureScope(t *testing.T) {
 		}
 		enc.CopyBufferToTexture(buffer, tex, nil)
 
-		idx := tex.coreTexture.TrackingData().Index()
+		idx := tex.impl.CoreTexture().TrackingData().Index()
 		if scope := enc.core.Mutable().TextureScope(); scope.IsUsed(idx) {
 			t.Fatalf("failed copy recorded texture usage %v", scope.EndUsage(idx))
 		}
@@ -355,12 +355,12 @@ func TestCopyAfterEarlierCommandUsageIsNotAConflict(t *testing.T) {
 
 			textures := enc.core.Mutable().TextureScope()
 			if want := tt.wantSrc; want != 0 {
-				if got := textures.EndUsage(src.coreTexture.TrackingData().Index()); got != want {
+				if got := textures.EndUsage(src.impl.CoreTexture().TrackingData().Index()); got != want {
 					t.Errorf("source texture usage = %v, want %v", got, want)
 				}
 			}
 			if want := tt.wantDst; want != 0 {
-				if got := textures.EndUsage(dst.coreTexture.TrackingData().Index()); got != want {
+				if got := textures.EndUsage(dst.impl.CoreTexture().TrackingData().Index()); got != want {
 					t.Errorf("destination texture usage = %v, want %v", got, want)
 				}
 			}
@@ -414,7 +414,7 @@ func TestCopyOntoItselfIsRejectedAtomically(t *testing.T) {
 			}
 			tt.record(enc, tex, buf)
 
-			if enc.core.Mutable().TextureScope().IsUsed(tex.coreTexture.TrackingData().Index()) {
+			if enc.core.Mutable().TextureScope().IsUsed(tex.impl.CoreTexture().TrackingData().Index()) {
 				t.Error("rejected copy recorded the texture in the command buffer tracker")
 			}
 			if enc.core.Mutable().BufferScope().IsUsed(buf.impl.CoreBuffer().TrackingData().Index()) {
@@ -479,7 +479,7 @@ func createCopyScopeBuffer(t *testing.T, device *Device, label string) *Buffer {
 // seedTextureUsage simulates an earlier command of the encoder that left the
 // texture in usage.
 func seedTextureUsage(enc *CommandEncoder, texture *Texture, usage track.TextureUses) {
-	enc.core.Mutable().TextureScope().SetSingle(texture.coreTexture.TrackingData().Index(), usage)
+	enc.core.Mutable().TextureScope().SetSingle(texture.impl.CoreTexture().TrackingData().Index(), usage)
 }
 
 // seedBufferUsage simulates an earlier command of the encoder that left the

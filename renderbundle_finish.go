@@ -9,6 +9,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // vertexBufferAlignment is the alignment of a vertex buffer offset
@@ -35,7 +36,7 @@ type bundleState struct {
 
 	refs    []*core.ResourceRef
 	seen    map[*core.ResourceRef]struct{}
-	groups  []*BindGroup
+	groups  []*resource.BindGroup
 	buffers []*Buffer
 }
 
@@ -98,17 +99,17 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 // setBindGroup validates the group and its dynamic offsets and assigns it to
 // the binder; nothing is emitted until a draw uses it.
 // Matches Rust bundle.rs set_bind_group.
-func (s *bundleState) setBindGroup(index uint32, group *BindGroup, offsets []uint32) error {
+func (s *bundleState) setBindGroup(index uint32, group *resource.BindGroup, offsets []uint32) error {
 	if err := validateSetBindGroup("RenderBundleEncoder", index, group, offsets, &s.device.core.Limits); err != nil {
 		return err
 	}
-	if group.released != nil && group.released.Load() {
+	if group.IsReleased() {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, ErrReleased)
 	}
-	if group.device != s.device.seamView() {
+	if group.Device() != s.device.seamView() {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, errBundleDevice)
 	}
-	if err := s.scope.MergeBindGroup(group.usages); err != nil {
+	if err := s.scope.MergeBindGroup(group.Usages()); err != nil {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, err)
 	}
 	s.binder.setGroup(index, group, offsets)
@@ -244,7 +245,7 @@ func (s *bundleState) drawIndexed(args gputypes.DrawIndexedArgs) error {
 // stale and that the current pipeline uses.
 // Matches Rust bundle.rs State::flush_bindings.
 func (s *bundleState) flushBindings() {
-	s.binder.listValid(s.binder.takeRebindStart(), func(i uint32, group *BindGroup, offsets []uint32) {
+	s.binder.listValid(s.binder.takeRebindStart(), func(i uint32, group *resource.BindGroup, offsets []uint32) {
 		s.commands = append(s.commands, bundleCommand{kind: bundleSetBindGroup, slot: i, group: group, offsets: offsets})
 	})
 }
@@ -263,12 +264,12 @@ func (s *bundleState) keep(ref *core.ResourceRef) {
 
 // keepBindGroup keeps a bind group and the buffers bound in it, as a pass's
 // SetBindGroup does.
-func (s *bundleState) keepBindGroup(group *BindGroup) {
-	if _, ok := s.seen[group.ref]; !ok || group.ref == nil {
+func (s *bundleState) keepBindGroup(group *resource.BindGroup) {
+	if _, ok := s.seen[group.Ref()]; !ok || group.Ref() == nil {
 		s.groups = append(s.groups, group)
 	}
-	s.keep(group.ref)
-	for _, buf := range group.boundBuffers {
+	s.keep(group.Ref())
+	for _, buf := range group.BoundBuffers() {
 		if cb := buf.CoreBuffer(); cb != nil {
 			s.keep(cb.Ref)
 		}

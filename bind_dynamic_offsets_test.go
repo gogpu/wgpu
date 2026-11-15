@@ -8,13 +8,14 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // dynamicOffsetsTestGroup returns a bind group with, listed out of binding
 // order: binding 3, a 512-byte buffer bound at [0, 64) as dynamic read-only
 // storage; binding 1, a 1024-byte buffer bound at [256, 288) as a dynamic
 // uniform; and binding 0, a non-dynamic uniform.
-func dynamicOffsetsTestGroup() *BindGroup {
+func dynamicOffsetsTestGroup() *resource.BindGroup {
 	layout := []gputypes.BindGroupLayoutEntry{
 		{Binding: 3, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage, HasDynamicOffset: true}},
 		{Binding: 0, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
@@ -25,11 +26,11 @@ func dynamicOffsetsTestGroup() *BindGroup {
 		{Binding: 1, Buffer: NewTestBuffer(1024, gputypes.BufferUsageUniform, "uniform"), Offset: 256, Size: 32},
 		{Binding: 3, Buffer: NewTestBuffer(512, gputypes.BufferUsageStorage, "storage"), Size: 64},
 	}
-	return &BindGroup{dynamicBindings: buildDynamicBindings(layout, entries)}
+	return resource.NewBindGroup(&resource.BindGroupInit{DynamicBindings: buildDynamicBindings(layout, entries)})
 }
 
 func TestBuildDynamicBindings(t *testing.T) {
-	got := dynamicOffsetsTestGroup().dynamicBindings
+	got := dynamicOffsetsTestGroup().DynamicBindings()
 	want := []core.DynamicBinding{
 		{Binding: 1, BindingType: gputypes.BufferBindingTypeUniform, BufferSize: 1024, BindingEnd: 288, MaxDynamicOffset: 736},
 		{Binding: 3, BindingType: gputypes.BufferBindingTypeReadOnlyStorage, BufferSize: 512, BindingEnd: 64, MaxDynamicOffset: 448},
@@ -86,7 +87,7 @@ func TestValidateDynamicOffsets(t *testing.T) {
 		})
 	}
 
-	plain := &BindGroup{}
+	plain := resource.NewBindGroup(&resource.BindGroupInit{})
 	if err := validateDynamicOffsets(0, plain, []uint32{256}, &limits); !errors.Is(err, errDynamicOffsetCount) {
 		t.Fatalf("offsets for a group without dynamic bindings: error = %v, want %v", err, errDynamicOffsetCount)
 	}

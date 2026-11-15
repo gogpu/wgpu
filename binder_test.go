@@ -8,15 +8,29 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/wgpu/internal/resource"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
+
+// newTestBindGroupLayout builds a layout over its entries with no device or
+// HAL object, for binder fixtures: the type's fields moved to internal/resource
+// (ADR-070), so a test constructs it through the destination constructor.
+func newTestBindGroupLayout(entries []gputypes.BindGroupLayoutEntry) *resource.BindGroupLayout {
+	return resource.NewBindGroupLayout(nil, nil, entries)
+}
+
+// newTestBinderBindGroup builds a bind group fixture carrying the late buffer
+// binding infos the binder reads, with no device or HAL object.
+func newTestBinderBindGroup(layout *resource.BindGroupLayout, lateInfos []resource.LateBufferBindingInfo) *resource.BindGroup {
+	return resource.NewBindGroup(&resource.BindGroupInit{Layout: layout, LateBufferBindingInfos: lateInfos})
+}
 
 func TestBinderReset(t *testing.T) {
 	var b binder
 
-	layout := &BindGroupLayout{}
+	layout := &resource.BindGroupLayout{}
 	b.assign(0, layout)
-	b.updateExpectations([]*BindGroupLayout{layout})
+	b.updateExpectations([]*resource.BindGroupLayout{layout})
 
 	b.reset()
 
@@ -38,9 +52,9 @@ func TestBinderReset(t *testing.T) {
 func TestBinderUpdateExpectations(t *testing.T) {
 	var b binder
 
-	l0 := &BindGroupLayout{}
-	l1 := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	l0 := &resource.BindGroupLayout{}
+	l1 := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l0, l1})
 
 	if b.maxSlots != 2 {
 		t.Errorf("maxSlots = %d, want 2", b.maxSlots)
@@ -61,13 +75,13 @@ func TestBinderUpdateExpectations(t *testing.T) {
 func TestBinderUpdateExpectationsClearsPrevious(t *testing.T) {
 	var b binder
 
-	l0 := &BindGroupLayout{}
-	l1 := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	l0 := &resource.BindGroupLayout{}
+	l1 := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l0, l1})
 
 	// Switch to a pipeline with only 1 bind group.
-	l2 := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l2})
+	l2 := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l2})
 
 	if b.maxSlots != 1 {
 		t.Errorf("maxSlots = %d, want 1", b.maxSlots)
@@ -82,7 +96,7 @@ func TestBinderUpdateExpectationsClearsPrevious(t *testing.T) {
 
 func TestBinderAssign(t *testing.T) {
 	var b binder
-	l := &BindGroupLayout{}
+	l := &resource.BindGroupLayout{}
 
 	b.assign(3, l)
 	if b.assigned[3] != l {
@@ -92,7 +106,7 @@ func TestBinderAssign(t *testing.T) {
 
 func TestBinderAssignOutOfRange(t *testing.T) {
 	var b binder
-	l := &BindGroupLayout{}
+	l := &resource.BindGroupLayout{}
 
 	// Should not panic when index >= MaxBindGroups.
 	b.assign(MaxBindGroups, l)
@@ -102,9 +116,9 @@ func TestBinderAssignOutOfRange(t *testing.T) {
 func TestBinderCheckCompatibilityAllSatisfied(t *testing.T) {
 	var b binder
 
-	l0 := &BindGroupLayout{}
-	l1 := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	l0 := &resource.BindGroupLayout{}
+	l1 := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l0, l1})
 	b.assign(0, l0)
 	b.assign(1, l1)
 
@@ -116,9 +130,9 @@ func TestBinderCheckCompatibilityAllSatisfied(t *testing.T) {
 func TestBinderCheckCompatibilityMissingBindGroup(t *testing.T) {
 	var b binder
 
-	l0 := &BindGroupLayout{}
-	l1 := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	l0 := &resource.BindGroupLayout{}
+	l1 := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l0, l1})
 	b.assign(0, l0)
 	// Slot 1 is not assigned.
 
@@ -137,17 +151,13 @@ func TestBinderCheckCompatibilityMissingBindGroup(t *testing.T) {
 func TestBinderCheckCompatibilityIncompatibleLayout(t *testing.T) {
 	var b binder
 
-	expected := &BindGroupLayout{
-		entries: []gputypes.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: gputypes.ShaderStageVertex},
-		},
-	}
-	wrong := &BindGroupLayout{
-		entries: []gputypes.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: gputypes.ShaderStageFragment},
-		},
-	}
-	b.updateExpectations([]*BindGroupLayout{expected})
+	expected := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+	})
+	wrong := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageFragment},
+	})
+	b.updateExpectations([]*resource.BindGroupLayout{expected})
 	b.assign(0, wrong)
 
 	err := b.checkCompatibility()
@@ -182,15 +192,15 @@ func TestBinderCheckCompatibilityPipelineWithNoBindGroups(t *testing.T) {
 func TestBinderAssignedPreservedAcrossPipelineSwitch(t *testing.T) {
 	var b binder
 
-	l0 := &BindGroupLayout{}
-	l1 := &BindGroupLayout{}
+	l0 := &resource.BindGroupLayout{}
+	l1 := &resource.BindGroupLayout{}
 
 	// Set bind groups before pipeline.
 	b.assign(0, l0)
 	b.assign(1, l1)
 
 	// Now set pipeline that expects these layouts.
-	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	b.updateExpectations([]*resource.BindGroupLayout{l0, l1})
 
 	// Assignments should still be valid.
 	if err := b.checkCompatibility(); err != nil {
@@ -204,10 +214,10 @@ func TestBinderCrashScenario(t *testing.T) {
 	// User calls SetBindGroup(1, ...) — no bind group at index 0.
 	var b binder
 
-	expected0 := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{expected0})
+	expected0 := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{expected0})
 
-	wrong := &BindGroupLayout{}
+	wrong := &resource.BindGroupLayout{}
 	b.assign(1, wrong) // Bind at index 1, but pipeline only expects index 0.
 
 	err := b.checkCompatibility()
@@ -220,12 +230,10 @@ func TestBinderCrashScenario(t *testing.T) {
 }
 
 func TestBindGroupLayoutIsCompatibleWithSamePointer(t *testing.T) {
-	layout := &BindGroupLayout{
-		entries: []gputypes.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: gputypes.ShaderStageVertex},
-		},
-	}
-	if !layout.isCompatibleWith(layout) {
+	layout := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageVertex},
+	})
+	if !layout.IsCompatibleWith(layout) {
 		t.Error("same pointer should be compatible (fast path)")
 	}
 }
@@ -249,30 +257,28 @@ func TestBindGroupLayoutIsCompatibleWithSameEntries(t *testing.T) {
 		},
 	}
 
-	layout1 := &BindGroupLayout{entries: make([]gputypes.BindGroupLayoutEntry, len(entries))}
-	copy(layout1.entries, entries)
+	layout1 := newTestBindGroupLayout(make([]gputypes.BindGroupLayoutEntry, len(entries)))
+	copy(layout1.Entries(), entries)
 
 	// Create a second layout with identical entries but separate pointer allocations.
-	layout2 := &BindGroupLayout{
-		entries: []gputypes.BindGroupLayoutEntry{
-			{
-				Binding:    0,
-				Visibility: gputypes.ShaderStageVertex,
-				Buffer: &gputypes.BufferBindingLayout{
-					Type:             gputypes.BufferBindingTypeUniform,
-					HasDynamicOffset: false,
-					MinBindingSize:   64,
-				},
-			},
-			{
-				Binding:    1,
-				Visibility: gputypes.ShaderStageFragment,
-				Sampler:    &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering},
+	layout2 := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
+		{
+			Binding:    0,
+			Visibility: gputypes.ShaderStageVertex,
+			Buffer: &gputypes.BufferBindingLayout{
+				Type:             gputypes.BufferBindingTypeUniform,
+				HasDynamicOffset: false,
+				MinBindingSize:   64,
 			},
 		},
-	}
+		{
+			Binding:    1,
+			Visibility: gputypes.ShaderStageFragment,
+			Sampler:    &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering},
+		},
+	})
 
-	if !layout1.isCompatibleWith(layout2) {
+	if !layout1.IsCompatibleWith(layout2) {
 		t.Error("layouts with identical entries (different pointers) should be compatible")
 	}
 }
@@ -342,9 +348,9 @@ func TestBindGroupLayoutIsCompatibleWithDifferentEntries(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l1 := &BindGroupLayout{entries: tt.entries1}
-			l2 := &BindGroupLayout{entries: tt.entries2}
-			if l1.isCompatibleWith(l2) {
+			l1 := newTestBindGroupLayout(tt.entries1)
+			l2 := newTestBindGroupLayout(tt.entries2)
+			if l1.IsCompatibleWith(l2) {
 				t.Error("layouts with different entries should NOT be compatible")
 			}
 		})
@@ -352,9 +358,9 @@ func TestBindGroupLayoutIsCompatibleWithDifferentEntries(t *testing.T) {
 }
 
 func TestBindGroupLayoutIsCompatibleWithEmptyEntries(t *testing.T) {
-	l1 := &BindGroupLayout{entries: []gputypes.BindGroupLayoutEntry{}}
-	l2 := &BindGroupLayout{entries: []gputypes.BindGroupLayoutEntry{}}
-	if !l1.isCompatibleWith(l2) {
+	l1 := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{})
+	l2 := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{})
+	if !l1.IsCompatibleWith(l2) {
 		t.Error("two empty layouts should be compatible")
 	}
 }
@@ -372,25 +378,23 @@ func TestBinderCheckCompatibilityEntryByEntry(t *testing.T) {
 		},
 	}
 
-	pipelineLayout := &BindGroupLayout{entries: make([]gputypes.BindGroupLayoutEntry, len(entries))}
-	copy(pipelineLayout.entries, entries)
+	pipelineLayout := newTestBindGroupLayout(make([]gputypes.BindGroupLayoutEntry, len(entries)))
+	copy(pipelineLayout.Entries(), entries)
 
-	bindGroupLayout := &BindGroupLayout{
-		entries: []gputypes.BindGroupLayoutEntry{
-			{
-				Binding:    0,
-				Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
-				Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: 64},
-			},
+	bindGroupLayout := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
+		{
+			Binding:    0,
+			Visibility: gputypes.ShaderStageVertex | gputypes.ShaderStageFragment,
+			Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: 64},
 		},
-	}
+	})
 
 	// Different pointers but same entries.
 	if pipelineLayout == bindGroupLayout {
 		t.Fatal("test setup error: layouts should be different pointers")
 	}
 
-	b.updateExpectations([]*BindGroupLayout{pipelineLayout})
+	b.updateExpectations([]*resource.BindGroupLayout{pipelineLayout})
 	b.assign(0, bindGroupLayout)
 
 	if err := b.checkCompatibility(); err != nil {
@@ -401,18 +405,14 @@ func TestBinderCheckCompatibilityEntryByEntry(t *testing.T) {
 func TestBinderCheckCompatibilityEntryByEntryMismatch(t *testing.T) {
 	var b binder
 
-	pipelineLayout := &BindGroupLayout{
-		entries: []gputypes.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
-		},
-	}
-	bindGroupLayout := &BindGroupLayout{
-		entries: []gputypes.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
-		},
-	}
+	pipelineLayout := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
+	})
+	bindGroupLayout := newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
+		{Binding: 0, Visibility: gputypes.ShaderStageVertex, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
+	})
 
-	b.updateExpectations([]*BindGroupLayout{pipelineLayout})
+	b.updateExpectations([]*resource.BindGroupLayout{pipelineLayout})
 	b.assign(0, bindGroupLayout)
 
 	err := b.checkCompatibility()
@@ -459,9 +459,9 @@ func TestBinderMultipleSlots(t *testing.T) {
 			var b binder
 
 			// Create distinct layouts for each expected slot.
-			layouts := make([]*BindGroupLayout, tt.expected)
+			layouts := make([]*resource.BindGroupLayout, tt.expected)
 			for i := range layouts {
-				layouts[i] = &BindGroupLayout{}
+				layouts[i] = &resource.BindGroupLayout{}
 			}
 			b.updateExpectations(layouts)
 
@@ -518,7 +518,7 @@ func TestExtractShaderBindingSizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lower: %v", err)
 	}
-	module := &ShaderModule{irModule: lowered.IR, irInfo: &lowered.Info}
+	module := resource.NewShaderModule(nil, nil, lowered.IR, lowered.Info)
 	rb00 := ir.ResourceBinding{Group: 0, Binding: 0}
 	rb01 := ir.ResourceBinding{Group: 0, Binding: 1}
 
@@ -540,7 +540,7 @@ func TestExtractShaderBindingSizes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := module.bindingSizes(tt.stage, tt.entryPoint)
+			got := module.BindingSizes(tt.stage, tt.entryPoint)
 			if tt.want == nil {
 				if got != nil {
 					t.Fatalf("sizes = %v, want nil", got)
@@ -560,30 +560,27 @@ func TestExtractShaderBindingSizes(t *testing.T) {
 }
 
 func TestExtractShaderBindingSizesNilModule(t *testing.T) {
-	var nilModule *ShaderModule
-	if sizes := nilModule.bindingSizes(ir.StageCompute, "main"); sizes != nil {
+	var nilModule *resource.ShaderModule
+	if sizes := nilModule.BindingSizes(ir.StageCompute, "main"); sizes != nil {
 		t.Errorf("bindingSizes on nil module = %v, want nil", sizes)
 	}
-	spirv := &ShaderModule{}
-	if sizes := spirv.bindingSizes(ir.StageCompute, "main"); sizes != nil {
+	spirv := &resource.ShaderModule{}
+	if sizes := spirv.BindingSizes(ir.StageCompute, "main"); sizes != nil {
 		t.Errorf("bindingSizes without IR = %v, want nil", sizes)
 	}
 }
 
 func TestCheckLateBufferBindingsPass(t *testing.T) {
 	var b binder
-	l := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l})
+	l := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// Pipeline requires 64 bytes, buffer has 128 bytes — should pass.
 	var lateGroups [MaxBindGroups]LateSizedBufferGroup
 	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
-	bg := &BindGroup{
-		layout:                 l,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 128}},
-	}
+	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 128}})
 	b.assignBindGroup(0, bg)
 
 	if err := b.checkLateBufferBindings(); err != nil {
@@ -593,18 +590,15 @@ func TestCheckLateBufferBindingsPass(t *testing.T) {
 
 func TestCheckLateBufferBindingsExactSize(t *testing.T) {
 	var b binder
-	l := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l})
+	l := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// Pipeline requires 64 bytes, buffer has exactly 64 bytes — should pass.
 	var lateGroups [MaxBindGroups]LateSizedBufferGroup
 	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
-	bg := &BindGroup{
-		layout:                 l,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 64}},
-	}
+	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 64}})
 	b.assignBindGroup(0, bg)
 
 	if err := b.checkLateBufferBindings(); err != nil {
@@ -614,18 +608,15 @@ func TestCheckLateBufferBindingsExactSize(t *testing.T) {
 
 func TestCheckLateBufferBindingsFail(t *testing.T) {
 	var b binder
-	l := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l})
+	l := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// Pipeline requires 64 bytes, buffer has only 32 — should fail.
 	var lateGroups [MaxBindGroups]LateSizedBufferGroup
 	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
-	bg := &BindGroup{
-		layout:                 l,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 5, Size: 32}},
-	}
+	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 5, Size: 32}})
 	b.assignBindGroup(0, bg)
 
 	err := b.checkLateBufferBindings()
@@ -648,8 +639,8 @@ func TestCheckLateBufferBindingsFail(t *testing.T) {
 
 func TestCheckLateBufferBindingsNoLateEntries(t *testing.T) {
 	var b binder
-	l := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l})
+	l := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// No late groups — should always pass.
 	var lateGroups [MaxBindGroups]LateSizedBufferGroup
@@ -664,15 +655,12 @@ func TestCheckLateBufferBindingsBindGroupBeforePipeline(t *testing.T) {
 	// Test order-independence: bind group set BEFORE pipeline.
 	// Matches WebGPU spec behavior and Rust wgpu-core Binder.
 	var b binder
-	l := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l})
+	l := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 	b.assign(0, l)
 
 	// Set bind group FIRST (no pipeline yet — lateBufferBindings empty).
-	bg := &BindGroup{
-		layout:                 l,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 128}},
-	}
+	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 128}})
 	b.assignBindGroup(0, bg)
 
 	// Then set pipeline (should merge into existing entries).
@@ -688,8 +676,8 @@ func TestCheckLateBufferBindingsBindGroupBeforePipeline(t *testing.T) {
 func TestCheckLateBufferBindingsPipelineBeforeBindGroup(t *testing.T) {
 	// Test order-independence: pipeline set BEFORE bind group.
 	var b binder
-	l := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l})
+	l := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 	b.assign(0, l)
 
 	// Set pipeline FIRST.
@@ -698,10 +686,7 @@ func TestCheckLateBufferBindingsPipelineBeforeBindGroup(t *testing.T) {
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	// Then set bind group with insufficient size.
-	bg := &BindGroup{
-		layout:                 l,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 3, Size: 32}},
-	}
+	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 3, Size: 32}})
 	b.assignBindGroup(0, bg)
 
 	err := b.checkLateBufferBindings()
@@ -715,9 +700,9 @@ func TestCheckLateBufferBindingsPipelineBeforeBindGroup(t *testing.T) {
 
 func TestCheckLateBufferBindingsMultipleGroups(t *testing.T) {
 	var b binder
-	l0 := &BindGroupLayout{}
-	l1 := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l0, l1})
+	l0 := &resource.BindGroupLayout{}
+	l1 := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l0, l1})
 	b.assign(0, l0)
 	b.assign(1, l1)
 
@@ -727,14 +712,8 @@ func TestCheckLateBufferBindingsMultipleGroups(t *testing.T) {
 	lateGroups[1] = LateSizedBufferGroup{ShaderSizes: []uint64{48}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
-	bg0 := &BindGroup{
-		layout:                 l0,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 128}},
-	}
-	bg1 := &BindGroup{
-		layout:                 l1,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 16}},
-	}
+	bg0 := newTestBinderBindGroup(l0, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 128}})
+	bg1 := newTestBinderBindGroup(l1, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 16}})
 	b.assignBindGroup(0, bg0)
 	b.assignBindGroup(1, bg1)
 
@@ -754,16 +733,16 @@ func TestMakeLateSizedBufferGroups(t *testing.T) {
 		{Group: 1, Binding: 0}: 32,
 	}
 
-	layouts := []*BindGroupLayout{
-		{entries: []gputypes.BindGroupLayoutEntry{
+	layouts := []*resource.BindGroupLayout{
+		newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
 			{Binding: 0, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 0}},                            // late: should get 64
 			{Binding: 1, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 256}},                          // NOT late: MinBindingSize != 0
 			{Binding: 2, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 0}},                            // late: should get 128
 			{Binding: 3, Sampler: &gputypes.SamplerBindingLayout{Type: gputypes.SamplerBindingTypeFiltering}}, // not buffer
-		}},
-		{entries: []gputypes.BindGroupLayoutEntry{
+		}),
+		newTestBindGroupLayout([]gputypes.BindGroupLayoutEntry{
 			{Binding: 0, Buffer: &gputypes.BufferBindingLayout{MinBindingSize: 0}}, // late: should get 32
-		}},
+		}),
 	}
 
 	groups := makeLateSizedBufferGroups(shaderSizes, layouts)
@@ -797,17 +776,14 @@ func TestMakeLateSizedBufferGroups(t *testing.T) {
 
 func TestBinderResetClearsLateBindings(t *testing.T) {
 	var b binder
-	l := &BindGroupLayout{}
-	b.updateExpectations([]*BindGroupLayout{l})
+	l := &resource.BindGroupLayout{}
+	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	var lateGroups [MaxBindGroups]LateSizedBufferGroup
 	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
-	bg := &BindGroup{
-		layout:                 l,
-		lateBufferBindingInfos: []LateBufferBindingInfo{{BindingIndex: 0, Size: 32}},
-	}
+	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 32}})
 	b.assignBindGroup(0, bg)
 
 	// Before reset, should have late bindings.

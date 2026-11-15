@@ -1,53 +1,62 @@
 //go:build rust
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
 import (
-	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Texture represents a GPU texture.
-// On Rust backend, this wraps go-webgpu/webgpu Texture.
+//
+// The implementation lives in internal/resource (ADR-070). This declaration is
+// the public surface: every method is one delegation.
 type Texture struct {
-	r        *rwgpu.Texture
-	format   gputypes.TextureFormat
-	released bool
+	impl *resource.Texture
 }
 
 // Format returns the texture format.
-func (t *Texture) Format() gputypes.TextureFormat { return t.format }
+func (t *Texture) Format() gputypes.TextureFormat {
+	if t.impl == nil {
+		return gputypes.TextureFormatUndefined
+	}
+	return t.impl.Format()
+}
 
 // Release destroys the texture.
 func (t *Texture) Release() {
-	if t.released {
+	if t.impl == nil {
 		return
 	}
-	t.released = true
-	if t.r != nil {
-		t.r.Release()
-	}
+	t.impl.Release()
 }
 
 // TextureView represents a view into a texture.
-// On Rust backend, this wraps go-webgpu/webgpu TextureView.
 type TextureView struct {
-	r        *rwgpu.TextureView
-	texture  *Texture
-	released bool
+	impl *resource.TextureView
 }
 
-// Texture returns the parent Texture that this view was created from.
-// Returns nil if the view has been released.
-func (v *TextureView) Texture() *Texture { return v.texture }
+// Texture returns the parent Texture this view was created from. The rust
+// build reads it directly: a released view still returns its texture.
+func (v *TextureView) Texture() *Texture {
+	if v.impl == nil {
+		return nil
+	}
+	parent := v.impl.Texture()
+	if parent == nil {
+		return nil
+	}
+	wrapper, _ := parent.Pub.(*Texture)
+	return wrapper
+}
 
 // Release marks the texture view for destruction.
 func (v *TextureView) Release() {
-	if v.released {
+	if v.impl == nil {
 		return
 	}
-	v.released = true
-	if v.r != nil {
-		v.r.Release()
-	}
+	v.impl.Release()
 }

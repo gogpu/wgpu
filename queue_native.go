@@ -371,7 +371,7 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if q.hal == nil || dst == nil {
 		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
 	}
-	if dst.Texture != nil && dst.Texture.resolveHAL() == nil {
+	if dst.Texture != nil && dst.Texture.impl.ResolveHAL() == nil {
 		return ErrReleased
 	}
 	if dst.Texture == nil {
@@ -391,9 +391,9 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if skip {
 		return nil
 	}
-	if dst.Texture.needsStencilBlit(dst.Aspect) {
+	if dst.Texture.impl.NeedsStencilBlit(dst.Aspect) {
 		if err := q.writeStencilLocked(dst, data, layout, size); err != nil {
-			return fmt.Errorf("wgpu: WriteTexture: %w", stencilBlitError(dst.Texture.format, err))
+			return fmt.Errorf("wgpu: WriteTexture: %w", stencilBlitError(dst.Texture.impl.Format(), err))
 		}
 		return nil
 	}
@@ -408,7 +408,7 @@ func (q *Queue) writeTextureLocked(dst *ImageCopyTexture, data []byte, layout *I
 	halSize := size.toHAL()
 
 	if q.pending != nil {
-		return q.pending.writeTextureFor(dst.Texture, halDst, data, &halLayout, &halSize)
+		return q.pending.writeTextureFor(dst.Texture.impl, halDst, data, &halLayout, &halSize)
 	}
 
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
@@ -467,7 +467,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 // a valid upload of size zero, which Rust drops before any side effect. A
 // texture without a core texture (test stubs) is not validated.
 func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) (skip bool, err error) {
-	if view, ok := dst.Texture.coreTexture.CopyView(dst.MipLevel, gputypes.Origin3D(dst.Origin), dst.Aspect); ok {
+	if view, ok := dst.Texture.impl.CoreTexture().CopyView(dst.MipLevel, gputypes.Origin3D(dst.Origin), dst.Aspect); ok {
 		texelLayout := core.TexelCopyBufferLayout{
 			Offset:       layout.Offset,
 			BytesPerRow:  layout.BytesPerRow,
@@ -476,7 +476,7 @@ func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataL
 		if err := core.ValidateTextureWrite(view, texelLayout, uint64(len(data)), gputypes.Extent3D(*size)); err != nil {
 			return false, err
 		}
-		if err := dst.Texture.coreTexture.Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
+		if err := dst.Texture.impl.CoreTexture().Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
 			return false, err
 		}
 	}
@@ -581,12 +581,12 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 	// command buffer holds the group's reference until its submission
 	// completes (P1-CORE-020).
 	for bg := range cb.usedBindGroups {
-		for _, buf := range bg.boundBuffers {
+		for _, buf := range bg.BoundBuffers() {
 			if err := validateSubmitBufferCore(buf, index); err != nil {
 				return err
 			}
 		}
-		for _, tex := range bg.boundTextures {
+		for _, tex := range bg.BoundTextures() {
 			if err := validateSubmitTexture(tex, index); err != nil {
 				return err
 			}
@@ -598,7 +598,7 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 	// command buffer holds the set's reference until its submission completes
 	// (P1-CORE-021). Only a query set whose HAL query set is gone fails.
 	for qs := range cb.usedQuerySets {
-		if qs.core == nil || qs.core.IsDestroyed() {
+		if qs.Core() == nil || qs.Core().IsDestroyed() {
 			return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed query set: %w",
 				index, ErrSubmitQuerySetDestroyed)
 		}
@@ -643,8 +643,8 @@ func validateSubmitBufferCore(buf *resource.Buffer, index int) error {
 // reference keeps it alive (P1-CORE-020). Callers never pass nil:
 // trackTexture skips nil and collectBindGroupResources only records non-nil
 // entries.
-func validateSubmitTexture(tex *Texture, index int) error {
-	if tex.recordedHAL() == nil {
+func validateSubmitTexture(tex *resource.Texture, index int) error {
+	if tex.RecordedHAL() == nil {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed texture: %w",
 			index, ErrSubmitTextureDestroyed)
 	}
@@ -758,7 +758,7 @@ func buildTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.Tracke
 			if bg == nil {
 				continue
 			}
-			collectBoundTextureIndices(resolver, bg.boundTextures)
+			collectBoundTextureIndices(resolver, bg.BoundTextures())
 		}
 	}
 	return resolver
@@ -766,7 +766,7 @@ func buildTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.Tracke
 
 // collectTextureIndices adds TrackerIndex -> hal.Texture entries from
 // the used textures map.
-func collectTextureIndices(resolver map[track.TrackerIndex]hal.Texture, used map[*Texture]struct{}) {
+func collectTextureIndices(resolver map[track.TrackerIndex]hal.Texture, used map[*resource.Texture]struct{}) {
 	for tex := range used {
 		addTrackedTexture(resolver, tex)
 	}
@@ -774,7 +774,7 @@ func collectTextureIndices(resolver map[track.TrackerIndex]hal.Texture, used map
 
 // collectBoundTextureIndices adds TrackerIndex -> hal.Texture entries from
 // bind group bound textures.
-func collectBoundTextureIndices(resolver map[track.TrackerIndex]hal.Texture, bound []*Texture) {
+func collectBoundTextureIndices(resolver map[track.TrackerIndex]hal.Texture, bound []*resource.Texture) {
 	for _, tex := range bound {
 		addTrackedTexture(resolver, tex)
 	}
@@ -782,11 +782,11 @@ func collectBoundTextureIndices(resolver map[track.TrackerIndex]hal.Texture, bou
 
 // addTrackedTexture adds a single texture to the resolver if it has a
 // valid coreTexture and TrackerIndex.
-func addTrackedTexture(resolver map[track.TrackerIndex]hal.Texture, tex *Texture) {
-	if tex == nil || tex.coreTexture == nil {
+func addTrackedTexture(resolver map[track.TrackerIndex]hal.Texture, tex *resource.Texture) {
+	if tex == nil || tex.CoreTexture() == nil {
 		return
 	}
-	td := tex.coreTexture.TrackingData()
+	td := tex.CoreTexture().TrackingData()
 	if td == nil || !td.Index().IsValid() {
 		return
 	}
@@ -795,7 +795,7 @@ func addTrackedTexture(resolver map[track.TrackerIndex]hal.Texture, tex *Texture
 	}
 	// recordedHAL, not resolveHAL: a texture released after recording still
 	// needs its submit-time barriers (P1-CORE-020).
-	if halTex := tex.recordedHAL(); halTex != nil {
+	if halTex := tex.RecordedHAL(); halTex != nil {
 		resolver[td.Index()] = halTex
 	}
 }
@@ -852,7 +852,7 @@ func buildBufferTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.
 			if bg == nil {
 				continue
 			}
-			for _, buf := range bg.boundBuffers {
+			for _, buf := range bg.BoundBuffers() {
 				addTrackedBufferCore(resolver, buf)
 			}
 		}

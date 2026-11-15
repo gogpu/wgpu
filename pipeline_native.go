@@ -7,6 +7,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // LateSizedBufferGroup holds the shader-required minimum buffer sizes for
@@ -28,7 +29,7 @@ type LateSizedBufferGroup struct {
 // Equivalent to Rust wgpu-core's Device::make_late_sized_buffer_groups (resource.rs:2413-2448).
 func makeLateSizedBufferGroups(
 	shaderBindingSizes map[ir.ResourceBinding]uint64,
-	layouts []*BindGroupLayout,
+	layouts []*resource.BindGroupLayout,
 ) [MaxBindGroups]LateSizedBufferGroup {
 	var groups [MaxBindGroups]LateSizedBufferGroup
 
@@ -37,7 +38,7 @@ func makeLateSizedBufferGroups(
 			continue
 		}
 		var sizes []uint64
-		for _, entry := range bgl.entries {
+		for _, entry := range bgl.Entries() {
 			if entry.Buffer == nil || entry.Buffer.MinBindingSize != 0 {
 				continue
 			}
@@ -67,7 +68,7 @@ type RenderPipeline struct {
 	bindGroupCount uint32
 	// bindGroupLayouts stores the layouts from the pipeline layout.
 	// Used by the binder for draw-time compatibility validation.
-	bindGroupLayouts []*BindGroupLayout
+	bindGroupLayouts []*resource.BindGroupLayout
 	// requiredVertexBuffers is the number of vertex buffer layouts declared
 	// in the pipeline's vertex state. Draw calls validate that at least this
 	// many vertex buffers have been set via SetVertexBuffer.
@@ -172,7 +173,7 @@ type ComputePipeline struct {
 	bindGroupCount uint32
 	// bindGroupLayouts stores the layouts from the pipeline layout.
 	// Used by the binder for draw-time compatibility validation.
-	bindGroupLayouts []*BindGroupLayout
+	bindGroupLayouts []*resource.BindGroupLayout
 	// lateSizedBufferGroups holds shader-required minimum sizes for buffer bindings
 	// whose layout has MinBindingSize == 0. Validated at dispatch time.
 	// Matches Rust wgpu-core ComputePipeline.late_sized_buffer_groups.

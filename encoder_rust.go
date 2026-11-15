@@ -79,7 +79,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 			},
 		}
 		rDst := &rwgpu.TexelCopyTextureInfo{
-			Texture:  dst.r.Handle(),
+			Texture:  dst.impl.Rust().Handle(),
 			MipLevel: r.TextureBase.MipLevel,
 			Origin:   rwgpu.Origin3D{X: r.TextureBase.Origin.X, Y: r.TextureBase.Origin.Y, Z: r.TextureBase.Origin.Z},
 		}
@@ -110,7 +110,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 		rRegions[i] = rwgpu.BufferTextureCopy{
 			BufferLayout: rwgpu.ImageDataLayout(r.BufferLayout),
 			TextureBase: rwgpu.ImageCopyTexture{
-				Texture:  r.TextureBase.Texture.r,
+				Texture:  r.TextureBase.Texture.impl.Rust(),
 				MipLevel: r.TextureBase.MipLevel,
 				Origin:   rwgpu.Origin3D(r.TextureBase.Origin),
 				Aspect:   rwgpu.TextureAspect(r.TextureBase.Aspect),
@@ -118,7 +118,7 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 			Size: rwgpu.Extent3D{Width: r.Size.Width, Height: r.Size.Height, DepthOrArrayLayers: r.Size.DepthOrArrayLayers},
 		}
 	}
-	e.r.CopyTextureToBuffer(src.r, dst.impl.R(), rRegions)
+	e.r.CopyTextureToBuffer(src.impl.Rust(), dst.impl.R(), rRegions)
 }
 
 // CopyTextureToTexture copies data between textures.
@@ -130,13 +130,13 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 	for i, r := range regions {
 		rRegions[i] = rwgpu.TextureCopy{
 			Source: rwgpu.ImageCopyTexture{
-				Texture:  r.Source.Texture.r,
+				Texture:  r.Source.Texture.impl.Rust(),
 				MipLevel: r.Source.MipLevel,
 				Origin:   rwgpu.Origin3D(r.Source.Origin),
 				Aspect:   rwgpu.TextureAspect(r.Source.Aspect),
 			},
 			Destination: rwgpu.ImageCopyTexture{
-				Texture:  r.Destination.Texture.r,
+				Texture:  r.Destination.Texture.impl.Rust(),
 				MipLevel: r.Destination.MipLevel,
 				Origin:   rwgpu.Origin3D(r.Destination.Origin),
 				Aspect:   rwgpu.TextureAspect(r.Destination.Aspect),
@@ -144,7 +144,7 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 			Size: rwgpu.Extent3D{Width: r.Size.Width, Height: r.Size.Height, DepthOrArrayLayers: r.Size.DepthOrArrayLayers},
 		}
 	}
-	e.r.CopyTextureToTexture(src.r, dst.r, rRegions)
+	e.r.CopyTextureToTexture(src.impl.Rust(), dst.impl.Rust(), rRegions)
 }
 
 // TransitionTextures transitions texture states for synchronization.
@@ -228,10 +228,10 @@ func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) (*rwgpu.RenderP
 			},
 		}
 		if ca.View != nil {
-			att.View = ca.View.r
+			att.View = ca.View.impl.Rust()
 		}
 		if ca.ResolveTarget != nil {
-			att.ResolveTarget = ca.ResolveTarget.r
+			att.ResolveTarget = ca.ResolveTarget.impl.Rust()
 		}
 		rDesc.ColorAttachments[i] = att
 	}
@@ -249,7 +249,7 @@ func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) (*rwgpu.RenderP
 			StencilReadOnly:   dsa.StencilReadOnly,
 		}
 		if dsa.View != nil {
-			rDSA.View = dsa.View.r
+			rDSA.View = dsa.View.impl.Rust()
 		}
 		rDesc.DepthStencilAttachment = rDSA
 	}

@@ -60,12 +60,12 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if q.released {
 		return ErrReleased
 	}
-	if dst == nil || dst.Texture == nil || dst.Texture.browser == nil {
+	if dst == nil || dst.Texture == nil || dst.Texture.impl.Browser() == nil {
 		return ErrReleased
 	}
 
 	jsDst := browser.BuildImageCopyTexture(
-		dst.Texture.browser.Ref(),
+		dst.Texture.impl.Browser().Ref(),
 		dst.MipLevel,
 		dst.Origin.X, dst.Origin.Y, dst.Origin.Z,
 	)

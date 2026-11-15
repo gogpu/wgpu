@@ -71,15 +71,19 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 // is bound to the backend at the next dispatch whose pipeline layout uses it.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
 	limits := &p.encoder.device.core.Limits
-	if err := validateSetBindGroup("ComputePass", index, group, offsets, limits); err != nil {
+	if group == nil || group.impl == nil {
+		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetBindGroup: bind group is nil"))
+		return
+	}
+	if err := validateSetBindGroup("ComputePass", index, group.impl, offsets, limits); err != nil {
 		p.encoder.setError(err)
 		return
 	}
-	p.binder.setGroup(index, group, offsets)
-	p.trackRef(group.ref)
+	p.binder.setGroup(index, group.impl, offsets)
+	p.trackRef(group.impl.Ref())
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
-	for _, buf := range group.boundBuffers {
+	for _, buf := range group.impl.BoundBuffers() {
 		if cb := buf.CoreBuffer(); cb != nil && cb.Ref != nil {
 			p.trackRef(cb.Ref)
 		}
@@ -87,7 +91,7 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	// Track bind group itself for submit-time validation (VAL-B5 and, via
 	// group.boundBuffers/boundTextures, VAL-A6). The group's own slices are
 	// walked at Submit, so there is nothing to fan out here.
-	p.encoder.trackBindGroup(group)
+	p.encoder.trackBindGroup(group.impl)
 	if p.test != nil {
 		p.test.BindGroupBound(p.testPass, index, offsets)
 	}
@@ -169,7 +173,7 @@ func (p *ComputePassEncoder) flushDispatch(method string, indirect *Buffer, indi
 	active := groups[:0]
 	for i := uint32(0); i < MaxBindGroups; i++ {
 		if bg := p.binder.activeGroup(i); bg != nil {
-			active = append(active, bg.usages)
+			active = append(active, bg.Usages())
 		}
 	}
 	var indirectCore *core.Buffer

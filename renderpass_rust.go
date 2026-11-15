@@ -27,10 +27,10 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 
 // SetBindGroup sets a bind group for the given index.
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if group == nil || group.r == nil {
+	if group == nil || group.impl.Rust() == nil {
 		return
 	}
-	p.r.SetBindGroup(index, group.r, offsets)
+	p.r.SetBindGroup(index, group.impl.Rust(), offsets)
 }
 
 // SetVertexBuffer sets a vertex buffer for the given slot.

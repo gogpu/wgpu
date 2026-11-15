@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Compile-time assertion: Surface must implement all public API methods (ADR-047).
@@ -219,11 +220,11 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 		return nil, false, fmt.Errorf("wgpu: %w", err)
 	}
 
+	impl := resource.NewTexture(bt, s.configFormat)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
 	return &SurfaceTexture{
-		texture: &Texture{
-			browser: bt,
-			format:  s.configFormat,
-		},
+		texture: tex,
 	}, false, nil // Browser surfaces are never suboptimal
 }
 
@@ -319,7 +320,7 @@ func (st *SurfaceTexture) AsTexture() *Texture { return st.texture }
 //
 // Pass nil for desc to create a default view (all mips, all layers, same format).
 func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) {
-	if st.released || st.texture == nil || st.texture.browser == nil {
+	if st.released || st.texture == nil || st.texture.impl.Browser() == nil {
 		return nil, ErrReleased
 	}
 
@@ -335,11 +336,8 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 		jsDesc = js.Undefined()
 	}
 
-	bv := st.texture.browser.CreateView(jsDesc)
-	return &TextureView{
-		browser: bv,
-		texture: st.AsTexture(),
-	}, nil
+	bv := st.texture.impl.Browser().CreateView(jsDesc)
+	return &TextureView{impl: resource.NewTextureView(bv, st.Texture().impl)}, nil
 }
 
 // Texture returns the underlying Texture. This is useful for operations that

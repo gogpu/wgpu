@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // labeledCB is a HAL command buffer that remembers the label its encoder was
@@ -53,8 +54,8 @@ func finishWithTextureUse(t *testing.T, device *Device, label string, tex *Textu
 	if err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
-	cmd.core.TextureScope().SetSingle(tex.coreTexture.TrackingData().Index(), use)
-	cmd.usedTextures = map[*Texture]struct{}{tex: {}}
+	cmd.core.TextureScope().SetSingle(tex.impl.CoreTexture().TrackingData().Index(), use)
+	cmd.usedTextures = map[*resource.Texture]struct{}{tex.impl: {}}
 	return cmd
 }
 
@@ -84,7 +85,7 @@ func TestAssembleSubmission_TransitBeforeEachCommandBuffer(t *testing.T) {
 		t.Fatalf("CreateTexture: %v", err)
 	}
 	defer tex.Release()
-	idx := tex.coreTexture.TrackingData().Index()
+	idx := tex.impl.CoreTexture().TrackingData().Index()
 	device.core.Tracker().InsertTexture(idx, track.TextureUsesResource)
 
 	cb1 := finishWithTextureUse(t, device, "cb1", tex, track.TextureUsesColorTarget)

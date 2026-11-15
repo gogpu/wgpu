@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // TestRenderPipelineToHALSpecDefaults checks that the native conversion hands
@@ -20,7 +21,7 @@ func TestRenderPipelineToHALSpecDefaults(t *testing.T) {
 			DepthCompare:      gputypes.CompareFunctionLess,
 		},
 		Fragment: &FragmentState{
-			Module: &ShaderModule{},
+			Module: &ShaderModule{impl: &resource.ShaderModule{}},
 			Targets: []gputypes.ColorTargetState{{
 				Format:    gputypes.TextureFormatRGBA8Unorm,
 				Blend:     &gputypes.BlendState{},

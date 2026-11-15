@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package resource
 
 import (
 	"bytes"
@@ -111,16 +111,51 @@ func spirvString(words []uint32) string {
 	return string(b)
 }
 
+// NewShaderModule builds a shader module over a HAL object and the shared
+// device view. info is the ModuleInfo of irModule's validation; it is kept
+// only when irModule is non-nil (a SPIR-V module has neither).
+func NewShaderModule(hal hal.ShaderModule, device core.DeviceView, irModule *ir.Module, info valid.ModuleInfo) *ShaderModule {
+	var infoPtr *valid.ModuleInfo
+	if irModule != nil {
+		infoPtr = &info
+	}
+	return &ShaderModule{hal: hal, device: device, irModule: irModule, irInfo: infoPtr}
+}
+
+// HAL returns the HAL shader module, or nil.
+func (m *ShaderModule) HAL() hal.ShaderModule {
+	if m == nil {
+		return nil
+	}
+	return m.hal
+}
+
+// Device returns the shared device view the module was created on.
+func (m *ShaderModule) Device() core.DeviceView {
+	if m == nil {
+		return nil
+	}
+	return m.device
+}
+
+// IRModule returns the parsed naga IR, or nil for a SPIR-V module.
+func (m *ShaderModule) IRModule() *ir.Module {
+	if m == nil {
+		return nil
+	}
+	return m.irModule
+}
+
 // armSPIRVWorkgroups records the LocalSize of each compute entry point of a
 // SPIR-V module given to CreateShaderModule, so pipeline creation can check it
 // against the limits. WGSL modules carry the same information in their IR.
-func (m *ShaderModule) armSPIRVWorkgroups(words []uint32) {
+func (m *ShaderModule) ArmSPIRVWorkgroups(words []uint32) {
 	m.spirvWorkgroups = spirvComputeWorkgroups(words)
 }
 
-// spirvWorkgroupSize returns the LocalSize of the compute entry point name of
+// SPIRVWorkgroupSize returns the LocalSize of the compute entry point name of
 // a SPIR-V module; an empty name selects the only one.
-func (m *ShaderModule) spirvWorkgroupSize(name string) ([3]uint32, bool) {
+func (m *ShaderModule) SPIRVWorkgroupSize(name string) ([3]uint32, bool) {
 	if m.spirvWorkgroups == nil {
 		return [3]uint32{}, false
 	}
@@ -156,13 +191,13 @@ func (m *ShaderModule) entryPointIndex(stage ir.ShaderStage, name string) int {
 	return found
 }
 
-// specializedEntryPoint returns the IR, its ModuleInfo and the index of the
+// SpecializedEntryPoint returns the IR, its ModuleInfo and the index of the
 // entry point a pipeline stage names, with the pipeline constants applied:
 // a module with overrides, or a pipeline giving constants, is specialized
 // for the stage (naga.ProcessOverrides), so override-sized workgroup sizes
 // and arrays have their values. The index is -1 without IR or without that
 // entry point. An error is a constant that does not apply to the module.
-func (m *ShaderModule) specializedEntryPoint(stage ir.ShaderStage, name string, constants map[string]float64) (*ir.Module, valid.ModuleInfo, int, error) {
+func (m *ShaderModule) SpecializedEntryPoint(stage ir.ShaderStage, name string, constants map[string]float64) (*ir.Module, valid.ModuleInfo, int, error) {
 	i := m.entryPointIndex(stage, name)
 	if i < 0 || i >= len(m.irInfo.EntryPoints) {
 		return nil, valid.ModuleInfo{}, -1, nil
@@ -177,14 +212,14 @@ func (m *ShaderModule) specializedEntryPoint(stage ir.ShaderStage, name string, 
 	return specialized.IR, specialized.Info, 0, nil // Specialize keeps only this entry point
 }
 
-// bindingSizes returns the minimum buffer binding sizes of the globals the
+// BindingSizes returns the minimum buffer binding sizes of the globals the
 // entry point uses, callees included, or nil without IR or without that
 // entry point. Rust wgpu-core Interface::check_stage reads the resources of
 // one entry point, those its ModuleInfo marks as used
 // (wgpu-core/src/validation.rs): two globals of a module may share a binding
 // when no entry point uses both, and only the one this entry point uses
 // sets the size.
-func (m *ShaderModule) bindingSizes(stage ir.ShaderStage, entryPoint string) map[ir.ResourceBinding]uint64 {
+func (m *ShaderModule) BindingSizes(stage ir.ShaderStage, entryPoint string) map[ir.ResourceBinding]uint64 {
 	i := m.entryPointIndex(stage, entryPoint)
 	if i < 0 || i >= len(m.irInfo.EntryPoints) {
 		return nil

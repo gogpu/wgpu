@@ -78,18 +78,24 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 		return nil, fmt.Errorf("wgpu: failed to create texture: %w", err)
 	}
 
-	return &Texture{r: rt, format: desc.Format}, nil
+	impl := resource.NewTexture(rt, desc.Format)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex, nil
 }
 
 // newDetachedTexture returns a texture that carries the descriptor's format
 // and no backend object. It backs the public wgputest.NewDetachedTexture; see
 // newDetachedTextureFactory. desc may be nil.
 func newDetachedTexture(desc *TextureDescriptor) *Texture {
-	t := &Texture{}
+	var format gputypes.TextureFormat
 	if desc != nil {
-		t.format = desc.Format
+		format = desc.Format
 	}
-	return t
+	impl := resource.NewDetachedTexture(format)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex
 }
 
 // convertTextureDesc converts a texture descriptor for wgpu-native, with the
@@ -115,7 +121,7 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 	if d.released {
 		return nil, ErrReleased
 	}
-	if texture == nil || texture.r == nil {
+	if texture == nil || texture.impl.Rust() == nil {
 		return nil, fmt.Errorf("wgpu: texture is nil")
 	}
 
@@ -133,12 +139,12 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		}
 	}
 
-	rv, err := texture.r.CreateView(rDesc)
+	rv, err := texture.impl.Rust().CreateView(rDesc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
 	}
 
-	return &TextureView{r: rv, texture: texture}, nil
+	return &TextureView{impl: resource.NewTextureView(rv, texture.impl)}, nil
 }
 
 // CreateSampler creates a texture sampler.
@@ -152,7 +158,7 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		return nil, fmt.Errorf("wgpu: failed to create sampler: %w", err)
 	}
 
-	return &Sampler{r: rs}, nil
+	return &Sampler{impl: resource.NewSampler(rs)}, nil
 }
 
 // samplerDescriptorToRust converts a SamplerDescriptor for wgpu-native. A nil
@@ -203,7 +209,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
 	}
 
-	return &ShaderModule{r: rm}, nil
+	return &ShaderModule{impl: resource.NewShaderModule(rm)}, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout.
@@ -228,7 +234,7 @@ func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGr
 		return nil, fmt.Errorf("wgpu: failed to create bind group layout: %w", err)
 	}
 
-	return &BindGroupLayout{r: rl}, nil
+	return &BindGroupLayout{impl: resource.NewBindGroupLayout(rl)}, nil
 }
 
 // CreatePipelineLayout creates a pipeline layout.
@@ -243,7 +249,7 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 	rLayouts := make([]*rwgpu.BindGroupLayout, len(desc.BindGroupLayouts))
 	for i, l := range desc.BindGroupLayouts {
 		if l != nil {
-			rLayouts[i] = l.r
+			rLayouts[i] = l.impl.Rust()
 		}
 	}
 
@@ -255,7 +261,7 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		return nil, fmt.Errorf("wgpu: failed to create pipeline layout: %w", err)
 	}
 
-	return &PipelineLayout{r: rl}, nil
+	return &PipelineLayout{impl: resource.NewPipelineLayout(rl)}, nil
 }
 
 // CreateBindGroup creates a bind group.
@@ -269,7 +275,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 
 	var rLayout *rwgpu.BindGroupLayout
 	if desc.Layout != nil {
-		rLayout = desc.Layout.r
+		rLayout = desc.Layout.impl.Rust()
 	}
 
 	rEntries := make([]rwgpu.BindGroupEntry, len(desc.Entries))
@@ -286,7 +292,7 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
 	}
 
-	return &BindGroup{r: rg}, nil
+	return &BindGroup{impl: resource.NewBindGroup(rg)}, nil
 }
 
 // CreateRenderPipeline creates a render pipeline.
@@ -357,11 +363,11 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 
 	var rLayout *rwgpu.PipelineLayout
 	if desc.Layout != nil {
-		rLayout = desc.Layout.r
+		rLayout = desc.Layout.impl.Rust()
 	}
 	var rModule *rwgpu.ShaderModule
 	if desc.Module != nil {
-		rModule = desc.Module.r
+		rModule = desc.Module.impl.Rust()
 	}
 
 	rp, err := d.r.CreateComputePipeline(&rwgpu.ComputePipelineDescriptor{
@@ -405,7 +411,7 @@ func (d *Device) CreateFence() (*Fence, error) {
 	if d.released {
 		return nil, ErrReleased
 	}
-	return &Fence{}, nil
+	return &Fence{impl: &resource.Fence{}}, nil
 }
 
 // DestroyFence destroys a fence.
@@ -424,7 +430,7 @@ func (d *Device) ResetFence(f *Fence) error {
 	if d.released {
 		return ErrReleased
 	}
-	if f == nil || f.released {
+	if f == nil || f.impl.IsReleased() {
 		return ErrReleased
 	}
 	return nil
@@ -436,7 +442,7 @@ func (d *Device) GetFenceStatus(f *Fence) (bool, error) {
 	if d.released {
 		return false, ErrReleased
 	}
-	if f == nil || f.released {
+	if f == nil || f.impl.IsReleased() {
 		return false, ErrReleased
 	}
 	return true, nil
@@ -448,7 +454,7 @@ func (d *Device) WaitForFence(f *Fence, _ uint64, _ time.Duration) (bool, error)
 	if d.released {
 		return false, ErrReleased
 	}
-	if f == nil || f.released {
+	if f == nil || f.impl.IsReleased() {
 		return false, ErrReleased
 	}
 	// Poll device to ensure GPU work has progressed.
@@ -588,10 +594,10 @@ func convertBindGroupEntry(e BindGroupEntry) rwgpu.BindGroupEntry {
 		re.Buffer = e.Buffer.impl.R()
 	}
 	if e.Sampler != nil {
-		re.Sampler = e.Sampler.r
+		re.Sampler = e.Sampler.impl.Rust()
 	}
 	if e.TextureView != nil {
-		re.TextureView = e.TextureView.r
+		re.TextureView = e.TextureView.impl.Rust()
 	}
 	return re
 }
@@ -603,7 +609,7 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 	}
 
 	if desc.Layout != nil {
-		rDesc.Layout = desc.Layout.r
+		rDesc.Layout = desc.Layout.impl.Rust()
 	}
 
 	// Vertex state.
@@ -611,7 +617,7 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 		EntryPoint: desc.Vertex.EntryPoint,
 	}
 	if desc.Vertex.Module != nil {
-		rDesc.Vertex.Module = desc.Vertex.Module.r
+		rDesc.Vertex.Module = desc.Vertex.Module.impl.Rust()
 	}
 	rDesc.Vertex.Buffers = convertVertexBufferLayouts(desc.Vertex.Buffers)
 
@@ -711,7 +717,7 @@ func convertFragmentState(fs *FragmentState) *rwgpu.FragmentState {
 		EntryPoint: fs.EntryPoint,
 	}
 	if fs.Module != nil {
-		result.Module = fs.Module.r
+		result.Module = fs.Module.impl.Rust()
 	}
 
 	result.Targets = make([]rwgpu.ColorTargetState, len(fs.Targets))

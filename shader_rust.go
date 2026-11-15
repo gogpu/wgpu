@@ -1,23 +1,19 @@
 //go:build rust
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
-import rwgpu "github.com/go-webgpu/webgpu/wgpu"
+import "github.com/gogpu/wgpu/internal/resource"
 
 // ShaderModule represents a compiled shader module.
-// On Rust backend, this wraps go-webgpu/webgpu ShaderModule.
+//
+// The implementation lives in internal/resource (ADR-070); Release is one
+// delegation.
 type ShaderModule struct {
-	r        *rwgpu.ShaderModule
-	released bool
+	impl *resource.ShaderModule
 }
 
 // Release destroys the shader module.
-func (m *ShaderModule) Release() {
-	if m.released {
-		return
-	}
-	m.released = true
-	if m.r != nil {
-		m.r.Release()
-	}
-}
+func (m *ShaderModule) Release() { m.impl.Release() }

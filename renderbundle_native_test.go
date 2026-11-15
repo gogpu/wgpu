@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 var rgba8Formats = []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}
@@ -71,7 +72,7 @@ func (r *bundleTestRig) beginPass(t *testing.T, color bool) (*CommandEncoder, *R
 }
 
 // pipeline returns a pipeline rendering to formats with the given layouts.
-func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*BindGroupLayout) *RenderPipeline {
+func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*resource.BindGroupLayout) *RenderPipeline {
 	return &RenderPipeline{
 		hal:              &testHALResource{},
 		device:           r.device,
@@ -81,8 +82,13 @@ func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*B
 	}
 }
 
-func (r *bundleTestRig) group(layout *BindGroupLayout) *BindGroup {
-	return &BindGroup{hal: &testHALResource{}, device: r.device.seamView(), layout: layout, ref: core.NewResourceRef("BindGroup:test", nil)}
+func (r *bundleTestRig) group(layout *resource.BindGroupLayout) *BindGroup {
+	return &BindGroup{impl: resource.NewBindGroup(&resource.BindGroupInit{
+		HAL:    &testHALResource{},
+		Device: r.device.seamView(),
+		Layout: layout,
+		Ref:    core.NewResourceRef("BindGroup:test", nil),
+	})}
 }
 
 func (r *bundleTestRig) buffer(t *testing.T, usage gputypes.BufferUsage) *Buffer {
@@ -330,12 +336,12 @@ func TestRenderBundleKeepsResources(t *testing.T) {
 
 	encoder, pass := rig.beginPass(t, true)
 	pass.ExecuteBundles(bundle)
-	if got := group.ref.RefCount(); got != 3 {
+	if got := group.impl.Ref().RefCount(); got != 3 {
 		t.Fatalf("bind group refs after ExecuteBundles = %d, want 3", got)
 	}
 	bundle.Release()
 	bundle.Release()
-	if got := group.ref.RefCount(); got != 2 {
+	if got := group.impl.Ref().RefCount(); got != 2 {
 		t.Fatalf("bind group refs after Release = %d, want 2 (the encoder keeps its own)", got)
 	}
 	pass.ExecuteBundles(bundle)
@@ -396,8 +402,13 @@ func TestRenderBundleUsageScope(t *testing.T) {
 	if td := buffer.impl.CoreBuffer().TrackingData(); td == nil || !td.Index().IsValid() {
 		t.Skip("noop buffers have no tracker index")
 	}
-	writer := rig.group(layout)
-	writer.usages = &core.BindGroupUsages{Buffers: []core.BindGroupBufferUse{{Buffer: buffer.impl.CoreBuffer(), Usage: track.BufferUsesStorageWrite}}}
+	writer := &BindGroup{impl: resource.NewBindGroup(&resource.BindGroupInit{
+		HAL:    &testHALResource{},
+		Device: rig.device.seamView(),
+		Layout: layout,
+		Ref:    core.NewResourceRef("BindGroup:test", nil),
+		Usages: &core.BindGroupUsages{Buffers: []core.BindGroupBufferUse{{Buffer: buffer.impl.CoreBuffer(), Usage: track.BufferUsesStorageWrite}}},
+	})}
 
 	t.Run("inside the bundle", func(t *testing.T) {
 		enc := rig.encoder(t, nil)
