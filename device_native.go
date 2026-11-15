@@ -772,12 +772,12 @@ func cloneBindGroupResourceRefs(entries []BindGroupEntry) []*core.ResourceRef {
 	return refs
 }
 
-func collectBindGroupResources(entries []BindGroupEntry) ([]*Buffer, []*Texture) {
-	var buffers []*Buffer
+func collectBindGroupResources(entries []BindGroupEntry) ([]*resource.Buffer, []*Texture) {
+	var buffers []*resource.Buffer
 	var textures []*Texture
 	for i := range entries {
-		if entries[i].Buffer != nil {
-			buffers = append(buffers, entries[i].Buffer)
+		if entries[i].Buffer != nil && entries[i].Buffer.impl != nil {
+			buffers = append(buffers, entries[i].Buffer.impl)
 		}
 		if entries[i].TextureView != nil && entries[i].TextureView.texture != nil {
 			textures = append(textures, entries[i].TextureView.texture)

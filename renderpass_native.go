@@ -121,7 +121,7 @@ func (p *RenderPassEncoder) trackBindGroup(group *BindGroup) {
 	// Without this, Buffer.Release() before Submit can HAL-destroy buffers
 	// that are still referenced by a pending command buffer.
 	for _, buf := range group.boundBuffers {
-		if cb := buf.impl.CoreBuffer(); cb != nil && cb.Ref != nil {
+		if cb := buf.CoreBuffer(); cb != nil && cb.Ref != nil {
 			p.trackRef(cb.Ref)
 		}
 	}

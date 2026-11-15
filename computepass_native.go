@@ -80,7 +80,7 @@ func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offset
 	// Clone individual buffer ResourceRefs to keep them alive until GPU completes.
 	// Matches Rust wgpu merge_bind_group → ResourceMetadata.insert(Arc<Buffer>).
 	for _, buf := range group.boundBuffers {
-		if cb := buf.impl.CoreBuffer(); cb != nil && cb.Ref != nil {
+		if cb := buf.CoreBuffer(); cb != nil && cb.Ref != nil {
 			p.trackRef(cb.Ref)
 		}
 	}

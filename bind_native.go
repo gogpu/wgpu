@@ -9,6 +9,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
@@ -197,7 +198,7 @@ type BindGroup struct {
 	// Used at Submit time to verify that referenced buffers are still alive
 	// and not mapped. Matches Rust wgpu-core's pattern where
 	// validate_command_buffer iterates cmd_buf_data.trackers.buffers.
-	boundBuffers []*Buffer
+	boundBuffers []*resource.Buffer
 	// boundTextures holds references to textures bound in this bind group (VAL-A6).
 	// Used at Submit time to verify that referenced textures are still alive.
 	boundTextures []*Texture

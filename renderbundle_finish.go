@@ -269,7 +269,7 @@ func (s *bundleState) keepBindGroup(group *BindGroup) {
 	}
 	s.keep(group.ref)
 	for _, buf := range group.boundBuffers {
-		if cb := buf.impl.CoreBuffer(); cb != nil {
+		if cb := buf.CoreBuffer(); cb != nil {
 			s.keep(cb.Ref)
 		}
 	}

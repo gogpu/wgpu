@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Queue handles command submission and data transfers.
@@ -581,7 +582,7 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 	// completes (P1-CORE-020).
 	for bg := range cb.usedBindGroups {
 		for _, buf := range bg.boundBuffers {
-			if err := validateSubmitBuffer(buf, index); err != nil {
+			if err := validateSubmitBufferCore(buf, index); err != nil {
 				return err
 			}
 		}
@@ -614,15 +615,22 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 // destroyed by Release itself. Callers never pass nil: trackBuffer skips nil
 // and collectBindGroupResources only records non-nil entries.
 func validateSubmitBuffer(buf *Buffer, index int) error {
-	coreBuf := buf.impl.CoreBuffer()
-	if buf.impl.IsReleased() &&
+	if buf == nil || buf.impl == nil {
+		return nil
+	}
+	return validateSubmitBufferCore(buf.impl, index)
+}
+
+func validateSubmitBufferCore(buf *resource.Buffer, index int) error {
+	coreBuf := buf.CoreBuffer()
+	if buf.IsReleased() &&
 		(coreBuf == nil || coreBuf.Ref == nil || coreBuf.IsDestroyed()) {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed buffer %q: %w",
 			index, buf.Label(), ErrSubmitBufferDestroyed)
 	}
 	// Check mapped state.
 	// Rust: BufferMapState::Idle is the only valid state for submit.
-	if buf.MapState() != MapStateUnmapped {
+	if buf.MapState() != resource.MapStateUnmapped {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references mapped buffer %q: %w",
 			index, buf.Label(), ErrSubmitBufferMapped)
 	}
@@ -845,7 +853,7 @@ func buildBufferTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.
 				continue
 			}
 			for _, buf := range bg.boundBuffers {
-				addTrackedBuffer(resolver, buf)
+				addTrackedBufferCore(resolver, buf)
 			}
 		}
 	}
@@ -855,10 +863,17 @@ func buildBufferTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.
 // addTrackedBuffer adds a single buffer to the resolver if it has a
 // valid core buffer and TrackerIndex.
 func addTrackedBuffer(resolver map[track.TrackerIndex]hal.Buffer, buf *Buffer) {
+	if buf == nil || buf.impl == nil {
+		return
+	}
+	addTrackedBufferCore(resolver, buf.impl)
+}
+
+func addTrackedBufferCore(resolver map[track.TrackerIndex]hal.Buffer, buf *resource.Buffer) {
 	if buf == nil {
 		return
 	}
-	coreBuf := buf.impl.CoreBuffer()
+	coreBuf := buf.CoreBuffer()
 	if coreBuf == nil {
 		return
 	}
@@ -869,7 +884,7 @@ func addTrackedBuffer(resolver map[track.TrackerIndex]hal.Buffer, buf *Buffer) {
 	if _, exists := resolver[td.Index()]; exists {
 		return
 	}
-	if halBuf := buf.impl.HALBuffer(); halBuf != nil {
+	if halBuf := buf.HALBuffer(); halBuf != nil {
 		resolver[td.Index()] = halBuf
 	}
 }
