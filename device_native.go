@@ -6,6 +6,8 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"log/slog"
+	"runtime"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -194,13 +196,108 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 // an extraction package; this device method is the call site the device's own
 // reference closures keep (ADR-070 §11, S2).
 func (d *Device) destroyTextureDeferred(halTex hal.Texture, td *track.TrackingData) {
-	textureDestroyDeferred(d.seamView(), halTex, td)
+	core.DestroyTextureDeferred(d.seamView(), halTex, td)
 }
 
 // destroyTextureViewDeferred destroys a HAL texture view once the GPU has
 // completed the last submission so far.
 func (d *Device) destroyTextureViewDeferred(halView hal.TextureView) {
-	textureViewDestroyDeferred(d.seamView(), halView)
+	core.DestroyTextureViewDeferred(d.seamView(), halView)
+}
+
+// The texture helpers below live with the device, not with the texture types:
+// they are read here (CreateTexture, CreateTextureView) and never from the
+// moving files, and an unexported package-scope name cannot cross the
+// source/destination boundary of the extraction (ADR-070 §11, S2).
+
+// copyViewFormats copies TextureDescriptor.ViewFormats, so a later change to
+// the caller's slice does not change what views are allowed.
+func copyViewFormats(formats []gputypes.TextureFormat) *[]gputypes.TextureFormat {
+	if len(formats) == 0 {
+		return nil
+	}
+	c := slices.Clone(formats)
+	return &c
+}
+
+// newDetachedTexture returns a texture that carries the descriptor's metadata
+// (its format and view formats) and nothing else: no device and no HAL object.
+// It backs the public wgputest.NewDetachedTexture; see
+// newDetachedTextureFactory. desc may be nil: the handle then carries zero
+// metadata.
+func newDetachedTexture(desc *TextureDescriptor) *Texture {
+	t := &Texture{}
+	if desc != nil {
+		t.format = desc.Format
+		t.viewFormats = copyViewFormats(desc.ViewFormats)
+	}
+	return t
+}
+
+// resolveViewMipCount returns the number of mip levels a texture view covers:
+// the requested count, or the levels from baseMipLevel to the end of the
+// texture ("resolving GPUTextureViewDescriptor defaults"). 0 when the texture
+// is not known.
+func resolveViewMipCount(texture *Texture, base, requested uint32) uint32 {
+	if requested != 0 {
+		return requested
+	}
+	if texture == nil || texture.coreTexture == nil {
+		return 0
+	}
+	if mips := texture.coreTexture.MipLevelCount(); mips > base {
+		return mips - base
+	}
+	return 0
+}
+
+// resolveViewLayerCount returns the number of array layers a texture view
+// covers: the requested count, or the default WebGPU derives ("resolving
+// GPUTextureViewDescriptor defaults"): 1 for a 1d, 2d or 3d view, 6 for a
+// cube, and the layers from baseArrayLayer to the end of the texture for a
+// 2d-array or cube-array view. 0 when the texture is not known.
+func resolveViewLayerCount(texture *Texture, dim gputypes.TextureViewDimension, base, requested uint32) uint32 {
+	if requested != 0 {
+		return requested
+	}
+	switch dim {
+	case gputypes.TextureViewDimension1D, gputypes.TextureViewDimension2D, gputypes.TextureViewDimension3D:
+		return 1
+	case gputypes.TextureViewDimensionCube:
+		return 6
+	}
+	if texture == nil || texture.coreTexture == nil {
+		return 0
+	}
+	if layers := texture.coreTexture.Size().DepthOrArrayLayers; layers > base {
+		return layers - base
+	}
+	return 0
+}
+
+// resolveViewDimension returns the dimension a texture view has: the requested
+// one, or the default WebGPU derives from the texture ("resolving
+// GPUTextureViewDescriptor defaults"): 1d, 2d for a single-layer 2D texture,
+// 2d-array for a layered one, 3d. Undefined when the texture's own dimension
+// is not known (a texture wrapped from a HAL handle).
+func resolveViewDimension(texture *Texture, requested gputypes.TextureViewDimension) gputypes.TextureViewDimension {
+	if requested != gputypes.TextureViewDimensionUndefined {
+		return requested
+	}
+	if texture == nil || texture.coreTexture == nil {
+		return gputypes.TextureViewDimensionUndefined
+	}
+	switch texture.coreTexture.Dimension() {
+	case gputypes.TextureDimension1D:
+		return gputypes.TextureViewDimension1D
+	case gputypes.TextureDimension3D:
+		return gputypes.TextureViewDimension3D
+	default:
+		if texture.coreTexture.Size().DepthOrArrayLayers > 1 {
+			return gputypes.TextureViewDimension2DArray
+		}
+		return gputypes.TextureViewDimension2D
+	}
 }
 
 // CreateTextureView creates a view into a texture.
@@ -370,7 +467,7 @@ func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule
 		info := halDesc.Info
 		module.irInfo = &info
 	} else if len(desc.SPIRV) > 0 {
-		module.spirvWorkgroups = spirvComputeWorkgroups(desc.SPIRV)
+		module.armSPIRVWorkgroups(desc.SPIRV)
 	}
 	return module, nil
 }
@@ -769,9 +866,9 @@ func storageTextureUses(access gputypes.StorageTextureAccess) track.TextureUses 
 // buildDynamicBindings collects the dynamic buffer bindings of a bind group,
 // sorted by binding number (Rust wgpu-core Device::create_bind_group sorts
 // dynamic_binding_info by binding_idx).
-func buildDynamicBindings(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) []dynamicBinding {
+func buildDynamicBindings(layoutEntries []gputypes.BindGroupLayoutEntry, entries []BindGroupEntry) []core.DynamicBinding {
 	entryMap := buildBindGroupEntryMap(entries)
-	var bindings []dynamicBinding
+	var bindings []core.DynamicBinding
 	for _, layoutEntry := range layoutEntries {
 		if layoutEntry.Buffer == nil || !layoutEntry.Buffer.HasDynamicOffset {
 			continue
@@ -789,16 +886,128 @@ func buildDynamicBindings(layoutEntries []gputypes.BindGroupLayoutEntry, entries
 		if end <= bufSize {
 			maxOffset = bufSize - end
 		}
-		bindings = append(bindings, dynamicBinding{
-			binding:          layoutEntry.Binding,
-			bindingType:      layoutEntry.Buffer.Type,
-			bufferSize:       bufSize,
-			bindingEnd:       end,
-			maxDynamicOffset: maxOffset,
+		bindings = append(bindings, core.DynamicBinding{
+			Binding:          layoutEntry.Binding,
+			BindingType:      layoutEntry.Buffer.Type,
+			BufferSize:       bufSize,
+			BindingEnd:       end,
+			MaxDynamicOffset: maxOffset,
 		})
 	}
-	slices.SortFunc(bindings, func(a, b dynamicBinding) int { return cmp.Compare(a.binding, b.binding) })
+	slices.SortFunc(bindings, func(a, b core.DynamicBinding) int { return cmp.Compare(a.Binding, b.Binding) })
 	return bindings
+}
+
+// Unexported sentinel errors for dynamic offset validation, matching Rust
+// wgpu-core's BindError variants. They live with the validation below, which
+// the binder calls and the bind group type does not (ADR-070 §11, S2).
+var (
+	errDynamicOffsetCount       = errors.New("dynamic offset count does not match the bind group's dynamic bindings")
+	errDynamicOffsetUnaligned   = errors.New("dynamic offset is not aligned")
+	errDynamicOffsetOutOfBounds = errors.New("dynamic offset puts the binding past the end of its buffer")
+)
+
+// dynamicOffsetAlignment returns the alignment a dynamic offset of a binding
+// type needs and the name of its limit (Rust buffer_binding_type_alignment).
+// An unset binding type is a uniform buffer, WebGPU's default.
+func dynamicOffsetAlignment(bindingType gputypes.BufferBindingType, limits *gputypes.Limits) (uint32, string) {
+	switch bindingType {
+	case gputypes.BufferBindingTypeStorage, gputypes.BufferBindingTypeReadOnlyStorage:
+		return limits.MinStorageBufferOffsetAlignment, "minStorageBufferOffsetAlignment"
+	default:
+		return limits.MinUniformBufferOffsetAlignment, "minUniformBufferOffsetAlignment"
+	}
+}
+
+// validateDynamicOffsets checks the dynamic offsets given to SetBindGroup:
+// one per dynamic binding, each aligned to the limit of its binding type and
+// keeping the binding inside its buffer. Matches Rust wgpu-core's
+// BindGroup::validate_dynamic_bindings (W3C WebGPU setBindGroup validation).
+func validateDynamicOffsets(index uint32, group *BindGroup, offsets []uint32, limits *gputypes.Limits) error {
+	if len(offsets) != len(group.dynamicBindings) {
+		return fmt.Errorf("bind group at index %d has %d dynamic binding(s), got %d offset(s): %w",
+			index, len(group.dynamicBindings), len(offsets), errDynamicOffsetCount)
+	}
+	for i, offset := range offsets {
+		info := &group.dynamicBindings[i]
+		alignment, limitName := dynamicOffsetAlignment(info.BindingType, limits)
+		if alignment != 0 && offset%alignment != 0 {
+			return fmt.Errorf("bind group at index %d, binding %d: dynamic offset[%d]=%d is not a multiple of %s (%d): %w",
+				index, info.Binding, i, offset, limitName, alignment, errDynamicOffsetUnaligned)
+		}
+		if uint64(offset) > info.MaxDynamicOffset {
+			return fmt.Errorf("bind group at index %d, binding %d: dynamic offset[%d]=%d puts the binding end (%d) past the buffer size %d: %w",
+				index, info.Binding, i, offset, info.BindingEnd+uint64(offset), info.BufferSize, errDynamicOffsetOutOfBounds)
+		}
+	}
+	return nil
+}
+
+// The reference-count constructors and the GC cleanup below live with the
+// device: it installs them on the resources it creates, and the resource types
+// do not call them (ADR-070 §11, S2).
+
+// newSamplerRef returns the reference count of a HAL sampler: when its last
+// owner drops it, the sampler is destroyed after the submissions in flight,
+// as a bind group is.
+func newSamplerRef(d core.DeviceView, halDevice hal.Device, halSampler hal.Sampler, label string) *core.ResourceRef {
+	return core.NewResourceRef("Sampler:"+label, func() {
+		dq := d.DestroyQueue()
+		if dq == nil {
+			halDevice.DestroySampler(halSampler)
+			return
+		}
+		dq.Defer(d.LastSubmissionIndex(), "Sampler", func() {
+			halDevice.DestroySampler(halSampler)
+		})
+	})
+}
+
+// newPipelineLayoutRef returns the reference count of a HAL pipeline layout:
+// when its last owner drops it, the layout is destroyed after the submissions
+// in flight, as a sampler or a bind group is. The owners are the application
+// until Release and every pipeline created with the layout, which passes it to
+// vkCmdBindDescriptorSets on every bind (P2-CORE-022).
+func newPipelineLayoutRef(d core.DeviceView, halDevice hal.Device, halLayout hal.PipelineLayout, label string) *core.ResourceRef {
+	return core.NewResourceRef("PipelineLayout:"+label, func() {
+		dq := d.DestroyQueue()
+		if dq == nil {
+			halDevice.DestroyPipelineLayout(halLayout)
+			return
+		}
+		dq.Defer(d.LastSubmissionIndex(), "PipelineLayout", func() {
+			halDevice.DestroyPipelineLayout(halLayout)
+		})
+	})
+}
+
+// bindGroupCleanupRef holds the data needed to destroy a bind group's HAL
+// resources from a runtime.AddCleanup callback. This struct must NOT reference
+// the BindGroup itself — runtime.AddCleanup requires the callback argument to
+// be independent of the cleaned-up object.
+type bindGroupCleanupRef struct {
+	label    string
+	released *atomic.Bool
+	ref      *core.ResourceRef // for ref.Drop() in GC path (ADR-056)
+}
+
+// registerBindGroupCleanup registers a runtime.AddCleanup handler on the bind group.
+// When GC collects the bind group without an explicit Release(), the cleanup
+// drops the ResourceRef — the same refcount-driven path as Release(). ADR-056.
+func registerBindGroupCleanup(bg *BindGroup, label string) runtime.Cleanup {
+	return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
+		if !ref.released.CompareAndSwap(false, true) {
+			return
+		}
+		slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
+		if ref.ref != nil {
+			ref.ref.Drop()
+		}
+	}, bindGroupCleanupRef{
+		label:    label,
+		released: bg.released,
+		ref:      bg.ref,
+	})
 }
 
 // CreateRenderPipeline creates a render pipeline.

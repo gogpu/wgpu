@@ -111,6 +111,13 @@ func spirvString(words []uint32) string {
 	return string(b)
 }
 
+// armSPIRVWorkgroups records the LocalSize of each compute entry point of a
+// SPIR-V module given to CreateShaderModule, so pipeline creation can check it
+// against the limits. WGSL modules carry the same information in their IR.
+func (m *ShaderModule) armSPIRVWorkgroups(words []uint32) {
+	m.spirvWorkgroups = spirvComputeWorkgroups(words)
+}
+
 // spirvWorkgroupSize returns the LocalSize of the compute entry point name of
 // a SPIR-V module; an empty name selects the only one.
 func (m *ShaderModule) spirvWorkgroupSize(name string) ([3]uint32, bool) {

@@ -24,22 +24,6 @@ type Sampler struct {
 	mipmapFilter gputypes.FilterMode
 }
 
-// newSamplerRef returns the reference count of a HAL sampler: when its last
-// owner drops it, the sampler is destroyed after the submissions in flight,
-// as a bind group is.
-func newSamplerRef(d core.DeviceView, halDevice hal.Device, halSampler hal.Sampler, label string) *core.ResourceRef {
-	return core.NewResourceRef("Sampler:"+label, func() {
-		dq := d.DestroyQueue()
-		if dq == nil {
-			halDevice.DestroySampler(halSampler)
-			return
-		}
-		dq.Defer(d.LastSubmissionIndex(), "Sampler", func() {
-			halDevice.DestroySampler(halSampler)
-		})
-	})
-}
-
 // Release drops the application's reference to the sampler. The HAL sampler
 // is destroyed once no bind group references it any more and the GPU has
 // completed every submission that may use it: a sampler released after a bind

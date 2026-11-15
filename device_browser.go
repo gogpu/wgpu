@@ -82,9 +82,20 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 	}, nil
 }
 
+// newDetachedTexture returns a texture that carries the descriptor's format
+// and no backend object. It backs the public wgputest.NewDetachedTexture; see
+// newDetachedTextureFactory. desc may be nil.
+func newDetachedTexture(desc *TextureDescriptor) *Texture {
+	t := &Texture{}
+	if desc != nil {
+		t.format = desc.Format
+	}
+	return t
+}
+
 // convertTextureDescriptor converts a texture descriptor to a
 // GPUTextureDescriptor, with the zero members that have a WebGPU default set
-// to it (texture_defaults.go).
+// to it (texture_sampler_defaults.go).
 func convertTextureDescriptor(desc *TextureDescriptor) js.Value {
 	desc = normalizeTextureDescriptor(desc)
 	return browser.BuildTextureDescriptor(

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // dynamicOffsetsTestGroup returns a bind group with, listed out of binding
@@ -29,9 +30,9 @@ func dynamicOffsetsTestGroup() *BindGroup {
 
 func TestBuildDynamicBindings(t *testing.T) {
 	got := dynamicOffsetsTestGroup().dynamicBindings
-	want := []dynamicBinding{
-		{binding: 1, bindingType: gputypes.BufferBindingTypeUniform, bufferSize: 1024, bindingEnd: 288, maxDynamicOffset: 736},
-		{binding: 3, bindingType: gputypes.BufferBindingTypeReadOnlyStorage, bufferSize: 512, bindingEnd: 64, maxDynamicOffset: 448},
+	want := []core.DynamicBinding{
+		{Binding: 1, BindingType: gputypes.BufferBindingTypeUniform, BufferSize: 1024, BindingEnd: 288, MaxDynamicOffset: 736},
+		{Binding: 3, BindingType: gputypes.BufferBindingTypeReadOnlyStorage, BufferSize: 512, BindingEnd: 64, MaxDynamicOffset: 448},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("dynamic bindings = %+v, want %+v", got, want)

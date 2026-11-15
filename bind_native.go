@@ -3,7 +3,6 @@
 package wgpu
 
 import (
-	"log/slog"
 	"runtime"
 	"sync/atomic"
 
@@ -11,16 +10,6 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 )
-
-// bindGroupCleanupRef holds the data needed to destroy a bind group's HAL
-// resources from a runtime.AddCleanup callback. This struct must NOT reference
-// the BindGroup itself — runtime.AddCleanup requires the callback argument to
-// be independent of the cleaned-up object.
-type bindGroupCleanupRef struct {
-	label    string
-	released *atomic.Bool
-	ref      *core.ResourceRef // for ref.Drop() in GC path (ADR-056)
-}
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
 type BindGroupLayout struct {
@@ -136,24 +125,6 @@ type PipelineLayout struct {
 	ref *core.ResourceRef
 }
 
-// newPipelineLayoutRef returns the reference count of a HAL pipeline layout:
-// when its last owner drops it, the layout is destroyed after the submissions
-// in flight, as a sampler or a bind group is. The owners are the application
-// until Release and every pipeline created with the layout, which passes it to
-// vkCmdBindDescriptorSets on every bind (P2-CORE-022).
-func newPipelineLayoutRef(d core.DeviceView, halDevice hal.Device, halLayout hal.PipelineLayout, label string) *core.ResourceRef {
-	return core.NewResourceRef("PipelineLayout:"+label, func() {
-		dq := d.DestroyQueue()
-		if dq == nil {
-			halDevice.DestroyPipelineLayout(halLayout)
-			return
-		}
-		dq.Defer(d.LastSubmissionIndex(), "PipelineLayout", func() {
-			halDevice.DestroyPipelineLayout(halLayout)
-		})
-	})
-}
-
 // Release drops the application's reference to the pipeline layout. The HAL
 // layout is destroyed once no pipeline created with it exists any more and the
 // GPU has completed every submission that may use it: a layout released after
@@ -218,7 +189,7 @@ type BindGroup struct {
 	lateBufferBindingInfos []LateBufferBindingInfo
 	// dynamicBindings are the bindings with a dynamic offset, sorted by
 	// binding number; SetBindGroup validates its offsets against them.
-	dynamicBindings []dynamicBinding
+	dynamicBindings []core.DynamicBinding
 	// ref is the GPU-aware reference counter for this bind group (Phase 2).
 	// Clone'd when used in a render/compute pass, Drop'd when GPU completes submission.
 	ref *core.ResourceRef
@@ -258,23 +229,4 @@ func (g *BindGroup) Release() {
 	if g.ref != nil {
 		g.ref.Drop()
 	}
-}
-
-// registerBindGroupCleanup registers a runtime.AddCleanup handler on the bind group.
-// When GC collects the bind group without an explicit Release(), the cleanup
-// drops the ResourceRef — the same refcount-driven path as Release(). ADR-056.
-func registerBindGroupCleanup(bg *BindGroup, label string) runtime.Cleanup {
-	return runtime.AddCleanup(bg, func(ref bindGroupCleanupRef) {
-		if !ref.released.CompareAndSwap(false, true) {
-			return
-		}
-		slog.Warn("wgpu: BindGroup released by GC (missing explicit Release)", "label", ref.label)
-		if ref.ref != nil {
-			ref.ref.Drop()
-		}
-	}, bindGroupCleanupRef{
-		label:    label,
-		released: bg.released,
-		ref:      bg.ref,
-	})
 }
