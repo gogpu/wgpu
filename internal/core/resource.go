@@ -115,6 +115,11 @@ type Device struct {
 	// atomic access makes the lazy first use race-free: concurrent first
 	// registrations must all observe one tracker, or a registration can land
 	// in a tracker nobody polls and its map never resolves.
+	//
+	// A Device copied by value (the legacy Hub's RegisterDevice/GetDevice)
+	// while another goroutine initializes the slot reads the word
+	// non-atomically — inherent to the Hub's value semantics; any future lazy
+	// state on Device must use this same one-word atomic form.
 	pendingMapTrackerSlot unsafe.Pointer // *deviceMapTracker
 
 	// === Common fields ===

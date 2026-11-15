@@ -315,45 +315,29 @@ func TestMappedRangeLiveRangesDistinct(t *testing.T) {
 }
 
 // TestBufferMapPoolHandover drives the pooled mapping path from several
-// goroutines at once. Its purpose is the -race evidence for the cached
-// wrapper's synchronization: an implementation object released by one
+// goroutines at once on ONE device. Its purpose is the -race evidence for the
+// cached wrapper's synchronization: an implementation object released by one
 // goroutine is re-acquired by another, and the race detector checks the slot
 // access against sync.Pool's Put/Get handover — the happens-before edge the
-// design relies on. It asserts correctness only: under -race the pool may
-// hand a different object back, so no identity assertion belongs here.
-//
-// Each worker maps on its own device on purpose: concurrent Buffer.Map on ONE
-// device is racy today in internal/core — mapTracker publishes
-// Device.pendingMapTrackerSlot without synchronization (device_poll.go) — and
-// that pre-existing defect is not what this test is about.
+// design relies on — while the device's lazy map tracker is initialized by the
+// same goroutines (race-free since the slot became atomic; see
+// TestMapTrackerConcurrentFirstUse). It asserts correctness only: under -race
+// the pool may hand a different object back, so no identity assertion belongs
+// here.
 func TestBufferMapPoolHandover(t *testing.T) {
-	instance, adapter, firstDevice := createTestDevice(t)
+	instance, adapter, device := createTestDevice(t)
 	defer instance.Release()
 	defer adapter.Release()
+	defer device.Release()
 
 	const (
 		workers = 4
 		cycles  = 25
 		size    = 64
 	)
-	devices := make([]*wgpu.Device, workers)
-	devices[0] = firstDevice
-	for i := 1; i < workers; i++ {
-		dev, err := adapter.RequestDevice(nil)
-		if err != nil {
-			t.Fatalf("RequestDevice %d: %v", i, err)
-		}
-		devices[i] = dev
-	}
-	defer func() {
-		for _, dev := range devices {
-			dev.Release()
-		}
-	}()
-
 	bufs := make([]*wgpu.Buffer, workers)
-	for i, dev := range devices {
-		bufs[i] = createMapReadBuf(t, dev, size)
+	for i := range bufs {
+		bufs[i] = createMapReadBuf(t, device, size)
 	}
 	defer func() {
 		for _, buf := range bufs {

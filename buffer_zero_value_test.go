@@ -14,6 +14,13 @@ import (
 // the guarded methods report the released/unmapped zero values instead of
 // panicking on a nil implementation pointer.
 func TestBufferZeroValueIsSafe(t *testing.T) {
+	// A regression here is a panic in the wrapper; recover it so the failure is
+	// reported for this test instead of aborting the whole package binary.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("zero-value Buffer panicked where the pre-move type did not: %v", r)
+		}
+	}()
 	var b wgpu.Buffer
 	b.Release() // must not panic
 	if got := b.MapState(); got != wgpu.MapStateUnmapped {
