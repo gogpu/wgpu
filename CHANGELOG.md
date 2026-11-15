@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+A seam patch before the internal-layout change (v0.35.0): the test seam gains constant-time counters and
+metadata-only textures — the last `NewTextureFromHAL` replacement — and naga moves to v0.22.1.
+
+### Added
+
+- **`wgputest.(*Recorder).Counts`** returns the number of records of each kind — encoders, buffers, textures,
+  views, vertex and index binds, bind groups, passes, draws, indexed draws, submits — computed from the trace's
+  slice lengths under the recorder's lock. A test that only compares totals (a submit counter, a benchmark's
+  encoders per frame) reads it per iteration without cloning the growing `Trace`, which would be O(n²) in a timed
+  loop.
+- **`wgputest.NewDetachedTexture`** returns a `*wgpu.Texture` that carries its descriptor's metadata (format and
+  view formats) and no device and no backend object, for logic that only inspects the handle. An operation that
+  needs the GPU reports `wgpu.ErrReleased`, the error wgpu reports for a texture without a HAL handle, and never
+  panics; `Release` is a no-op. It replaces the hand-written `hal.Texture` stubs that consumers built through
+  `NewTextureFromHAL`, which leaves the public API when `hal` becomes internal (ADR-070).
+
+### Fixed
+
+- **`Texture.Release` on a texture without a device and a HAL object no longer panics.** The wrapper reached
+  `Device.destroyTextureDeferred` through the nil device; a detached texture from `wgputest.NewDetachedTexture`
+  now releases cleanly, twice if asked. A root test pins it, and its negative control fails without the guard.
+
+### Changed
+
+- **naga v0.22.1** (from v0.21.12). v0.22.0 and v0.22.1 are the SPIR-V input frontend's Phase 3 work — row-major
+  matrix members on read and a spec-correct store, projected samples of arrayed images, the storage-expression
+  budget, positioned post-parse errors, `nagac --from-spirv` — plus the IR's name-presence model and the
+  memory-decoration capability model. This module parses WGSL and writes SPIR-V/MSL/HLSL and never calls
+  `spirv.Parse`. Gate: the v0.22.1 gate on this machine — 33/33 packages, the readback corpus under
+  `VK_LAYER_KHRONOS_validation` 695 PASS / 0 FAIL / 5 SKIP with 0 validation messages, SPIR-V 69/69 and MSL 69/69
+  byte-identical against v0.22.0 — and this branch's full suite; the release tag adds only the release-prep docs
+  over the gated candidate.
+
 ## [0.34.15] - 2026-11-14
 
 A Vulkan present and device-loss patch: the present barrier is tracked like every other submission, every acquired
