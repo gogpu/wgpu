@@ -53,7 +53,7 @@ func TestCopyUsageTransitionDrivesBarriers(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Finish: %v", err)
 			}
-			coreCB.TextureScope().SetSingle(idx, tt.copyUsage)
+			coreCB.TextureScope().AppendSingle(nil, idx, track.TextureSelector{}, tt.copyUsage)
 
 			cb := encoder.NewTestCommandBuffer(coreCB, host)
 			cb.SetUsedSetsForTest(nil, map[*resource.Texture]struct{}{tex: {}}, nil)

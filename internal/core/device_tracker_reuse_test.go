@@ -15,7 +15,7 @@ import (
 // barriers recorded before that command buffer.
 func submitTextureUse(dt *DeviceTracker, idx track.TrackerIndex, usage track.TextureUses) []track.TexturePendingTransition {
 	enc := track.NewEncoderTextureTracker()
-	enc.SetSingle(idx, usage)
+	enc.AppendSingle(nil, idx, track.TextureSelector{}, usage)
 	return dt.MergeTextureScope(enc)
 }
 
