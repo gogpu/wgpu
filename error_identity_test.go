@@ -35,6 +35,11 @@ func TestRootSentinelsAreTheInternalValues(t *testing.T) {
 		{"ErrNoBackendRegistered", ErrNoBackendRegistered, core.ErrNoBackendRegistered},
 		{"ErrNoHardwareAdapter", ErrNoHardwareAdapter, core.ErrNoHardwareAdapter},
 		{"ErrNoFallbackAdapter", ErrNoFallbackAdapter, core.ErrNoFallbackAdapter},
+		// The released sentinel is the one the device domain answers on every
+		// post-release path (ADR-070 S11): the internal device returns
+		// core.ErrReleased, so the public sentinel must be the same value for
+		// callers' errors.Is to hold through the declaration layer.
+		{"ErrReleased", ErrReleased, core.ErrReleased},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
