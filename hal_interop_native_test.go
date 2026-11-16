@@ -10,6 +10,7 @@ import (
 	publichal "github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	instancepkg "github.com/gogpu/wgpu/internal/instance"
 	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
@@ -72,7 +73,7 @@ func TestHALNativeNoopDevice(t *testing.T) {
 // TestHALNativeAdapterAndSurface checks the adapter and surface accessors
 // against HAL objects with no native handles.
 func TestHALNativeAdapterAndSurface(t *testing.T) {
-	adapter := &Adapter{core: &core.Adapter{}}
+	adapter := &Adapter{}
 	if got := adapter.HAL(); got != (publichal.Handles{}) {
 		t.Fatalf("adapter without HAL HAL() = %+v, want zero Handles", got)
 	}
@@ -88,7 +89,7 @@ func TestHALNativeAdapterAndSurface(t *testing.T) {
 // TestHALNativeInstanceWithoutHAL checks that an instance created without HAL
 // instances yields the zero Handles.
 func TestHALNativeInstanceWithoutHAL(t *testing.T) {
-	instance := &Instance{core: core.NewInstanceWithMock(nil)}
+	instance := &Instance{impl: instancepkg.New(core.NewInstanceWithMock(nil))}
 	if got := instance.HAL(); got != (publichal.Handles{}) {
 		t.Fatalf("instance without HAL HAL() = %+v, want zero Handles", got)
 	}

@@ -49,7 +49,7 @@ type Surface struct {
 //   - Linux/Wayland: displayHandle=wl_display*, windowHandle=wl_surface*
 //   - Android: displayHandle ignored, windowHandle=ANativeWindow*
 func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface, error) {
-	if i == nil || i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 	return i.createSurface(surfaceTargetFromLegacyHandles(i.display, displayHandle, windowHandle), nil)
@@ -58,7 +58,7 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface,
 // CreateSurfaceFromTarget samples a provider once and retains it until the
 // surface is released.
 func (i *Instance) CreateSurfaceFromTarget(target SurfaceTarget) (*Surface, error) {
-	if i == nil || i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 	rawTarget, err := resolveSurfaceTarget(target)
@@ -71,7 +71,7 @@ func (i *Instance) CreateSurfaceFromTarget(target SurfaceTarget) (*Surface, erro
 // CreateSurfaceUnsafe creates a surface from raw platform handles without
 // retaining an ownership source.
 func (i *Instance) CreateSurfaceUnsafe(target SurfaceTargetUnsafe) (*Surface, error) {
-	if i == nil || i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 	if err := target.validate(); err != nil {
@@ -81,14 +81,14 @@ func (i *Instance) CreateSurfaceUnsafe(target SurfaceTargetUnsafe) (*Surface, er
 }
 
 func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource SurfaceTarget) (*Surface, error) {
-	if i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 	if err := checkSurfaceDisplay(i.display, target); err != nil {
 		return nil, err
 	}
 
-	rs, err := createPlatformSurfaceTarget(i.r, target)
+	rs, err := createPlatformSurfaceTarget(i.impl.InstanceR(), target)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create surface: %w", err)
 	}

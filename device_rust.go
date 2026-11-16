@@ -32,20 +32,6 @@ type Device struct {
 	queue    *Queue
 }
 
-// rustInstanceHost adapts the root Instance to device.InstanceHost on the rust
-// build: the one wgpu-native handle the device's error scopes read.
-type rustInstanceHost struct{ i *Instance }
-
-var _ device.InstanceHost = rustInstanceHost{}
-
-// InstanceR returns the wgpu-native instance, or nil for an absent one.
-func (h rustInstanceHost) InstanceR() *rwgpu.Instance {
-	if h.i == nil {
-		return nil
-	}
-	return h.i.r
-}
-
 // Queue returns the device's command queue.
 func (d *Device) Queue() *Queue {
 	return d.queue

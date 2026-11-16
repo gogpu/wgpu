@@ -4,15 +4,15 @@ package wgpu
 
 import "github.com/gogpu/wgpu/hal"
 
-// halHandles is the "rust"-build body of Instance.HAL.
+// halHandles is the "rust"-build body of Instance.HAL. The implementation
+// reports the wgpu-native instance handle, and the zero Handles once it is
+// released; a declaration layer without an implementation (the zero value)
+// reports the zero value too.
 func (i *Instance) halHandles() hal.Handles {
-	if i == nil || i.released || i.r == nil {
+	if i == nil || i.impl == nil {
 		return hal.Handles{}
 	}
-	return hal.Handles{
-		Kind:   hal.KindWebGPU,
-		WebGPU: hal.WebGPUHandles{Instance: i.r.Handle()},
-	}
+	return i.impl.HAL()
 }
 
 // halHandles is the "rust"-build body of Adapter.HAL.
@@ -21,14 +21,10 @@ func (a *Adapter) halHandles() hal.Handles {
 	// handle stays valid after the instance is released. The zero Handles after
 	// either release is the contract hal_interop.go promises, consistent with
 	// Instance.HAL(), not a lifetime requirement (ADR-070 §15.5).
-	if a == nil || a.released || a.r == nil || (a.instance != nil && a.instance.isReleased()) {
+	if a == nil || a.impl == nil {
 		return hal.Handles{}
 	}
-	h := hal.WebGPUHandles{Adapter: a.r.Handle()}
-	if a.instance != nil && a.instance.r != nil {
-		h.Instance = a.instance.r.Handle()
-	}
-	return hal.Handles{Kind: hal.KindWebGPU, WebGPU: h}
+	return a.impl.HAL()
 }
 
 // halHandles is the "rust"-build body of Device.HAL. Adapter stays zero: the
@@ -38,8 +34,8 @@ func (d *Device) halHandles() hal.Handles {
 		return hal.Handles{}
 	}
 	h := hal.WebGPUHandles{Device: d.impl.R().Handle()}
-	if d.instance != nil && d.instance.r != nil {
-		h.Instance = d.instance.r.Handle()
+	if d.instance != nil && d.instance.impl != nil && d.instance.impl.InstanceR() != nil {
+		h.Instance = d.instance.impl.InstanceR().Handle()
 	}
 	if d.queue != nil && d.queue.impl.R() != nil {
 		h.Queue = d.queue.impl.R().Handle()

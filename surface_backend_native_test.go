@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/hal/software"
+	instancepkg "github.com/gogpu/wgpu/internal/instance"
 )
 
 type surfaceCreateTestInstance struct {
@@ -60,7 +61,7 @@ func newSoftwareSurfaceTestInstance(t *testing.T) *Instance {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 	t.Cleanup(instance.Release)
-	if instance.core.HALInstanceForBackend(gputypes.BackendSoftware) == nil {
+	if instance.impl.Core().HALInstanceForBackend(gputypes.BackendSoftware) == nil {
 		t.Fatal("software HAL instance was not registered")
 	}
 	return instance
@@ -272,8 +273,8 @@ func TestTypedSurfaceCreationPathsUseBackendMap(t *testing.T) {
 func TestCreateSurfaceReportsBoundaryFailures(t *testing.T) {
 	target := currentPlatformSurfaceTarget(t)
 
-	empty := &Instance{core: core.NewInstanceWithMock(nil)}
-	t.Cleanup(empty.core.Destroy)
+	empty := &Instance{impl: instancepkg.New(core.NewInstanceWithMock(nil))}
+	t.Cleanup(empty.impl.Release)
 	if surface, err := empty.CreateSurfaceUnsafe(target); surface != nil || err == nil {
 		t.Fatalf("CreateSurfaceUnsafe without HAL = (%v, %v), want nil error result", surface, err)
 	}
@@ -304,8 +305,10 @@ func TestCreateSurfaceReportsBoundaryFailures(t *testing.T) {
 }
 
 func TestAdoptCreatedSurfaceDestroysEverySurfaceOnReleaseRace(t *testing.T) {
-	instance := &Instance{core: core.NewInstanceWithMock(nil), released: true}
-	t.Cleanup(instance.core.Destroy)
+	impl := instancepkg.New(core.NewInstanceWithMock(nil))
+	impl.Release()
+	instance := &Instance{impl: impl}
+	t.Cleanup(impl.Release)
 	first := &surfaceDestroyCounter{}
 	second := &surfaceDestroyCounter{}
 

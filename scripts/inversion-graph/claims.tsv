@@ -61,3 +61,12 @@ target	internal/device	internal/pipeconst	wasm	S11
 target	internal/device	internal/core/track	native	S11
 inverted	internal/device	internal/instance	native+rust	S11
 target	internal/device	internal/stencilblit	native	S11
+target	internal/instance	internal/device	all	S12
+target	internal/instance	internal/surface	all	S12
+target	internal/instance	internal/queue	all	S12
+target	internal/instance	internal/encoder	native	S12
+target	internal/instance	internal/pendingwrites	native	S12
+target	internal/instance	internal/hal	all	S12
+target	internal/instance	internal/core	all	S12
+target	internal/instance	internal/browser	wasm	S12
+target	internal/instance	hal	all	S12

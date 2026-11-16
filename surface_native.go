@@ -44,15 +44,16 @@ const (
 // type is the declaration layer the public API is frozen on. It holds the
 // domain's implementation handle, the instance the surface is registered with,
 // and the target ownership source, all of which are root concerns: the instance
-// map stays in this package until S12, and the ownership provider is a public
-// value the destination cannot name.
+// identity is a public value, and the ownership provider is a public value the
+// destination cannot name. The instance's surface registry lives in
+// internal/instance (ADR-070 S12) and is reached through the implementation.
 type Surface struct {
 	impl *surface.Surface
 
 	// instance is the root instance the surface is registered with for device
 	// teardown. Kept here, not in the destination: the cross-instance rejection
-	// and the unregister are root-side facts, and the instance map is root-owned
-	// until S12.
+	// and the unregister are root-side facts, and the destination names no
+	// public root type.
 	instance *Instance
 
 	// targetSource is retained only for CreateSurfaceFromTarget. Raw handles
@@ -112,7 +113,7 @@ func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource Surfac
 		return nil, err
 	}
 
-	entries := i.core.HALInstanceEntries()
+	entries := i.impl.Core().HALInstanceEntries()
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("wgpu: no HAL instance available for surface creation")
 	}
@@ -145,10 +146,13 @@ func (i *Instance) adoptCreatedSurface(
 		SurfaceCreated: true,
 	})
 	created := &Surface{impl: impl, targetSource: targetSource}
-	if err := i.adoptSurface(created); err != nil {
+	if err := i.impl.AdoptSurface(created.impl); err != nil {
 		surface.DestroyHALSurfaces(coreSurface, halSurfaces, initialBackend, true)
 		return nil, err
 	}
+	// The identity cache is written once, here, after the registry accepted the
+	// surface: the pre-move adoption recorded it on the same path.
+	created.instance = i
 	return created, nil
 }
 
@@ -283,13 +287,14 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 		return fmt.Errorf("wgpu: surface and device belong to different instances")
 	}
 
-	// The HAL instance a backend's raw surface is created on is a root fact too:
-	// the instance's HAL entries stay in this package until S12. Resolve it for
-	// the device's backend and hand it in as a value; the implementation never
-	// names the instance.
+	// The HAL instance a backend's raw surface is created on is a root fact: the
+	// raw surface's HAL object belongs to the instance's HAL entries, which the
+	// implementation owns. Resolve it for the device's backend and hand it in as
+	// a value; the implementation never names the instance.
 	var halInstance hal.Instance
-	if device != nil && device.impl != nil && device.impl.Core() != nil && s.instance != nil && s.instance.core != nil {
-		halInstance = s.instance.core.HALInstanceForBackend(device.impl.Core().Backend())
+	if device != nil && device.impl != nil && device.impl.Core() != nil &&
+		s.instance != nil && s.instance.impl != nil && s.instance.impl.Core() != nil {
+		halInstance = s.instance.impl.Core().HALInstanceForBackend(device.impl.Core().Backend())
 	}
 
 	return mapSurfaceConfigureError(s.impl.Configure(host, surfaceConfiguration(config), sameInstance, halInstance))
@@ -461,12 +466,14 @@ func (s *Surface) DiscardTexture() {
 // replaced them (ADR-070 S11).
 
 // Release releases the surface: the implementation destroys the HAL surfaces,
-// and this layer then unregisters the surface from its instance and drops the
-// target ownership source, in the pre-move order.
+// and this layer then unregisters the surface from its instance's registry and
+// drops the target ownership source, in the pre-move order.
 func (s *Surface) Release() {
 	s.impl.Release()
 	if s.instance != nil {
-		s.instance.unregisterSurface(s)
+		if s.instance.impl != nil {
+			s.instance.impl.UnregisterSurface(s.impl)
+		}
 		s.instance = nil
 	}
 	s.targetSource = nil

@@ -2,13 +2,15 @@
 
 package wgpu
 
-import (
-	"fmt"
-	"sync"
+// This file is the public declaration layer over internal/instance on the
+// native build (ADR-070 S12). The implementation moved to internal/instance;
+// what stays here is the frozen public Instance type, the creation function, the
+// descriptor boundary and the display handle the surface creation glue converts.
 
+import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/core"
-	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/instance"
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // InstanceDescriptor configures instance creation.
@@ -36,13 +38,14 @@ type InstanceDescriptor struct {
 //
 // Instance methods are safe for concurrent use, except Release() which
 // must not be called concurrently with other methods.
+//
+// The implementation lives in internal/instance (ADR-070 S12); this type is the
+// declaration layer the public API is frozen on. It holds the implementation
+// handle and the display handle the surface creation glue converts, both
+// written once at construction.
 type Instance struct {
-	core     *core.Instance
-	display  DisplayHandle // InstanceDescriptor.Display, immutable
-	mu       sync.Mutex
-	released bool
-	devices  map[*Device]struct{}
-	surfaces map[*Surface]struct{}
+	impl    *instance.Instance
+	display DisplayHandle // InstanceDescriptor.Display, immutable
 }
 
 // CreateInstance creates a new GPU instance.
@@ -61,9 +64,7 @@ func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
 		gpuDesc = &d
 	}
 
-	coreInstance := core.NewInstanceWithDisplay(gpuDesc, display.halDisplay())
-
-	return &Instance{core: coreInstance, display: display}, nil
+	return &Instance{impl: instance.Create(gpuDesc, display.halDisplay()), display: display}, nil
 }
 
 // RequestAdapter requests a GPU adapter matching the options.
@@ -78,177 +79,41 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 		return nil, ErrReleased
 	}
 
-	// Convert wgpu-level options to gputypes for core.
+	// The descriptor boundary (shape 1): the public options become the core
+	// request type and the compatible surface's implementation handle. A nil
+	// pointer stays nil so core resolves the same defaults it did pre-move.
 	var coreOpts *gputypes.RequestAdapterOptions
+	var compatible *surface.Surface
 	if opts != nil {
 		coreOpts = &gputypes.RequestAdapterOptions{
 			PowerPreference:      opts.PowerPreference,
 			ForceFallbackAdapter: opts.ForceFallbackAdapter,
 		}
+		if opts.CompatibleSurface != nil {
+			compatible = opts.CompatibleSurface.impl
+		}
 	}
 
-	// If a compatible surface is provided, use the surface-aware path
-	// that triggers deferred GLES adapter enumeration.
-	var adapterID core.AdapterID
-	var err error
-	if opts != nil && opts.CompatibleSurface != nil {
-		adapterID, err = i.core.RequestAdapterWithSurfaces(
-			coreOpts,
-			opts.CompatibleSurface.impl.HALSurfacesForAdapterRequest(),
-		)
-	} else {
-		adapterID, err = i.core.RequestAdapter(coreOpts)
-	}
+	impl, err := i.impl.RequestAdapter(coreOpts, compatible)
 	if err != nil {
 		return nil, err
 	}
-	keepAdapter := false
-	defer func() {
-		if !keepAdapter {
-			i.core.ReleaseSurfaceAdapter(adapterID)
-		}
-	}()
-
-	info, err := core.GetAdapterInfo(adapterID)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to get adapter info: %w", err)
-	}
-	features, err := core.GetAdapterFeatures(adapterID)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to get adapter features: %w", err)
-	}
-	limits, err := core.GetAdapterLimits(adapterID)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to get adapter limits: %w", err)
-	}
-
-	hal.Logger().Info("wgpu: adapter selected",
-		"name", info.Name,
-		"backend", info.Backend,
-		"type", info.DeviceType,
-	)
-
-	hub := core.GetGlobal().Hub()
-	coreAdapter, err := hub.GetAdapter(adapterID)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to get adapter: %w", err)
-	}
-
-	adapter := &Adapter{
-		id:        adapterID,
-		core:      &coreAdapter,
-		info:      info,
-		features:  features,
-		limits:    limits,
-		downlevel: coreAdapter.DownlevelCapabilities,
-		instance:  i,
-	}
-	keepAdapter = true
-	return adapter, nil
+	return &Adapter{impl: impl, instance: i}, nil
 }
 
+// isReleased reports whether the instance is released. A nil wrapper, or one
+// without an implementation (the zero value), answers released.
 func (i *Instance) isReleased() bool {
-	if i == nil {
+	if i == nil || i.impl == nil {
 		return true
 	}
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	return i.released
-}
-
-func (i *Instance) adoptDevice(device *Device) error {
-	if device == nil {
-		return fmt.Errorf("wgpu: cannot adopt a nil device")
-	}
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if i.released {
-		return ErrReleased
-	}
-	if i.devices == nil {
-		i.devices = make(map[*Device]struct{})
-	}
-	i.devices[device] = struct{}{}
-	device.setInstance(newDeviceInstanceHost(i))
-	return nil
-}
-
-func (i *Instance) unregisterDevice(device *Device) {
-	if i == nil || device == nil {
-		return
-	}
-	i.mu.Lock()
-	delete(i.devices, device)
-	i.mu.Unlock()
-}
-
-func (i *Instance) adoptSurface(surface *Surface) error {
-	if surface == nil {
-		return fmt.Errorf("wgpu: cannot adopt a nil surface")
-	}
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if i.released {
-		return ErrReleased
-	}
-	if i.surfaces == nil {
-		i.surfaces = make(map[*Surface]struct{})
-	}
-	i.surfaces[surface] = struct{}{}
-	surface.instance = i
-	return nil
-}
-
-func (i *Instance) unregisterSurface(surface *Surface) {
-	if i == nil || surface == nil {
-		return
-	}
-	i.mu.Lock()
-	delete(i.surfaces, surface)
-	i.mu.Unlock()
-}
-
-// surfacesForDevice stood here as the device teardown's scan. It moved into the
-// device domain's instance host (device_instance_host_native.go), which walks
-// this registry under the same lock and filtering rule; Device.Release reads
-// the scan through that seam (ADR-070 S11).
-
-func (i *Instance) beginRelease() ([]*Device, []*Surface, bool) {
-	if i == nil {
-		return nil, nil, false
-	}
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if i.released {
-		return nil, nil, false
-	}
-	i.released = true
-
-	devices := make([]*Device, 0, len(i.devices))
-	for device := range i.devices {
-		devices = append(devices, device)
-	}
-	surfaces := make([]*Surface, 0, len(i.surfaces))
-	for surface := range i.surfaces {
-		surfaces = append(surfaces, surface)
-	}
-	return devices, surfaces, true
+	return i.impl.IsReleased()
 }
 
 // Release releases the instance and all associated resources.
 func (i *Instance) Release() {
-	devices, surfaces, ok := i.beginRelease()
-	if !ok {
+	if i == nil {
 		return
 	}
-
-	// Devices own configured swapchains, surfaces own platform surface handles,
-	// and the instance owns the native instance. Release in that order.
-	for _, device := range devices {
-		device.Release()
-	}
-	for _, surface := range surfaces {
-		surface.Release()
-	}
-	i.core.Destroy()
+	i.impl.Release()
 }

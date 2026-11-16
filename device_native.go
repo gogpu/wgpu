@@ -33,32 +33,12 @@ type Device struct {
 	queue *Queue
 
 	// instance is the identity-check cache: the root Instance that adopted this
-	// device, written once by setInstance at construction and cleared by
-	// Release. Surface.Configure compares it to reject a cross-instance
-	// device/surface pair. It is set from the same host that is handed to the
-	// implementation, so the two cannot diverge, and nothing else writes it
-	// (ADR-070 S11, lead ruling 7).
+	// device, written once by the adapter's RequestDevice at construction and
+	// cleared by Release. Surface.Configure compares it to reject a
+	// cross-instance device/surface pair. The implementation holds the seam view
+	// of the same instance (SetInstance), so the two cannot diverge, and nothing
+	// else writes it (ADR-070 S11 ruling 7, extended by S12).
 	instance *Instance
-}
-
-// setInstance wires the device to the instance that adopted it: it binds the
-// host's device pointer, stores the root identity cache from the same host and
-// hands the host to the implementation's own seam, so both describe one
-// instance. It takes the concrete host rather than device.InstanceHost because
-// it binds the device pointer and reads the root instance pointer, neither of
-// which the seam may name; the call-site assignment is the compile check that
-// the host satisfies the seam.
-//
-// Called once, by Instance.adoptDevice.
-func (d *Device) setInstance(h *deviceInstanceHost) {
-	if d == nil || h == nil {
-		return
-	}
-	h.d = d
-	d.instance = h.i
-	if d.impl != nil {
-		d.impl.SetInstance(h)
-	}
 }
 
 // Queue returns the device's command queue.

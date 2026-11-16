@@ -2,14 +2,14 @@
 
 package wgpu
 
+// This file is the public declaration layer over internal/instance on the rust
+// build (ADR-070 S12). The implementation moved to internal/instance; what stays
+// here is the frozen public Adapter type, the descriptor boundary and the root
+// instance identity cache the returned device records.
+
 import (
-	"fmt"
-
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/device"
-	"github.com/gogpu/wgpu/internal/queue"
-
-	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+	"github.com/gogpu/wgpu/internal/instance"
 )
 
 // DeviceDescriptor configures device creation.
@@ -21,67 +21,50 @@ type DeviceDescriptor struct {
 
 // Adapter represents a physical GPU.
 // On Rust backend, this wraps go-webgpu/webgpu Adapter.
+//
+// The implementation lives in internal/instance (ADR-070 S12); this type is the
+// declaration layer the public API is frozen on. It keeps the root instance the
+// adapter was requested from, written once at construction: the returned device
+// records it as its identity cache.
 type Adapter struct {
-	r        *rwgpu.Adapter
-	info     gputypes.AdapterInfo
-	features gputypes.Features
-	limits   gputypes.Limits
+	impl     *instance.Adapter
 	instance *Instance
-	released bool
 }
 
 // Info returns adapter metadata.
-func (a *Adapter) Info() gputypes.AdapterInfo { return a.info }
+func (a *Adapter) Info() gputypes.AdapterInfo { return a.impl.Info() }
 
 // Features returns supported features.
-func (a *Adapter) Features() gputypes.Features { return a.features }
+func (a *Adapter) Features() gputypes.Features { return a.impl.Features() }
 
 // Limits returns the adapter's resource limits.
-func (a *Adapter) Limits() gputypes.Limits { return a.limits }
+func (a *Adapter) Limits() gputypes.Limits { return a.impl.Limits() }
 
 // DownlevelCapabilities returns backend capability flags for downlevel adapters.
 // Rust wgpu handles real values internally; from Go FFI we return fully compliant defaults.
 func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
-	return gputypes.DefaultDownlevelCapabilities()
+	return a.impl.DownlevelCapabilities()
 }
 
 // RequestDevice creates a logical device from this adapter.
 // If desc is nil, default features and limits are used.
 func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
-	if a.released {
-		return nil, ErrReleased
-	}
-
-	var rDesc *rwgpu.DeviceDescriptor
+	// The descriptor boundary (shape 1): the public descriptor becomes the
+	// implementation's mirror, and a nil pointer stays nil.
+	var implDesc *instance.DeviceDescriptor
 	if desc != nil {
-		rDesc = &rwgpu.DeviceDescriptor{
-			Label: desc.Label,
-		}
-		// Limits conversion: if user specified limits, convert them.
-		if desc.RequiredLimits != (gputypes.Limits{}) {
-			rl := convertToRustLimits(desc.RequiredLimits)
-			rDesc.RequiredLimits = &rl
+		implDesc = &instance.DeviceDescriptor{
+			Label:            desc.Label,
+			RequiredFeatures: desc.RequiredFeatures,
+			RequiredLimits:   desc.RequiredLimits,
 		}
 	}
 
-	rd, err := a.r.RequestDevice(rDesc)
+	impl, q, err := a.impl.RequestDevice(implDesc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to request device: %w", err)
+		return nil, err
 	}
-
-	deviceFeatures := convertRustFeatures(rd.Features())
-	deviceLimits := convertRustLimits(rd.Limits())
-
-	rq := rd.Queue()
-
-	impl := device.NewRust(rd, deviceFeatures, deviceLimits)
-	impl.SetInstance(rustInstanceHost{i: a.instance})
-
-	return &Device{
-		impl:     impl,
-		instance: a.instance,
-		queue:    &Queue{impl: queue.New(rq)},
-	}, nil
+	return &Device{impl: impl, instance: a.instance, queue: &Queue{impl: q}}, nil
 }
 
 // SurfaceCapabilities describes what a surface supports on this adapter.
@@ -93,19 +76,13 @@ type SurfaceCapabilities struct {
 
 // GetSurfaceCapabilities returns the capabilities of a surface for this adapter.
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
-	if a.released || surface == nil {
+	if surface == nil {
 		return nil
 	}
-	rSurface := surface.impl.R()
-	if rSurface == nil {
+	caps := a.impl.GetSurfaceCapabilities(surface.impl)
+	if caps == nil {
 		return nil
 	}
-
-	caps, err := rSurface.GetCapabilities(a.r)
-	if err != nil {
-		return nil
-	}
-
 	return &SurfaceCapabilities{
 		Formats:      caps.Formats,
 		PresentModes: caps.PresentModes,
@@ -115,45 +92,5 @@ func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities 
 
 // Release releases the adapter.
 func (a *Adapter) Release() {
-	if a.released {
-		return
-	}
-	a.released = true
-	if a.r != nil {
-		a.r.Release()
-	}
-}
-
-// convertToRustLimits converts gputypes.Limits to go-webgpu Limits.
-//
-//nolint:dupl // Symmetric field-by-field mapping (rwgpu→gputypes vs gputypes→rwgpu), not real duplication.
-func convertToRustLimits(gl gputypes.Limits) rwgpu.Limits {
-	return rwgpu.Limits{
-		MaxTextureDimension1D:                     gl.MaxTextureDimension1D,
-		MaxTextureDimension2D:                     gl.MaxTextureDimension2D,
-		MaxTextureDimension3D:                     gl.MaxTextureDimension3D,
-		MaxTextureArrayLayers:                     gl.MaxTextureArrayLayers,
-		MaxBindGroups:                             gl.MaxBindGroups,
-		MaxBindingsPerBindGroup:                   gl.MaxBindingsPerBindGroup,
-		MaxDynamicUniformBuffersPerPipelineLayout: gl.MaxDynamicUniformBuffersPerPipelineLayout,
-		MaxDynamicStorageBuffersPerPipelineLayout: gl.MaxDynamicStorageBuffersPerPipelineLayout,
-		MaxSampledTexturesPerShaderStage:          gl.MaxSampledTexturesPerShaderStage,
-		MaxSamplersPerShaderStage:                 gl.MaxSamplersPerShaderStage,
-		MaxStorageBuffersPerShaderStage:           gl.MaxStorageBuffersPerShaderStage,
-		MaxStorageTexturesPerShaderStage:          gl.MaxStorageTexturesPerShaderStage,
-		MaxUniformBuffersPerShaderStage:           gl.MaxUniformBuffersPerShaderStage,
-		MaxUniformBufferBindingSize:               gl.MaxUniformBufferBindingSize,
-		MaxStorageBufferBindingSize:               gl.MaxStorageBufferBindingSize,
-		MinUniformBufferOffsetAlignment:           gl.MinUniformBufferOffsetAlignment,
-		MinStorageBufferOffsetAlignment:           gl.MinStorageBufferOffsetAlignment,
-		MaxVertexBuffers:                          gl.MaxVertexBuffers,
-		MaxBufferSize:                             gl.MaxBufferSize,
-		MaxVertexAttributes:                       gl.MaxVertexAttributes,
-		MaxVertexBufferArrayStride:                gl.MaxVertexBufferArrayStride,
-		MaxComputeWorkgroupSizeX:                  gl.MaxComputeWorkgroupSizeX,
-		MaxComputeWorkgroupSizeY:                  gl.MaxComputeWorkgroupSizeY,
-		MaxComputeWorkgroupSizeZ:                  gl.MaxComputeWorkgroupSizeZ,
-		MaxComputeWorkgroupsPerDimension:          gl.MaxComputeWorkgroupsPerDimension,
-		MaxComputeInvocationsPerWorkgroup:         gl.MaxComputeInvocationsPerWorkgroup,
-	}
+	a.impl.Release()
 }

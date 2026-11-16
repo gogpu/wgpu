@@ -4,24 +4,28 @@ package wgpu
 
 import "github.com/gogpu/wgpu/hal"
 
-// halHandles is the native-build body of Instance.HAL.
+// halHandles is the native-build body of Instance.HAL. The implementation
+// reports the handles of the core instance's highest-priority HAL backend, and
+// the zero Handles once the core instance is gone; a declaration layer without
+// an implementation (the zero value) reports the zero value too.
 func (i *Instance) halHandles() hal.Handles {
-	if i == nil || i.core == nil {
+	if i == nil || i.impl == nil {
 		return hal.Handles{}
 	}
-	return i.core.HALHandles()
+	return i.impl.HAL()
 }
 
 // halHandles is the native-build body of Adapter.HAL.
 func (a *Adapter) halHandles() hal.Handles {
 	// A cached adapter is instance-owned: Adapter.Release only marks the
-	// wrapper, and releasing the instance destroys the HAL object underneath.
-	// Report nothing once either is gone, so a caller never receives a stale
-	// native pointer; hal_interop.go promises the zero Handles after release.
-	if a == nil || a.core == nil || a.released || (a.instance != nil && a.instance.isReleased()) {
+	// implementation wrapper, and releasing the instance destroys the HAL object
+	// underneath. Report nothing once either is gone, so a caller never receives
+	// a stale native pointer; hal_interop.go promises the zero Handles after
+	// release.
+	if a == nil || a.impl == nil {
 		return hal.Handles{}
 	}
-	return a.core.HALHandles()
+	return a.impl.HAL()
 }
 
 // halHandles is the native-build body of Device.HAL.

@@ -2,14 +2,14 @@
 
 package wgpu
 
-import (
-	"fmt"
+// This file is the public declaration layer over internal/instance on the
+// native build (ADR-070 S12). The implementation moved to internal/instance;
+// what stays here is the frozen public Adapter type, the descriptor boundary and
+// the root instance identity cache the surface cross-check reads.
 
+import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/core"
-	"github.com/gogpu/wgpu/internal/device"
-	"github.com/gogpu/wgpu/internal/encoder"
-	"github.com/gogpu/wgpu/internal/pendingwrites"
+	"github.com/gogpu/wgpu/internal/instance"
 )
 
 // DeviceDescriptor configures device creation.
@@ -20,129 +20,60 @@ type DeviceDescriptor struct {
 }
 
 // Adapter represents a physical GPU.
+//
+// The implementation lives in internal/instance (ADR-070 S12); this type is the
+// declaration layer the public API is frozen on. It keeps the root instance the
+// adapter was requested from, written once at construction: the surface
+// cross-check compares it to reject a device/surface pair from two instances,
+// and the device wrapper records it as its identity cache.
 type Adapter struct {
-	id        core.AdapterID
-	core      *core.Adapter
-	info      gputypes.AdapterInfo
-	features  gputypes.Features
-	limits    gputypes.Limits
-	downlevel gputypes.DownlevelCapabilities
-	instance  *Instance
-	released  bool
+	impl     *instance.Adapter
+	instance *Instance
 }
 
 // Info returns adapter metadata.
-func (a *Adapter) Info() gputypes.AdapterInfo { return a.info }
+func (a *Adapter) Info() gputypes.AdapterInfo { return a.impl.Info() }
 
 // Features returns supported features.
-func (a *Adapter) Features() gputypes.Features { return a.features }
+func (a *Adapter) Features() gputypes.Features { return a.impl.Features() }
 
 // Limits returns the adapter's resource limits.
-func (a *Adapter) Limits() gputypes.Limits { return a.limits }
+func (a *Adapter) Limits() gputypes.Limits { return a.impl.Limits() }
 
 // DownlevelCapabilities returns backend capability flags for downlevel adapters.
 // Matches Rust wgpu Adapter::get_downlevel_capabilities() (adapter.rs:174).
-func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities { return a.downlevel }
+func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	return a.impl.DownlevelCapabilities()
+}
 
 // RequestDevice creates a logical device from this adapter.
 // If desc is nil, default features and limits are used.
 func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
-	if a == nil || a.released || a.instance == nil || a.instance.isReleased() {
+	if a == nil {
 		return nil, ErrReleased
 	}
 
-	var (
-		dev *Device
-		err error
-	)
-	if a.core.HasHAL() {
-		dev, err = a.requestDeviceHAL(desc)
-	} else {
-		dev, err = a.requestDeviceCore(desc)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := a.instance.adoptDevice(dev); err != nil {
-		dev.Release()
-		return nil, err
-	}
-	return dev, nil
-}
-
-func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
-	var features gputypes.Features
-	var limits gputypes.Limits
-	var label string
-
+	// The descriptor boundary (shape 1): the public descriptor becomes the
+	// implementation's mirror, and a nil pointer stays nil.
+	var implDesc *instance.DeviceDescriptor
 	if desc != nil {
-		features = desc.RequiredFeatures
-		limits = desc.RequiredLimits
-		label = desc.Label
-	}
-
-	// If no limits specified (nil descriptor or zero-value RequiredLimits),
-	// use the adapter's actual hardware limits. This matches the WebGPU spec:
-	// "Each limit in the returned device will be no worse than the corresponding
-	// limit in adapter.limits." When user doesn't specify limits, device gets
-	// full hardware capabilities (e.g., Intel Iris Xe reports 200 storage buffers,
-	// not the WebGPU minimum of 8).
-	// Matches Rust wgpu which returns adapter limits by default.
-	if limits == (gputypes.Limits{}) {
-		limits = a.limits
-	}
-
-	if err := core.ValidateDeviceRequest(features, limits, a.features, a.limits); err != nil {
-		return nil, err
-	}
-
-	openDevice, err := a.core.HALAdapter().Open(features, limits)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to open device: %w", err)
-	}
-
-	coreDevice := core.NewDevice(openDevice.Device, a.core, features, limits, label)
-
-	// Single shared encoder pool for both user command encoders (CreateCommandEncoder)
-	// and internal staging encoders (PendingWrites). Matches Rust wgpu-core which uses
-	// one device.command_allocator for both (queue.rs:1373).
-	pool := encoder.NewPool(openDevice.Device)
-
-	q := newQueue(openDevice.Queue, pendingwrites.New(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()))
-
-	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
-
-	impl := device.New(coreDevice, q.impl, pool)
-	dev := &Device{impl: impl, queue: q}
-	q.impl.SetDevice(impl)
-
-	return dev, nil
-}
-
-func (a *Adapter) requestDeviceCore(desc *DeviceDescriptor) (*Device, error) {
-	var gpuDesc *gputypes.DeviceDescriptor
-	if desc != nil {
-		gpuDesc = &gputypes.DeviceDescriptor{
-			Label:          desc.Label,
-			RequiredLimits: desc.RequiredLimits,
+		implDesc = &instance.DeviceDescriptor{
+			Label:            desc.Label,
+			RequiredFeatures: desc.RequiredFeatures,
+			RequiredLimits:   desc.RequiredLimits,
 		}
 	}
 
-	_, err := core.RequestDevice(a.id, gpuDesc)
+	impl, q, err := a.impl.RequestDevice(implDesc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create device: %w", err)
+		return nil, err
 	}
 
-	coreDevice := &core.Device{
-		Label:    "",
-		Features: 0,
-		Limits:   gputypes.DefaultLimits(),
+	dev := &Device{impl: impl, instance: a.instance}
+	if q != nil {
+		dev.queue = &Queue{impl: q}
 	}
-	if desc != nil {
-		coreDevice.Label = desc.Label
-	}
-
-	return &Device{impl: device.New(coreDevice, nil, nil)}, nil
+	return dev, nil
 }
 
 // SurfaceCapabilities describes what a surface supports on this adapter.
@@ -160,41 +91,28 @@ type SurfaceCapabilities struct {
 // GetSurfaceCapabilities returns the capabilities of a surface for this adapter.
 // Returns nil if the adapter has no HAL (core-only path) or the surface is nil.
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
-	if a == nil || a.released || a.instance == nil || a.instance.isReleased() ||
+	// The cross-instance rejection is a root fact: the instance a surface is
+	// registered with is this package's type.
+	if a == nil || a.instance == nil || a.instance.isReleased() ||
 		surface == nil || surface.impl.Released() || surface.instance != a.instance {
 		return nil
 	}
 
-	if !a.core.HasHAL() {
-		// Core-only path: return safe defaults (Fifo is guaranteed by Vulkan spec).
-		return &SurfaceCapabilities{
-			PresentModes: []gputypes.PresentMode{gputypes.PresentModeFifo},
-		}
-	}
-
-	halSurface := surface.impl.HALSurfaceForBackend(a.info.Backend)
-	if halSurface == nil {
+	caps := a.impl.GetSurfaceCapabilities(surface.impl)
+	if caps == nil {
 		return nil
 	}
-	halCaps := a.core.HALAdapter().SurfaceCapabilities(halSurface)
-	if halCaps == nil {
-		return nil
-	}
-
 	return &SurfaceCapabilities{
-		Formats:      halCaps.Formats,
-		PresentModes: halCaps.PresentModes,
-		AlphaModes:   halCaps.AlphaModes,
+		Formats:      caps.Formats,
+		PresentModes: caps.PresentModes,
+		AlphaModes:   caps.AlphaModes,
 	}
 }
 
 // Release releases the adapter.
 func (a *Adapter) Release() {
-	if a == nil || a.released {
+	if a == nil {
 		return
 	}
-	a.released = true
-	if a.instance != nil && a.instance.core != nil {
-		a.instance.core.ReleaseSurfaceAdapter(a.id)
-	}
+	a.impl.Release()
 }

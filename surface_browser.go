@@ -62,7 +62,7 @@ func (i *Instance) CreateSurface(displayHandle, windowHandle uintptr) (*Surface,
 // CreateSurfaceFromTarget samples a provider once and retains it until the
 // surface is released.
 func (i *Instance) CreateSurfaceFromTarget(target SurfaceTarget) (*Surface, error) {
-	if i == nil || i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 	rawTarget, err := resolveSurfaceTarget(target)
@@ -75,7 +75,7 @@ func (i *Instance) CreateSurfaceFromTarget(target SurfaceTarget) (*Surface, erro
 // CreateSurfaceUnsafe creates a browser surface from a raw numeric canvas ID
 // without retaining an ownership source.
 func (i *Instance) CreateSurfaceUnsafe(target SurfaceTargetUnsafe) (*Surface, error) {
-	if i == nil || i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 	if err := target.validate(); err != nil {
@@ -92,7 +92,7 @@ func (i *Instance) createSurfaceFromTarget(target SurfaceTargetUnsafe, targetSou
 }
 
 func (i *Instance) createSurfaceFromCanvasID(windowHandle uintptr, targetSource SurfaceTarget) (*Surface, error) {
-	if i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 
@@ -130,7 +130,7 @@ func (i *Instance) createSurfaceFromCanvasID(windowHandle uintptr, targetSource 
 // Matches Rust wgpu's SurfaceTarget::Canvas variant which takes an
 // HtmlCanvasElement directly.
 func (i *Instance) CreateSurfaceFromCanvas(canvas js.Value) (*Surface, error) {
-	if i.released {
+	if i.isReleased() {
 		return nil, ErrReleased
 	}
 	return i.createSurfaceFromCanvas(canvas)
@@ -139,7 +139,7 @@ func (i *Instance) CreateSurfaceFromCanvas(canvas js.Value) (*Surface, error) {
 // createSurfaceFromCanvas is the shared implementation for both CreateSurface
 // and CreateSurfaceFromCanvas.
 func (i *Instance) createSurfaceFromCanvas(canvas js.Value) (*Surface, error) {
-	bs, err := browser.NewSurface(i.browser.GPU(), canvas)
+	bs, err := browser.NewSurface(i.impl.GPU(), canvas)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to create surface: %w", err)
 	}

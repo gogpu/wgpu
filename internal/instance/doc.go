@@ -10,11 +10,16 @@
 // leaves the root package, which keeps the public Instance and Adapter
 // declaration layers over it.
 //
-// Today the package declares seams only. The instance's view of an adopted
-// device, which is all its teardown needs, is declared per context in
-// seams_native.go. The rust and browser contexts declare none: there the
-// instance implements the device's own seam (internal/device's InstanceHost
-// and InstanceR) and calls no device method, so no return seam exists. The
-// implementation moves in the next commit of the step, and the seams are
-// unchanged by that move.
+// The instance's view of an adopted device, which is all its teardown needs, is
+// declared per context in seams_native.go. The rust and browser contexts
+// declare none: there the instance implements the device's own seam
+// (internal/device's InstanceHost and InstanceR) and calls no device method, so
+// no return seam exists.
+//
+// The public Instance and Adapter types stay in the root package as declaration
+// layers: they hold this package's implementation handle, convert every public
+// descriptor to scalars and internal handles at the boundary, and keep the root
+// identity caches the surface cross-check reads. The surface creation glue
+// stays there too (S10's ruling): the public target types and their sentinels
+// cannot be named here.
 package instance
