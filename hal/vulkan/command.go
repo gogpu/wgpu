@@ -534,6 +534,15 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 		depthStencil := isDepthStencilFormat(tex.format)
 		srcAccess, srcStage, oldLayout := textureUsageToAccessStageLayout(b.Usage.OldUsage, depthStencil)
 		dstAccess, dstStage, newLayout := textureUsageToAccessStageLayout(b.Usage.NewUsage, depthStencil)
+		baseArrayLayer := b.Range.BaseArrayLayer
+		layerCount := arrayLayerCountOrRemaining(b.Range.ArrayLayerCount)
+		if tex.dimension == gputypes.TextureDimension3D {
+			// A 3D image has one layer, and an explicit count of a 3D image
+			// created 2D-array compatible counts depth slices once
+			// maintenance9 is enabled.
+			baseArrayLayer = 0
+			layerCount = vk.RemainingArrayLayers
+		}
 
 		imageBarriers = append(imageBarriers, vk.ImageMemoryBarrier{
 			SType:               vk.StructureTypeImageMemoryBarrier,
@@ -548,8 +557,8 @@ func (e *CommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 				AspectMask:     e.device.depthStencil.barrierAspects(b.Range.Aspect, tex.format),
 				BaseMipLevel:   b.Range.BaseMipLevel,
 				LevelCount:     mipLevelCountOrRemaining(b.Range.MipLevelCount),
-				BaseArrayLayer: b.Range.BaseArrayLayer,
-				LayerCount:     arrayLayerCountOrRemaining(b.Range.ArrayLayerCount),
+				BaseArrayLayer: baseArrayLayer,
+				LayerCount:     layerCount,
 			},
 		})
 
