@@ -49,8 +49,9 @@ type Device struct {
 	// and returned to the pool for reuse.
 	//
 	// Lifecycle: created before PendingWrites, destroyed after PendingWrites.
-	// PendingWrites.destroy() clears its pool reference but does NOT destroy
-	// the pool. Device.Release() destroys the pool after all users are done.
+	// pendingwrites.Writes.Destroy() clears its pool reference but does NOT
+	// destroy the pool. Device.Release() destroys the pool after all users are
+	// done.
 	//
 	// nil when no HAL device (e.g., core-only path).
 	cmdEncoderPool *encoderPool

@@ -16,11 +16,11 @@ internal/instance	internal/surface	all	N	Instance.CreateSurface() (*Surface, err
 # --- the rest of the extraction graph (no cycle candidate, listed for completeness) ---
 internal/instance	internal/queue	native	N	adapter_native.go:108 queue := &Queue{...}
 internal/instance	internal/encoder	native	N	adapter_native.go:103-108 encoder pool construction for the new device
-internal/instance	internal/pendingwrites	native	N	adapter_native.go:111 pendingwrites.New(openDevice.Device, openDevice.Queue, pool, ...)
+internal/instance	internal/pendingwrites	native	N	adapter_native.go:112 pendingwrites.New(openDevice.Device, openDevice.Queue, pool, ...)
 internal/instance	internal/hal	all	N	domain baseline (instance_native.go hal.Instance)
 internal/instance	internal/core	all	N	domain baseline (instance_native.go *core.Instance)
 internal/queue	internal/encoder	native	N	queue_native.go:237,249,688,731,886,895 cmdEncoderPool; *CommandBuffer
-internal/queue	internal/pendingwrites	native	N	queue_native.go:30 pending *pendingwrites.Writes
+internal/queue	internal/pendingwrites	native	N	queue_native.go:31 pending *pendingwrites.Writes
 internal/queue	internal/stencilblit	native	N	queue_native.go:427 stencil upload via stencilblit.NewUpload (payload; the queue records the commands)
 internal/queue	internal/hal	all	N	domain baseline (queue_native.go:25-26 hal.Queue, hal.Device)
 internal/queue	internal/core	native	N	queue_native.go:174 q.device.core; :529 DestroyQueueRef
@@ -40,7 +40,7 @@ internal/surface	internal/core	all	N	domain baseline (surface_native.go *core.Te
 internal/pendingwrites	internal/staging	native	N	internal/pendingwrites/pending_writes.go:47 belt *staging.Belt
 internal/pendingwrites	internal/hal	all	N	domain baseline (internal/pendingwrites/pending_writes.go:35-38 hal.Device, hal.Queue)
 internal/pendingwrites	internal/core	native	N	internal/pendingwrites/pending_writes.go:70 tracker *core.DeviceTracker
-internal/pendingwrites	internal/resource	native	N	internal/pendingwrites/pending_writes.go:12 resource.Texture; :89 dstTextures, :255 CoreTexture
+internal/pendingwrites	internal/resource	native	N	internal/pendingwrites/pending_writes.go:12 resource.Texture; :89 dstTextures, :256 CoreTexture
 internal/stencilblit	internal/hal	all	N	domain baseline (the payload holds hal handles; the encoder records the commands)
 internal/staging	internal/hal	all	N	staging_belt.go:34-35 halDevice, halQueue
 # --- the browser WebGPU path (wasm only): the extraction domains' _browser variants import internal/browser; the

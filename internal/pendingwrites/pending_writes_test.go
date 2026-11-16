@@ -99,7 +99,9 @@ func (d *testDevice) DestroyBuffer(buffer hal.Buffer) {
 
 func (d *testDevice) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
 	b, ok := buffer.(*testBuffer)
-	if !ok || b.data == nil || offset+size > uint64(len(b.data)) {
+	// offset >= len also covers an empty buffer and a zero-size map at the end
+	// of the data: &b.data[offset] would panic there.
+	if !ok || b.data == nil || offset+size > uint64(len(b.data)) || offset >= uint64(len(b.data)) {
 		return hal.BufferMapping{}, hal.ErrInvalidMapRange
 	}
 	return hal.BufferMapping{Ptr: unsafe.Pointer(&b.data[offset]), IsCoherent: true}, nil
