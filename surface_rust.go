@@ -178,6 +178,11 @@ func (s *Surface) DiscardTexture() {
 // values; the golden records the unnamed parameters this signature has always
 // had.
 func (s *Surface) PresentPixels(_ []byte, _, _ uint32, _ []image.Rectangle) error {
+	if s == nil {
+		// The pre-move rust method never dereferenced the receiver: a nil
+		// surface kept answering that the call is unsupported.
+		return fmt.Errorf("wgpu: PresentPixels is not supported on the Rust backend")
+	}
 	return s.impl.PresentPixels(nil, 0, 0, nil)
 }
 
@@ -185,12 +190,18 @@ func (s *Surface) PresentPixels(_ []byte, _, _ uint32, _ []image.Rectangle) erro
 // Software-backend extension for direct framebuffer write. The pixels are
 // never read, as for PresentPixels.
 func (s *Surface) WritePixels(_ []byte, _, _ uint32) error {
+	if s == nil {
+		return fmt.Errorf("wgpu: WritePixels is not supported on the Rust backend")
+	}
 	return s.impl.WritePixels(nil, 0, 0)
 }
 
 // SetPresentsWithTransaction is a no-op on Rust backend.
 // Core Animation transactions are macOS-only.
 func (s *Surface) SetPresentsWithTransaction(_ bool) {
+	if s == nil {
+		return // the pre-move no-op never touched the receiver
+	}
 	s.impl.SetPresentsWithTransaction(false)
 }
 

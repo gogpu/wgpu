@@ -250,7 +250,7 @@ func TestTypedSurfaceCreationPathsUseBackendMap(t *testing.T) {
 	if safeSurface.targetSource != provider {
 		t.Fatal("safe surface did not retain its provider")
 	}
-	if safeSurface.impl.HALSurfaceForBackend(gputypes.BackendSoftware) == nil {
+	if safeSurface.impl.HALSurfacesForAdapterRequest()[gputypes.BackendSoftware] == nil {
 		t.Fatal("safe surface did not retain the software backend surface")
 	}
 

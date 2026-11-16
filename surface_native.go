@@ -269,6 +269,13 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 		sameInstance = s.instance == device.instance || (s.instance == nil && device.instance == nil)
 	}
 
+	// A zero-value public Surface keeps its pre-move answers: an owned device
+	// was rejected as a different instance before any surface state was read,
+	// while an unowned one proceeded to the released answer.
+	if s.impl == nil && !sameInstance {
+		return fmt.Errorf("wgpu: surface and device belong to different instances")
+	}
+
 	// The HAL instance a backend's raw surface is created on is a root fact too:
 	// the instance's HAL entries stay in this package until S12. Resolve it for
 	// the device's backend and hand it in as a value; the implementation never
