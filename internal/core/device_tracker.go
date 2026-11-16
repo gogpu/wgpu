@@ -145,21 +145,6 @@ func (dt *DeviceTracker) SetSingleBuffer(index track.TrackerIndex, usage track.B
 	return dt.buffers.SetSingle(index, usage)
 }
 
-// SetSingleTexture moves a whole texture to usage outside any command buffer
-// (a queue write) and returns the barrier to record before that use.
-//
-// Deprecated: a texture whose subresources are in different states needs a
-// barrier for each, and SetSingleTexture returns only the first; use
-// AppendSingleTexture.
-func (dt *DeviceTracker) SetSingleTexture(index track.TrackerIndex, usage track.TextureUses) (track.TexturePendingTransition, bool) {
-	var storage [1]track.TexturePendingTransition
-	transitions := dt.AppendSingleTexture(storage[:0], index, track.TextureSelector{}, usage)
-	if len(transitions) == 0 {
-		return track.TexturePendingTransition{}, false
-	}
-	return transitions[0], true
-}
-
 // AppendSingleTexture moves the subresources selector selects to usage
 // outside any command buffer (a queue write) and appends the barriers to
 // record before that use, each from a subresource's own state, to
