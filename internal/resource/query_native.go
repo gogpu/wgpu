@@ -15,8 +15,8 @@ type QuerySet struct {
 }
 
 // NewQuerySet builds a query set over core state and the shared device view.
-func NewQuerySet(core *core.QuerySet, device core.DeviceView) *QuerySet {
-	return &QuerySet{core: core, device: device}
+func NewQuerySet(coreSet *core.QuerySet, device core.DeviceView) *QuerySet {
+	return &QuerySet{core: coreSet, device: device}
 }
 
 // Core returns the core query set, or nil.
@@ -72,6 +72,12 @@ func (qs *QuerySet) LiveCore() *core.QuerySet {
 		return nil
 	}
 	return qs.core
+}
+
+// IsReleased reports whether the application released the query set. Release
+// defers the core destruction, so the core object alone does not show it.
+func (qs *QuerySet) IsReleased() bool {
+	return qs != nil && qs.released
 }
 
 // Release drops the application's reference to the query set. The HAL query

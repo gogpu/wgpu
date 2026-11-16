@@ -551,7 +551,10 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		bgLayouts[i] = layout.impl
 	}
 
-	return &PipelineLayout{impl: resource.NewPipelineLayout(halLayout, d.seamView(), uint32(len(desc.BindGroupLayouts)), bgLayouts, newPipelineLayoutRef(d.seamView(), halDevice, halLayout, desc.Label))}, nil
+	// Complete the handle: the count was validated against the device limit
+	// above (ValidatePipelineLayoutDescriptor), so it fits uint32.
+	bindGroupCount := uint32(len(desc.BindGroupLayouts)) //nolint:gosec // G115: bounded by ValidatePipelineLayoutDescriptor (MaxBindGroups, at most 4) on line 539
+	return &PipelineLayout{impl: resource.NewPipelineLayout(halLayout, d.seamView(), bindGroupCount, bgLayouts, newPipelineLayoutRef(d.seamView(), halDevice, halLayout, desc.Label))}, nil
 }
 
 // CreateBindGroup creates a bind group.

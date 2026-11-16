@@ -114,12 +114,12 @@ func spirvString(words []uint32) string {
 // NewShaderModule builds a shader module over a HAL object and the shared
 // device view. info is the ModuleInfo of irModule's validation; it is kept
 // only when irModule is non-nil (a SPIR-V module has neither).
-func NewShaderModule(hal hal.ShaderModule, device core.DeviceView, irModule *ir.Module, info valid.ModuleInfo) *ShaderModule {
+func NewShaderModule(halModule hal.ShaderModule, device core.DeviceView, irModule *ir.Module, info valid.ModuleInfo) *ShaderModule {
 	var infoPtr *valid.ModuleInfo
 	if irModule != nil {
 		infoPtr = &info
 	}
-	return &ShaderModule{hal: hal, device: device, irModule: irModule, irInfo: infoPtr}
+	return &ShaderModule{hal: halModule, device: device, irModule: irModule, irInfo: infoPtr}
 }
 
 // HAL returns the HAL shader module, or nil.

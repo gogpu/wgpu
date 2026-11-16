@@ -45,7 +45,7 @@ type TextureView struct {
 
 // Texture returns the parent Texture this view was created from, the same
 // public wrapper the device handed out. Returns nil if the view has been
-// released (native behaviour; the browser and rust builds read it directly).
+// released (native behavior; the browser and rust builds read it directly).
 func (v *TextureView) Texture() *Texture {
 	if v == nil || v.impl == nil {
 		return nil

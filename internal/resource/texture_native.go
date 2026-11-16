@@ -46,14 +46,14 @@ type Texture struct {
 
 // NewTexture builds a texture over a HAL object and the shared device view.
 // The device that creates a texture is the only caller.
-func NewTexture(hal hal.Texture, device core.DeviceView, format gputypes.TextureFormat, viewFormats *[]gputypes.TextureFormat, coreTexture *core.Texture) *Texture {
-	return &Texture{hal: hal, device: device, format: format, viewFormats: viewFormats, coreTexture: coreTexture}
+func NewTexture(halTexture hal.Texture, device core.DeviceView, format gputypes.TextureFormat, viewFormats *[]gputypes.TextureFormat, coreTexture *core.Texture) *Texture {
+	return &Texture{hal: halTexture, device: device, format: format, viewFormats: viewFormats, coreTexture: coreTexture}
 }
 
 // NewSurfaceTexture builds a texture that borrows a surface image: it carries
 // the surface and lease so the HAL handle is usable only for that acquisition.
-func NewSurfaceTexture(hal hal.Texture, device core.DeviceView, format gputypes.TextureFormat, surface *core.Surface, surfaceLease uint64, coreTexture *core.Texture) *Texture {
-	return &Texture{hal: hal, device: device, format: format, surface: surface, surfaceLease: surfaceLease, coreTexture: coreTexture}
+func NewSurfaceTexture(halTexture hal.Texture, device core.DeviceView, format gputypes.TextureFormat, surface *core.Surface, surfaceLease uint64, coreTexture *core.Texture) *Texture {
+	return &Texture{hal: halTexture, device: device, format: format, surface: surface, surfaceLease: surfaceLease, coreTexture: coreTexture}
 }
 
 // NewDetachedTexture builds a texture that carries only the descriptor's

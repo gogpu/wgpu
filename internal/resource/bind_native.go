@@ -25,8 +25,8 @@ type BindGroupLayout struct {
 
 // NewBindGroupLayout builds a bind group layout over a HAL object and the
 // shared device view.
-func NewBindGroupLayout(hal hal.BindGroupLayout, device core.DeviceView, entries []gputypes.BindGroupLayoutEntry) *BindGroupLayout {
-	return &BindGroupLayout{hal: hal, device: device, entries: entries}
+func NewBindGroupLayout(halLayout hal.BindGroupLayout, device core.DeviceView, entries []gputypes.BindGroupLayoutEntry) *BindGroupLayout {
+	return &BindGroupLayout{hal: halLayout, device: device, entries: entries}
 }
 
 // HAL returns the HAL bind group layout, or nil.
@@ -156,8 +156,8 @@ type PipelineLayout struct {
 
 // NewPipelineLayout builds a pipeline layout over a HAL object and the shared
 // device view.
-func NewPipelineLayout(hal hal.PipelineLayout, device core.DeviceView, bindGroupCount uint32, bindGroupLayouts []*BindGroupLayout, ref *core.ResourceRef) *PipelineLayout {
-	return &PipelineLayout{hal: hal, device: device, bindGroupCount: bindGroupCount, bindGroupLayouts: bindGroupLayouts, ref: ref}
+func NewPipelineLayout(halLayout hal.PipelineLayout, device core.DeviceView, bindGroupCount uint32, bindGroupLayouts []*BindGroupLayout, ref *core.ResourceRef) *PipelineLayout {
+	return &PipelineLayout{hal: halLayout, device: device, bindGroupCount: bindGroupCount, bindGroupLayouts: bindGroupLayouts, ref: ref}
 }
 
 // HAL returns the HAL pipeline layout, or nil.

@@ -13,3 +13,5 @@ target	internal/resource	internal/browser	wasm	S1
 target	internal/resource	internal/core	all	S1
 target	internal/resource	internal/hal	all	S1
 inverted	internal/resource	internal/device	native+rust	S1
+target	internal/resource	internal/core/track	native	S2
+target	internal/resource	internal/shaderir	native	S2

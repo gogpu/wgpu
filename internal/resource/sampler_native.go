@@ -25,8 +25,8 @@ type Sampler struct {
 }
 
 // NewSampler builds a sampler over a HAL object and the shared device view.
-func NewSampler(hal hal.Sampler, device core.DeviceView, ref *core.ResourceRef, mag, min, mipmap gputypes.FilterMode) *Sampler {
-	return &Sampler{hal: hal, device: device, ref: ref, magFilter: mag, minFilter: min, mipmapFilter: mipmap}
+func NewSampler(halSampler hal.Sampler, device core.DeviceView, ref *core.ResourceRef, mag, minFilter, mipmap gputypes.FilterMode) *Sampler {
+	return &Sampler{hal: halSampler, device: device, ref: ref, magFilter: mag, minFilter: minFilter, mipmapFilter: mipmap}
 }
 
 // HAL returns the HAL sampler, or nil.

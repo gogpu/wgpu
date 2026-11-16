@@ -53,7 +53,7 @@ internal/surface	internal/browser	wasm	N	surface_browser.go:12
 internal/device	internal/browser	wasm	N	device_browser.go:11
 internal/instance	internal/browser	wasm	N	adapter_browser.go:9, instance_browser.go:9
 # --- the core trackers (native): the resource, encoder, pendingwrites and queue code registers with core/track.
-internal/resource	internal/core/track	native	N	bind_native.go:12, texture_native.go:10
+internal/resource	internal/core/track	native	N	texture_native.go:8
 internal/encoder	internal/core/track	native	N	computepass_native.go:11, encoder_native.go:10, renderbundle_finish.go:11
 internal/pendingwrites	internal/core/track	native	N	pending_writes.go:10
 internal/queue	internal/core/track	native	N	queue_native.go:12
@@ -64,4 +64,4 @@ internal/encoder	internal/indirect	wasm	N	renderpass_browser.go:8
 internal/device	internal/pipeconst	rust	N	device_rust.go:15
 internal/device	internal/pipeconst	wasm	N	device_browser.go:12
 # --- the shader IR the resource shader module lowers through.
-internal/resource	internal/shaderir	native	N	shader_native.go:12
+internal/resource	internal/shaderir	native	N	shader_native.go:13

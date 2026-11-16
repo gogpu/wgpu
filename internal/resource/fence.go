@@ -19,8 +19,8 @@ type Fence struct {
 }
 
 // NewFence builds a fence over a HAL object and the shared device view.
-func NewFence(hal hal.Fence, device core.DeviceView) *Fence {
-	return &Fence{hal: hal, device: device}
+func NewFence(halFence hal.Fence, device core.DeviceView) *Fence {
+	return &Fence{hal: halFence, device: device}
 }
 
 // HAL returns the HAL fence, or nil.
