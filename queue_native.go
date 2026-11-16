@@ -112,17 +112,16 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 		}
 	}
 
-	// Flush pending writes under lock, then release lock before HAL submit.
+	// Flush pending writes (the domain takes its own lock), then go on to
+	// HAL submit without it.
 	var pendingCmdBuf hal.CommandBuffer
 	var flushedEncoder hal.CommandEncoder
 	var flushedDstTextures []hal.Texture
 	var flushedDstRefs []*core.ResourceRef
 
 	if q.pending != nil {
-		q.pending.mu.Lock()
 		var err error
-		pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs, err = q.pending.flush()
-		q.pending.mu.Unlock()
+		pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs, err = q.pending.Flush()
 		if err != nil {
 			return 0, fmt.Errorf("wgpu: flush pending writes: %w", err)
 		}
@@ -131,9 +130,7 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 	allBuffers, err := q.assembleSubmission(pendingCmdBuf, commandBuffers)
 	if err != nil {
 		if q.pending != nil && pendingCmdBuf != nil {
-			q.pending.mu.Lock()
-			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
-			q.pending.mu.Unlock()
+			q.pending.CancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
 		}
 		return 0, err
 	}
@@ -147,9 +144,7 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 		// memory or a lost device, and the device is not expected to recover.
 		q.releaseTransits()
 		if q.pending != nil && pendingCmdBuf != nil {
-			q.pending.mu.Lock()
-			q.pending.cancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
-			q.pending.mu.Unlock()
+			q.pending.CancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
 		}
 		return 0, fmt.Errorf("wgpu: submit failed: %w", err)
 	}
@@ -160,25 +155,10 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 	// Record inflight resources and clean up completed ones.
 	// dstTextures/dstBuffers prevent premature Release (BUG-DX12-006: use-after-free).
 	if q.pending != nil {
-		q.pending.mu.Lock()
-		hasInflightWork := pendingCmdBuf != nil || flushedDstTextures != nil
-		if hasInflightWork {
-			q.pending.inflight = append(q.pending.inflight, inflightSubmission{
-				submissionIndex: subIdx,
-				staging:         nil, // staging managed by belt
-				cmdBuf:          pendingCmdBuf,
-				encoder:         flushedEncoder,
-				dstTextures:     flushedDstTextures,
-				dstRefs:         flushedDstRefs,
-			})
-		}
-		// Update the staging belt with the actual submission index
-		// (belt.Finish() was called during flush() before Submit).
-		if q.pending.belt != nil {
-			q.pending.belt.SetLastSubmissionIndex(subIdx)
-		}
-		q.pending.maintain(q.hal.PollCompleted())
-		q.pending.mu.Unlock()
+		// The HAL poll stays outside the pending-writes lock; RecordSubmission
+		// takes it once for the inflight entry, the belt index and the recycle.
+		q.pending.RecordSubmission(subIdx, q.hal.PollCompleted(),
+			pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
 	}
 
 	// Post-submit bookkeeping: track refs, recycle encoders, triage destroys.
@@ -946,7 +926,7 @@ func (q *Queue) recordAndTrackAllBarriers(
 // release cleans up queue resources.
 func (q *Queue) release() {
 	if q.pending != nil {
-		q.pending.destroy()
+		q.pending.Destroy()
 		q.pending = nil
 	}
 }

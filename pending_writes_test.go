@@ -170,7 +170,7 @@ func flushAndDiscard(pw *pendingWrites) error {
 
 func TestPendingWrites_NewNonBatching(t *testing.T) {
 	pw, _, _ := createNonBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	if pw.usesBatching {
 		t.Error("expected usesBatching=false for non-batching queue")
@@ -188,7 +188,7 @@ func TestPendingWrites_NewNonBatching(t *testing.T) {
 
 func TestPendingWrites_NewBatching(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	if !pw.usesBatching {
 		t.Error("expected usesBatching=true for batching queue")
@@ -203,7 +203,7 @@ func TestPendingWrites_NewBatching(t *testing.T) {
 
 func TestPendingWrites_WriteBufferNonBatching(t *testing.T) {
 	pw, dev, q := createNonBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	buf, err := dev.CreateBuffer(&hal.BufferDescriptor{
 		Label:            "test",
@@ -242,7 +242,7 @@ func TestPendingWrites_WriteBufferNonBatching(t *testing.T) {
 
 func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 	pw, _, q := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	// Create a destination buffer (non-mapped).
 	dstBuf := &noop.Resource{}
@@ -283,7 +283,7 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 
 func TestPendingWrites_WriteBufferEmptyData(t *testing.T) {
 	pw, _, q := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	dstBuf := &noop.Resource{}
 	// Empty data should be a no-op for batching.
@@ -301,7 +301,7 @@ func TestPendingWrites_WriteBufferEmptyData(t *testing.T) {
 
 func TestPendingWrites_WriteTextureNonBatching(t *testing.T) {
 	pw, _, q := createNonBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	tex := &noop.Texture{}
 	dst := &hal.ImageCopyTexture{Texture: tex}
@@ -323,7 +323,7 @@ func TestPendingWrites_WriteTextureNonBatching(t *testing.T) {
 
 func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 	pw, _, q := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	tex := &noop.Texture{}
 	dst := &hal.ImageCopyTexture{Texture: tex, MipLevel: 0}
@@ -373,7 +373,7 @@ func trackedPendingWrites(t *testing.T) (*pendingWrites, *barrierCaptureDevice, 
 	pool := newEncoderPool(dev)
 	pw := newPendingWrites(dev, &mockBatchingQueue{}, pool, coreDevice.Tracker())
 	t.Cleanup(func() {
-		pw.destroy()
+		pw.Destroy()
 		pool.destroy()
 	})
 	return pw, dev, coreDevice
@@ -519,7 +519,7 @@ func TestPendingWrites_WriteBufferBarrierBeforeCopy(t *testing.T) {
 
 func TestPendingWrites_WriteTextureEmptyData(t *testing.T) {
 	pw, _, q := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	tex := &noop.Texture{}
 	dst := &hal.ImageCopyTexture{Texture: tex}
@@ -540,7 +540,7 @@ func TestPendingWrites_WriteTextureEmptyData(t *testing.T) {
 
 func TestPendingWrites_FlushNoWork(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	pw.mu.Lock()
 	cmdBuf, enc, dstTex, dstBuf, err := pw.flush()
@@ -565,7 +565,7 @@ func TestPendingWrites_FlushNoWork(t *testing.T) {
 
 func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	dstBuf := &noop.Resource{}
 	data := []byte{1, 2, 3, 4}
@@ -676,7 +676,7 @@ func TestPendingWrites_DestinationRefsOutliveEncoding(t *testing.T) {
 
 func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	tex := &noop.Texture{}
 	dst := &hal.ImageCopyTexture{Texture: tex}
@@ -717,7 +717,7 @@ func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 
 func TestPendingWrites_Maintain(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	// Simulate two inflight submissions with staging buffers.
 	buf1 := &noop.Resource{}
@@ -758,7 +758,7 @@ func TestPendingWrites_Maintain(t *testing.T) {
 
 func TestPendingWrites_MaintainWithPendingTextureRefs(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	tex := &noop.Texture{}
 
@@ -780,7 +780,7 @@ func TestPendingWrites_MaintainWithPendingTextureRefs(t *testing.T) {
 
 func TestPendingWrites_HasPendingWork(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	if pw.HasPendingWork() {
 		t.Error("expected no pending work initially")
@@ -839,7 +839,7 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 	pw.mu.Unlock()
 
 	// destroy should not panic and should clean up everything.
-	pw.destroy()
+	pw.Destroy()
 
 	if pw.encoder != nil {
 		t.Error("expected encoder=nil after destroy")
@@ -861,7 +861,7 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 func TestPendingWrites_DestroyNonBatching(t *testing.T) {
 	pw, _, _ := createNonBatchingPW(t)
 	// Should not panic even with no pool.
-	pw.destroy()
+	pw.Destroy()
 }
 
 func TestPendingWrites_AlignUp(t *testing.T) {
@@ -1128,7 +1128,7 @@ func TestPendingWrites_WriteBufferEmptyBatching(t *testing.T) {
 	// Zero-length write in batching mode must return nil without allocating
 	// staging or activating the encoder.
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	dstBuf := &noop.Resource{}
 	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
@@ -1141,7 +1141,7 @@ func TestPendingWrites_WriteBufferEmptyBatching(t *testing.T) {
 
 func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	buf1 := &noop.Resource{}
 	buf2 := &noop.Resource{}
@@ -1191,7 +1191,7 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 
 func TestPendingWrites_ActivateReusesEncoder(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	// First write activates encoder.
 	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
@@ -1211,7 +1211,7 @@ func TestPendingWrites_ActivateReusesEncoder(t *testing.T) {
 
 func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	// Write and flush.
 	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
@@ -1250,7 +1250,7 @@ func TestPendingWrites_NewWithNoopBackend(t *testing.T) {
 	defer cleanup()
 
 	pw := newPendingWrites(dev, q, nil, nil)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	if pw.usesBatching {
 		t.Error("noop backend should not use batching")
@@ -1266,7 +1266,7 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	defer cleanup()
 
 	pw := newPendingWrites(dev, q, nil, nil)
-	defer pw.destroy()
+	defer pw.Destroy()
 
 	buf, err := dev.CreateBuffer(&hal.BufferDescriptor{
 		Label:            "test",
@@ -1311,7 +1311,7 @@ func TestPendingWrites_MaxStagingBufferSizerWiring(t *testing.T) {
 	q := &mockBatchingQueue{}
 	pool := newEncoderPool(&dev.Device)
 	pw := newPendingWrites(dev, q, pool, nil)
-	defer pw.destroy()
+	defer pw.Destroy()
 	defer pool.destroy()
 
 	if pw.belt == nil {
@@ -1330,7 +1330,7 @@ func TestPendingWrites_MaxStagingBufferSizerDefaultWhenNotImplemented(t *testing
 	q := &mockBatchingQueue{}
 	pool := newEncoderPool(dev)
 	pw := newPendingWrites(dev, q, pool, nil)
-	defer pw.destroy()
+	defer pw.Destroy()
 	defer pool.destroy()
 
 	if pw.belt == nil {

@@ -1633,9 +1633,7 @@ func (d *Device) maintainAfterIdle() {
 		dq.Triage(completed)
 	}
 	if d.queue.pending != nil {
-		d.queue.pending.mu.Lock()
-		d.queue.pending.maintain(completed)
-		d.queue.pending.mu.Unlock()
+		d.queue.pending.Maintain(completed)
 	}
 }
 

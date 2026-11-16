@@ -498,6 +498,17 @@ func (pw *pendingWrites) activate() (hal.CommandEncoder, error) {
 	return pw.encoder, nil
 }
 
+// Flush closes the pending command encoder and returns the command buffer to
+// prepend before user command buffers, with the encoder and the destination
+// references to track as one submission. It returns zero values when nothing
+// was recorded. Thread-safe: it takes the pending-writes lock itself, which is
+// the lock callers took around flush() before the domain became internal (S8).
+func (pw *pendingWrites) Flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []*core.ResourceRef, error) {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	return pw.flush()
+}
+
 // flush closes the pending command encoder and returns a command buffer to
 // prepend before user command buffers. Returns nil if no writes were recorded.
 // The encoder is detached for inflight tracking — after GPU completion,
@@ -597,6 +608,14 @@ func (pw *pendingWrites) discardRecording() {
 	clear(pw.dstTextures)
 }
 
+// CancelFlush releases a batch that was closed by Flush but rejected by HAL
+// Submit. Thread-safe: it takes the pending-writes lock itself.
+func (pw *pendingWrites) CancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	pw.cancelFlush(cmdBuf, encoder, dstTextures, dstRefs)
+}
+
 // cancelFlush releases a batch that was closed but rejected by HAL Submit.
 // The destination references drop after the encoder is reset. Must be called
 // with pw.mu held.
@@ -677,6 +696,43 @@ func (pw *pendingWrites) maintain(completedIndex uint64) {
 	}
 }
 
+// RecordSubmission records a completed HAL submit in one critical section: the
+// inflight entry for the resources the flushed batch holds, the staging belt's
+// real submission index, and the recycle of everything the GPU has completed
+// up to completedIndex. completedIndex is the caller's PollCompleted result,
+// taken before the call so the HAL poll stays outside this lock. Thread-safe:
+// it takes the pending-writes lock itself.
+func (pw *pendingWrites) RecordSubmission(subIdx, completedIndex uint64, cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+
+	// dstTextures/dstBuffers prevent premature Release (BUG-DX12-006:
+	// use-after-free): the submission holds them until GPU completion.
+	if cmdBuf != nil || dstTextures != nil {
+		pw.inflight = append(pw.inflight, inflightSubmission{
+			submissionIndex: subIdx,
+			staging:         nil, // staging managed by belt
+			cmdBuf:          cmdBuf,
+			encoder:         encoder,
+			dstTextures:     dstTextures,
+			dstRefs:         dstRefs,
+		})
+	}
+	// The belt's finish() ran during Flush, before Submit knew the index.
+	if pw.belt != nil {
+		pw.belt.SetLastSubmissionIndex(subIdx)
+	}
+	pw.maintain(completedIndex)
+}
+
+// Maintain recycles everything the GPU has completed up to completedIndex.
+// Thread-safe: it takes the pending-writes lock itself.
+func (pw *pendingWrites) Maintain(completedIndex uint64) {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	pw.maintain(completedIndex)
+}
+
 // HasPendingWork returns true if there are buffered writes waiting to be flushed.
 func (pw *pendingWrites) HasPendingWork() bool {
 	pw.mu.Lock()
@@ -684,8 +740,20 @@ func (pw *pendingWrites) HasPendingWork() bool {
 	return pw.isRecording
 }
 
-// destroy releases all resources held by pendingWrites.
-func (pw *pendingWrites) destroy() {
+// BeltStats returns the staging belt's statistics, zero when the backend does
+// not batch. Thread-safe; the surface-lifetime test reads it through here.
+func (pw *pendingWrites) BeltStats() staging.Stats {
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
+	if pw.belt == nil {
+		return staging.Stats{}
+	}
+	return pw.belt.Stats()
+}
+
+// Destroy releases all resources held by pendingWrites. Thread-safe: it takes
+// the pending-writes lock itself.
+func (pw *pendingWrites) Destroy() {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 
