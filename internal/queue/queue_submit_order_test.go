@@ -71,7 +71,7 @@ func finishWithTextureUse(t *testing.T, device *core.Device, host *testHost, lab
 	if err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
-	coreCB.TextureScope().SetSingle(tex.CoreTexture().TrackingData().Index(), use)
+	coreCB.TextureScope().AppendSingle(nil, tex.CoreTexture().TrackingData().Index(), track.TextureSelector{}, use)
 	out := encoder.NewTestCommandBuffer(coreCB, host)
 	out.SetUsedSetsForTest(nil, map[*resource.Texture]struct{}{tex: {}}, nil)
 	return out

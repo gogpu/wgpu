@@ -148,12 +148,30 @@ func (dt *DeviceTracker) SetSingleBuffer(index track.TrackerIndex, usage track.B
 // SetSingleTexture moves a whole texture to usage outside any command buffer
 // (a queue write) and returns the barrier to record before that use.
 //
+// Deprecated: a texture whose subresources are in different states needs a
+// barrier for each, and SetSingleTexture returns only the first; use
+// AppendSingleTexture.
+func (dt *DeviceTracker) SetSingleTexture(index track.TrackerIndex, usage track.TextureUses) (track.TexturePendingTransition, bool) {
+	var storage [1]track.TexturePendingTransition
+	transitions := dt.AppendSingleTexture(storage[:0], index, track.TextureSelector{}, usage)
+	if len(transitions) == 0 {
+		return track.TexturePendingTransition{}, false
+	}
+	return transitions[0], true
+}
+
+// AppendSingleTexture moves the subresources selector selects to usage
+// outside any command buffer (a queue write) and appends the barriers to
+// record before that use, each from a subresource's own state, to
+// transitions.
+//
 // Reference: wgpu-core device/queue.rs write_texture
 // (trackers.textures.set_single(&dst, selector, COPY_DST))
-func (dt *DeviceTracker) SetSingleTexture(index track.TrackerIndex, usage track.TextureUses) (track.TexturePendingTransition, bool) {
+func (dt *DeviceTracker) AppendSingleTexture(transitions []track.TexturePendingTransition, index track.TrackerIndex,
+	selector track.TextureSelector, usage track.TextureUses) []track.TexturePendingTransition {
 	dt.mu.Lock()
 	defer dt.mu.Unlock()
-	return dt.textures.SetSingle(index, usage)
+	return dt.textures.AppendSingle(transitions, index, selector, usage)
 }
 
 // RemoveBuffer removes a buffer from the device tracker.
@@ -170,7 +188,8 @@ func (dt *DeviceTracker) RemoveBuffer(index track.TrackerIndex) {
 // The trackerIndex must be a valid index for this texture in the device
 // tracker. If the texture is not yet tracked, it will be added.
 //
-// Returns the barrier (from -> Present) or nil if no barrier is needed.
+// Returns the barrier (from -> Present) or nil if no barrier is needed. A
+// surface texture has a single subresource, so there is at most one.
 func (dt *DeviceTracker) TrackPresentTexture(trackerIndex track.TrackerIndex) *track.TexturePendingTransition {
 	scope := track.NewTextureUsageScope()
 	_ = scope.SetUsage(trackerIndex, track.TextureUsesPresent)

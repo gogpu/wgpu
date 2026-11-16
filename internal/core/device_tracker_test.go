@@ -65,7 +65,7 @@ func TestDeviceTracker_MergeTextureScope_Transition(t *testing.T) {
 
 	// Command buffer uses it as copy source
 	scope := track.NewEncoderTextureTracker()
-	scope.SetSingle(idx, track.TextureUsesCopySrc)
+	scope.AppendSingle(nil, idx, track.TextureSelector{}, track.TextureUsesCopySrc)
 
 	transitions := dt.MergeTextureScope(scope)
 
@@ -89,7 +89,7 @@ func TestDeviceTracker_MergeTextureScope_NoTransition(t *testing.T) {
 	// Same ordered state
 	dt.InsertTexture(idx, track.TextureUsesResource)
 	scope := track.NewEncoderTextureTracker()
-	scope.SetSingle(idx, track.TextureUsesResource)
+	scope.AppendSingle(nil, idx, track.TextureSelector{}, track.TextureUsesResource)
 
 	transitions := dt.MergeTextureScope(scope)
 	if len(transitions) != 0 {
@@ -154,9 +154,9 @@ func TestDeviceTracker_MultipleTextures(t *testing.T) {
 	dt.InsertTexture(idx2, track.TextureUsesResource)
 
 	scope := track.NewEncoderTextureTracker()
-	scope.SetSingle(idx0, track.TextureUsesCopySrc)     // transition needed
-	scope.SetSingle(idx1, track.TextureUsesResource)    // same ordered, skip
-	scope.SetSingle(idx2, track.TextureUsesColorTarget) // transition needed
+	scope.AppendSingle(nil, idx0, track.TextureSelector{}, track.TextureUsesCopySrc)     // transition needed
+	scope.AppendSingle(nil, idx1, track.TextureSelector{}, track.TextureUsesResource)    // same ordered, skip
+	scope.AppendSingle(nil, idx2, track.TextureSelector{}, track.TextureUsesColorTarget) // transition needed
 
 	transitions := dt.MergeTextureScope(scope)
 
@@ -259,7 +259,7 @@ func TestDeviceTracker_PresentTransitionFlow(t *testing.T) {
 
 	// Step 2: Command buffer records ColorTarget usage
 	scope := track.NewEncoderTextureTracker()
-	scope.SetSingle(idx, track.TextureUsesColorTarget)
+	scope.AppendSingle(nil, idx, track.TextureSelector{}, track.TextureUsesColorTarget)
 
 	// Step 3: Merge — same ordered state, no barrier needed
 	transitions := dt.MergeTextureScope(scope)
@@ -308,7 +308,7 @@ func TestDeviceTracker_SubmitFlowSingleCB(t *testing.T) {
 
 	// Command buffer uses it as COLOR_TARGET (render pass attachment).
 	scope := track.NewEncoderTextureTracker()
-	scope.SetSingle(idx, track.TextureUsesColorTarget)
+	scope.AppendSingle(nil, idx, track.TextureSelector{}, track.TextureUsesColorTarget)
 
 	// Merge scope — should produce UNINITIALIZED -> COLOR_TARGET transition.
 	transitions := dt.MergeTextureScope(scope)
@@ -329,7 +329,7 @@ func TestDeviceTracker_SubmitFlowSingleCB(t *testing.T) {
 
 	// Second submit with same usage — no barrier (same ordered state).
 	scope2 := track.NewEncoderTextureTracker()
-	scope2.SetSingle(idx, track.TextureUsesColorTarget)
+	scope2.AppendSingle(nil, idx, track.TextureSelector{}, track.TextureUsesColorTarget)
 	transitions2 := dt.MergeTextureScope(scope2)
 	if len(transitions2) != 0 {
 		t.Errorf("Expected 0 transitions for same ordered state, got %d", len(transitions2))
@@ -352,11 +352,11 @@ func TestDeviceTracker_SubmitFlowMultipleCBs(t *testing.T) {
 
 	// First CB: uses A as ColorTarget
 	scope1 := track.NewEncoderTextureTracker()
-	scope1.SetSingle(idxA, track.TextureUsesColorTarget)
+	scope1.AppendSingle(nil, idxA, track.TextureSelector{}, track.TextureUsesColorTarget)
 
 	// Second CB: uses B as CopyDst
 	scope2 := track.NewEncoderTextureTracker()
-	scope2.SetSingle(idxB, track.TextureUsesCopyDst)
+	scope2.AppendSingle(nil, idxB, track.TextureSelector{}, track.TextureUsesCopyDst)
 
 	// Merge both scopes (simulating Submit loop)
 	trans1 := dt.MergeTextureScope(scope1)
@@ -414,7 +414,7 @@ func TestDeviceTracker_SubmitFlowNewTextureAutoInsert(t *testing.T) {
 
 	// Scope references a texture not yet tracked
 	scope := track.NewEncoderTextureTracker()
-	scope.SetSingle(idx, track.TextureUsesColorTarget)
+	scope.AppendSingle(nil, idx, track.TextureSelector{}, track.TextureUsesColorTarget)
 
 	// Should auto-insert without transition
 	transitions := dt.MergeTextureScope(scope)
@@ -444,8 +444,8 @@ func TestDeviceTracker_BarrierCBFromTransitions_FullFlow(t *testing.T) {
 	dt.InsertTexture(idx1, track.TextureUsesResource)
 
 	scope := track.NewEncoderTextureTracker()
-	scope.SetSingle(idx0, track.TextureUsesColorTarget) // Resource->ColorTarget
-	scope.SetSingle(idx1, track.TextureUsesResource)    // same, skip
+	scope.AppendSingle(nil, idx0, track.TextureSelector{}, track.TextureUsesColorTarget) // Resource->ColorTarget
+	scope.AppendSingle(nil, idx1, track.TextureSelector{}, track.TextureUsesResource)    // same, skip
 
 	transitions := dt.MergeTextureScope(scope)
 	if len(transitions) != 1 {
@@ -899,7 +899,7 @@ func TestBeginRenderPass_EarlierUsageIsTransitionedNotConflict(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateCommandEncoderWithHAL: %v", err)
 		}
-		enc.Mutable().TextureScope().SetSingle(td.Index(), earlier)
+		enc.Mutable().TextureScope().AppendSingle(nil, td.Index(), track.TextureSelector{}, earlier)
 
 		pass, err := enc.BeginRenderPass(&RenderPassDescriptor{
 			ColorAttachments: []RenderPassColorAttachment{
