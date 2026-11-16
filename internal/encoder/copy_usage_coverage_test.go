@@ -164,7 +164,7 @@ func TestCopyRecordsTransitionsFromEarlierCommands(t *testing.T) {
 
 	// An earlier command (a render pass) left the texture as a color target
 	// and the buffer as a vertex buffer.
-	encoder.core.Mutable().TextureScope().SetSingle(texIndex, track.TextureUsesColorTarget)
+	encoder.core.Mutable().TextureScope().AppendSingle(nil, texIndex, track.TextureSelector{}, track.TextureUsesColorTarget)
 	encoder.core.Mutable().BufferScope().SetSingle(bufIndex, track.BufferUsesVertex)
 
 	second := &copyBarrierCaptureEncoder{}

@@ -288,13 +288,16 @@ func (e *CommandEncoder) transitionCopyTextures(raw hal.CommandEncoder, requests
 		return
 	}
 	var barriers []hal.TextureBarrier
+	var transitionStorage [2]track.TexturePendingTransition
 	for _, request := range requests {
-		transition, needed := tracker.SetSingle(request.index, request.usage)
-		if !needed {
+		transitions := tracker.AppendSingle(transitionStorage[:0], request.index, track.TextureSelector{}, request.usage)
+		if len(transitions) == 0 {
 			continue
 		}
 		if halTexture := request.texture.ResolveHAL(); halTexture != nil {
-			barriers = append(barriers, transition.IntoHAL(halTexture))
+			for _, transition := range transitions {
+				barriers = append(barriers, transition.IntoHAL(halTexture))
+			}
 		}
 	}
 	if len(barriers) > 0 && raw != nil {

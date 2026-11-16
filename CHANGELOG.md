@@ -22,6 +22,16 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   needs the GPU reports `wgpu.ErrReleased`, the error wgpu reports for a texture without a HAL handle, and never
   panics; `Release` is a no-op. It replaces the hand-written `hal.Texture` stubs that consumers built through
   `NewTextureFromHAL`, which leaves the public API when `hal` becomes internal (ADR-070).
+- **`core/track` keeps a texture's usage per mip level and array layer**, as Rust wgpu-core's `TextureSelector`
+  states do: one usage while every subresource shares it, and one per mip level and layer once they differ, so a
+  usage scope conflicts only where two usages meet on one subresource and each barrier moves a subresource from its
+  own state. New forms take a `track.TextureSelector`, whose zero value selects the whole texture:
+  `TextureUsageScope.SetSubresourceUsage`, `EncoderTextureTracker.RecordSubresourceTransition`, and `AppendSingle`
+  on `EncoderTextureTracker` and `TextureTracker`, which appends the transitions to the caller's slice, so copies and
+  queue writes allocate nothing for them; `core.DeviceTracker.AppendSingleTexture` is its device form.
+  `TexturePendingTransition` has a `Selector`, which `IntoHAL` turns into the barrier's range. `GetUsage`,
+  `StartUsage` and `EndUsage` return `TextureUsesNone` while a texture's subresources differ. Every caller in this
+  module still passes the whole texture, so what is tracked and every barrier recorded are unchanged.
 
 ### Fixed
 
@@ -77,6 +87,13 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   there was no production path to register the hook, so the internal mechanism went with it: `internal/core`'s
   `SetPrepareFrame`, `PrepareFrameFunc`, the `prepareFrame` field and `applyPrepareFrame`, and the two core tests
   that covered them.
+
+### Deprecated
+
+- **`track.TextureTracker.SetSingle`, `track.EncoderTextureTracker.SetSingle` and
+  `core.DeviceTracker.SetSingleTexture`.** A texture whose subresources are in different states needs a barrier for
+  each, and these return only the first; use `AppendSingle` and `AppendSingleTexture`. `track.TextureState` is no
+  longer used by the trackers.
 
 ## [0.34.15] - 2026-11-14
 

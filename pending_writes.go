@@ -348,14 +348,19 @@ func (pw *pendingWrites) writeTextureFor(
 		return fmt.Errorf("wgpu: pending writes: activate encoder: %w", err)
 	}
 
-	// Transition the texture from its device-tracker state to COPY_DST. The
-	// tracker is whole-texture, so the barrier covers every subresource; a
-	// barrier from the real previous layout keeps earlier contents (a partial
-	// atlas update must not start from UNDEFINED).
+	// Transition the whole texture from its device-tracker state to
+	// COPY_DST, each subresource from its own; a barrier from the real
+	// previous layout keeps earlier contents (a partial atlas update must not
+	// start from UNDEFINED).
 	if idx := textureTrackerIndex(owner); pw.tracker != nil && idx.IsValid() {
-		if transition, ok := pw.tracker.SetSingleTexture(idx, track.TextureUsesCopyDst); ok {
-			barrier := [1]hal.TextureBarrier{transition.IntoHAL(dst.Texture)}
-			enc.TransitionTextures(barrier[:])
+		var transitionStorage [1]track.TexturePendingTransition
+		var barrierStorage [1]hal.TextureBarrier
+		barriers := barrierStorage[:0]
+		for _, transition := range pw.tracker.AppendSingleTexture(transitionStorage[:0], idx, track.TextureSelector{}, track.TextureUsesCopyDst) {
+			barriers = append(barriers, transition.IntoHAL(dst.Texture))
+		}
+		if len(barriers) > 0 {
+			enc.TransitionTextures(barriers)
 		}
 	}
 
