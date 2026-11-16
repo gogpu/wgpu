@@ -6,8 +6,8 @@
 // Package surface holds the surface domain's implementation (ADR-070 S10).
 //
 // On the rust build the domain's whole view of the device is the wgpu-native
-// handle a surface is configured against. The Surface implementation moves here
-// in the S10 Move; the root package keeps a declaration layer over it.
+// handle a surface is configured against. The Surface implementation lives
+// here; the root package keeps a declaration layer over it.
 package surface
 
 import rwgpu "github.com/go-webgpu/webgpu/wgpu"

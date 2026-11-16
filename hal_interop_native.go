@@ -34,8 +34,12 @@ func (d *Device) halHandles() hal.Handles {
 
 // halHandles is the native-build body of Surface.HAL.
 func (s *Surface) halHandles() hal.Handles {
-	if s == nil || s.core == nil {
+	if s == nil {
 		return hal.Handles{}
 	}
-	return s.core.HALHandles()
+	coreSurface := s.impl.Core()
+	if coreSurface == nil {
+		return hal.Handles{}
+	}
+	return coreSurface.HALHandles()
 }

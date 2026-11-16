@@ -12,7 +12,6 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
-	"github.com/gogpu/wgpu/internal/resource"
 	"github.com/gogpu/wgpu/internal/surface"
 )
 
@@ -41,45 +40,25 @@ const (
 
 // Surface represents a platform rendering surface (e.g., a window).
 //
-// Surface delegates lifecycle management to core.Surface, which enforces
-// the state machine: Unconfigured -> Configured -> Acquired -> Configured.
+// The lifecycle implementation lives in internal/surface (ADR-070 S10); this
+// type is the declaration layer the public API is frozen on. It holds the
+// domain's implementation handle, the instance the surface is registered with,
+// and the target ownership source, all of which are root concerns: the instance
+// map stays in this package until S12, and the ownership provider is a public
+// value the destination cannot name.
 type Surface struct {
-	core *core.Surface
-	// instance stays a root value: the surface is registered with it for
-	// device teardown, and the root declaration layer owns the identity the
-	// surface domain must not see (ADR-070 §15.3, ruling of 2026-11-16).
+	impl *surface.Surface
+
+	// instance is the root instance the surface is registered with for device
+	// teardown. Kept here, not in the destination: the cross-instance rejection
+	// and the unregister are root-side facts, and the instance map is root-owned
+	// until S12.
 	instance *Instance
-	// device is the seam view of the device the surface is configured
-	// against; nil until Configure succeeds. All device access below goes
-	// through it, so the implementation can move to internal/surface without
-	// naming a root type.
-	device   surface.DeviceHost
-	released bool
 
 	// targetSource is retained only for CreateSurfaceFromTarget. Raw handles
 	// passed through CreateSurfaceUnsafe or the compatibility CreateSurface
 	// method remain entirely caller-owned.
 	targetSource SurfaceTarget
-
-	// target is stored for a backend whose initial surface creation failed but
-	// whose device is later supplied explicitly.
-	target         SurfaceTargetUnsafe
-	currentBackend gputypes.Backend // backend type of the current HAL surface
-	surfaceCreated bool             // true while core points at a HAL surface
-	// halSurfaces owns one successfully created surface per enabled backend,
-	// matching Rust wgpu's surface_per_backend representation. core points at
-	// exactly one of these at a time to keep its lifecycle state machine small.
-	halSurfaces map[gputypes.Backend]hal.Surface
-
-	// swapchainTexture is the cached core.Texture for surface texture tracking.
-	// A swapchain has a bounded number of images (typically 2-3). All of them
-	// share a single TrackerIndex because surface texture usage is always the
-	// same (RenderAttachment) and the swapchain serializes image access.
-	// Created lazily on first GetCurrentTexture(), destroyed on Unconfigure/
-	// Release/reconfigure. This prevents TrackerIndex leak: without caching,
-	// a new core.Texture (and TrackerIndex) was allocated every frame, causing
-	// monotonic index growth and unbounded memory usage (#307).
-	swapchainTexture *core.Texture
 }
 
 // CreateSurface creates a rendering surface from legacy platform-specific
@@ -146,27 +125,28 @@ func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource Surfac
 	if err != nil {
 		return nil, err
 	}
-	return i.adoptCreatedSurface(target, targetSource, halSurfaces, initialBackend)
+	return i.adoptCreatedSurface(targetSource, halSurfaces, initialBackend, halTarget)
 }
 
 func (i *Instance) adoptCreatedSurface(
-	target SurfaceTargetUnsafe,
 	targetSource SurfaceTarget,
 	halSurfaces map[gputypes.Backend]hal.Surface,
 	initialBackend gputypes.Backend,
+	halTarget hal.SurfaceTarget,
 ) (*Surface, error) {
 	halSurface := halSurfaces[initialBackend]
 	coreSurface := core.NewSurface(halSurface, "")
-	created := &Surface{
-		core:           coreSurface,
-		target:         target,
-		targetSource:   targetSource,
-		currentBackend: initialBackend,
-		surfaceCreated: true,
-		halSurfaces:    halSurfaces,
-	}
+	impl := surface.New(surface.Init{
+		Core:           coreSurface,
+		Target:         halTarget,
+		TargetSet:      true,
+		Backend:        initialBackend,
+		HALSurfaces:    halSurfaces,
+		SurfaceCreated: true,
+	})
+	created := &Surface{impl: impl, targetSource: targetSource}
 	if err := i.adoptSurface(created); err != nil {
-		destroyHALSurfaces(coreSurface, halSurfaces, initialBackend, true)
+		surface.DestroyHALSurfaces(coreSurface, halSurfaces, initialBackend, true)
 		return nil, err
 	}
 	return created, nil
@@ -277,37 +257,38 @@ func (t SurfaceTargetUnsafe) halTarget() (hal.SurfaceTarget, error) {
 // Configure configures the surface for presentation.
 // Must be called before GetCurrentTexture().
 func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error {
-	if s.released {
-		return ErrReleased
-	}
-	if config == nil {
-		return fmt.Errorf("wgpu: surface configuration is nil")
-	}
-	if device == nil {
-		return fmt.Errorf("wgpu: device is nil")
-	}
 	host := newSurfaceDeviceHost(device)
-	if host.IsReleased() {
-		return ErrReleased
-	}
-	// Standard API objects must share an Instance so device teardown can find
-	// and retire every configured surface. Explicit HAL wrappers remain usable
-	// when both objects are intentionally unowned (instance == nil).
-	if s.instance != device.instance && (s.instance != nil || device.instance != nil) {
-		return fmt.Errorf("wgpu: surface and device belong to different instances")
-	}
-	// Reject reconfiguration while an image is acquired before touching the
-	// backend surface. ensureHALSurface may destroy and recreate the raw surface;
-	// doing that first would leave the active SurfaceTexture pointing at a
-	// destroyed image when core.Configure rejects the state transition.
-	if s.core == nil {
-		return ErrReleased
-	}
-	if s.core.State() == core.SurfaceStateAcquired {
-		return core.ErrSurfaceConfigureWhileAcquired
+
+	// The cross-instance rejection is a root fact: the instance the surface is
+	// registered with is this package's type. Standard API objects must share an
+	// Instance so device teardown can find and retire every configured surface;
+	// explicit HAL wrappers remain usable when both objects are intentionally
+	// unowned (instance == nil).
+	sameInstance := true
+	if device != nil {
+		sameInstance = s.instance == device.instance || (s.instance == nil && device.instance == nil)
 	}
 
-	halConfig := &hal.SurfaceConfiguration{
+	// The HAL instance a backend's raw surface is created on is a root fact too:
+	// the instance's HAL entries stay in this package until S12. Resolve it for
+	// the device's backend and hand it in as a value; the implementation never
+	// names the instance.
+	var halInstance hal.Instance
+	if device != nil && device.core != nil && s.instance != nil && s.instance.core != nil {
+		halInstance = s.instance.core.HALInstanceForBackend(device.core.Backend())
+	}
+
+	return mapSurfaceConfigureError(s.impl.Configure(host, surfaceConfiguration(config), sameInstance, halInstance))
+}
+
+// surfaceConfiguration converts the public surface configuration into the
+// surface domain's mirror, or nil for an absent configuration: the destination
+// reports the same nil-configuration error the public method did.
+func surfaceConfiguration(config *SurfaceConfiguration) *surface.SurfaceConfiguration {
+	if config == nil {
+		return nil
+	}
+	return &surface.SurfaceConfiguration{
 		Width:       config.Width,
 		Height:      config.Height,
 		Format:      config.Format,
@@ -315,98 +296,46 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 		PresentMode: config.PresentMode,
 		AlphaMode:   config.AlphaMode,
 	}
-
-	// Create or re-create the HAL surface on the correct backend's HAL instance.
-	// Surface creation is deferred from CreateSurface() to here because we need
-	// to know the device's backend. Creating a Vulkan surface then destroying it
-	// (when device is software) corrupts GDI state on some drivers.
-	if err := s.ensureHALSurface(host.Core().Backend()); err != nil {
-		return err
-	}
-
-	// Destroy the cached swapchain texture on reconfigure. The new swapchain
-	// may have different format, usage, or dimensions. A fresh core.Texture
-	// will be lazily created on the next GetCurrentTexture().
-	s.destroySwapchainTexture()
-
-	s.device = host
-	return mapSurfaceConfigureError(s.core.Configure(host.Core(), halConfig))
 }
 
 // mapSurfaceConfigureError gives the backend's device-mismatch error its
-// public sentinel, keeping the backend detail: errors.Is matches both.
+// public sentinel, keeping the backend detail: errors.Is matches both. It also
+// restores the public unsupported-target sentinel around the implementation's
+// re-creation failure, which is the same error the creation path reports.
 func mapSurfaceConfigureError(err error) error {
+	if err == nil {
+		return nil
+	}
 	if errors.Is(err, hal.ErrSurfaceDeviceMismatch) {
 		return fmt.Errorf("%w: %w", ErrSurfaceDeviceMismatch, err)
+	}
+	if errors.Is(err, hal.ErrUnsupportedSurfaceTarget) && !errors.Is(err, ErrUnsupportedSurfaceTarget) {
+		return fmt.Errorf("%w: %w", ErrUnsupportedSurfaceTarget, err)
 	}
 	return err
 }
 
 // Unconfigure removes the surface configuration.
 func (s *Surface) Unconfigure() {
-	if s.released {
-		return
-	}
-	s.destroySwapchainTexture()
-	s.core.Unconfigure()
+	s.impl.Unconfigure()
 }
 
 // GetCurrentTexture acquires the next texture for rendering.
 // Returns the surface texture and whether the surface is suboptimal.
 func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
-	if s.released {
-		return nil, false, ErrReleased
-	}
-	if s.device == nil {
-		return nil, false, fmt.Errorf("wgpu: surface not configured")
-	}
-
-	acquired, lease, err := s.core.AcquireTextureWithLease(nil)
+	impl, suboptimal, err := s.impl.GetCurrentTexture()
 	if err != nil {
 		return nil, false, err
 	}
-
-	// Reuse the cached core.Texture for TrackerIndex stability. A swapchain
-	// has a bounded number of images (typically 2-3), and they all share a
-	// single TrackerIndex because the swapchain serializes image access.
-	// Without caching, a new core.Texture (with a new TrackerIndex) was
-	// created every frame, causing monotonic index growth and unbounded
-	// memory consumption (#307).
-	//
-	// The coreTexture is shared with any Texture/TextureView wrappers
-	// created from this SurfaceTexture. At submit time, the TrackerIndex
-	// is used by populateTextureScope to record surface texture usage in
-	// the command buffer's TextureUsageScope for barrier generation.
-	if s.swapchainTexture == nil && s.device != nil && s.device.Core() != nil {
-		cfg := s.core.Config()
-		if cfg != nil {
-			s.swapchainTexture = core.NewTexture(
-				acquired.Texture, s.device.Core(),
-				cfg.Format,
-				gputypes.TextureDimension2D,
-				cfg.Usage,
-				gputypes.Extent3D{
-					Width:              cfg.Width,
-					Height:             cfg.Height,
-					DepthOrArrayLayers: 1,
-				},
-				1, 1, "surface",
-			)
-		}
-	}
-
-	return &SurfaceTexture{
-		hal:         acquired.Texture,
-		surface:     s,
-		device:      s.device,
-		lease:       lease,
-		coreTexture: s.swapchainTexture,
-	}, acquired.Suboptimal, nil
+	return &SurfaceTexture{impl: impl}, suboptimal, nil
 }
 
 // Present presents a surface texture to the screen.
 func (s *Surface) Present(texture *SurfaceTexture) error {
-	return s.PresentWithDamage(texture, nil)
+	// The destination's Present is PresentWithDamage with no damage rects; going
+	// to it directly keeps the hot path one call shorter than the pre-move
+	// two-step (the same answer either way).
+	return s.impl.Present(surfaceTextureHandle(texture))
 }
 
 // PresentWithDamage presents a surface texture to the screen, passing optional
@@ -419,24 +348,18 @@ func (s *Surface) Present(texture *SurfaceTexture) error {
 // VK_KHR_incremental_present, GLES eglSwapBuffersWithDamageKHR) use them
 // as compositor hints; others accept and ignore them.
 func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image.Rectangle) error {
-	if s.released {
-		return ErrReleased
-	}
-	if s.device == nil {
-		return fmt.Errorf("wgpu: surface not configured")
-	}
-	if s.device.HALQueue() == nil {
-		return fmt.Errorf("wgpu: queue not available")
-	}
+	return s.impl.PresentWithDamage(surfaceTextureHandle(texture), damageRects)
+}
 
-	if texture == nil {
-		return fmt.Errorf("wgpu: surface texture is nil")
+// surfaceTextureHandle returns the implementation handle of st. A nil wrapper
+// stays nil, so the destination reports "surface texture is nil"; a zero-value
+// wrapper embeds the zero implementation, which fails the same
+// nil-acquisition check the pre-move wrapper did.
+func surfaceTextureHandle(st *SurfaceTexture) *surface.SurfaceTexture {
+	if st == nil {
+		return nil
 	}
-	if texture.surface != s || !texture.isUsable() {
-		return ErrReleased
-	}
-
-	return s.core.PresentWithDamage(s.device.HALQueue(), damageRects)
+	return &st.impl
 }
 
 // SetPresentsWithTransaction toggles Core Animation transaction-based present
@@ -444,16 +367,7 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 // swap commits atomically with the resize CA transaction (Flutter/wgpu #3756
 // pattern); disable for normal rendering. No-op on non-Metal backends.
 func (s *Surface) SetPresentsWithTransaction(enabled bool) {
-	if s.released || s.core == nil {
-		return
-	}
-	raw := s.core.RawSurface()
-	if raw == nil {
-		return
-	}
-	if tp, ok := raw.(interface{ SetPresentsWithTransaction(bool) }); ok {
-		tp.SetPresentsWithTransaction(enabled)
-	}
+	s.impl.SetPresentsWithTransaction(enabled)
 }
 
 // PresentPixels writes RGBA pixel data directly to the surface and presents it
@@ -471,13 +385,7 @@ func (s *Surface) SetPresentsWithTransaction(enabled bool) {
 // Returns an error if the backend does not support PresentPixels (only the
 // software backend implements this extension).
 func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects []image.Rectangle) error {
-	if s.released {
-		return ErrReleased
-	}
-	if s.device == nil {
-		return fmt.Errorf("wgpu: surface not configured")
-	}
-	return s.core.PresentPixels(data, width, height, damageRects)
+	return s.impl.PresentPixels(data, width, height, damageRects)
 }
 
 // WritePixels copies RGBA pixel data directly into the surface framebuffer,
@@ -488,17 +396,10 @@ func (s *Surface) PresentPixels(data []byte, width, height uint32, damageRects [
 // Call between GetCurrentTexture() and Present(). No render pass needed.
 // Returns ErrReleased if the surface is not configured.
 func (s *Surface) WritePixels(data []byte, width, height uint32) error {
-	if s == nil || s.released || s.core == nil {
+	if s == nil {
 		return ErrReleased
 	}
-	raw := s.core.RawSurface()
-	if raw == nil {
-		return ErrReleased
-	}
-	if pw, ok := raw.(hal.PixelWriter); ok {
-		return pw.WritePixels(data, width, height)
-	}
-	return fmt.Errorf("wgpu: WritePixels not supported on this backend")
+	return s.impl.WritePixels(data, width, height)
 }
 
 // ReadPixels captures the current surface framebuffer as an owned, tightly
@@ -508,26 +409,10 @@ func (s *Surface) WritePixels(data []byte, width, height uint32) error {
 // The surface must be configured, and any acquired texture must be presented
 // or discarded before capture.
 func (s *Surface) ReadPixels() ([]byte, error) {
-	if s == nil || s.released || s.core == nil {
+	if s == nil {
 		return nil, ErrReleased
 	}
-
-	switch s.core.State() {
-	case core.SurfaceStateUnconfigured:
-		return nil, fmt.Errorf("wgpu: surface not configured")
-	case core.SurfaceStateAcquired:
-		return nil, fmt.Errorf("wgpu: surface texture is still acquired; present or discard it before ReadPixels")
-	}
-
-	reader, ok := s.core.RawSurface().(hal.PixelReader)
-	if !ok {
-		return nil, fmt.Errorf("wgpu: ReadPixels not supported on this backend")
-	}
-	pixels := reader.ReadPixels()
-	if pixels == nil {
-		return nil, fmt.Errorf("wgpu: ReadPixels returned no pixel data")
-	}
-	return pixels, nil
+	return s.impl.ReadPixels()
 }
 
 // ActualExtent returns the actual swapchain dimensions after driver clamping.
@@ -545,150 +430,46 @@ func (s *Surface) ReadPixels() ([]byte, error) {
 // Use this to size MSAA resolve textures, offscreen targets, and any other
 // resources that must match the true swapchain size.
 func (s *Surface) ActualExtent() (width, height uint32) {
-	if s.released {
-		return 0, 0
-	}
-	raw := s.core.RawSurface()
-	if raw == nil {
-		return 0, 0
-	}
-	return raw.ActualExtent()
+	return s.impl.ActualExtent()
 }
 
 // DiscardTexture discards the acquired surface texture without presenting it.
 // Use this if rendering failed or was canceled. If no texture is currently
 // acquired, this is a no-op.
 func (s *Surface) DiscardTexture() {
-	if s.released {
-		return
-	}
-	s.core.DiscardTexture()
+	s.impl.DiscardTexture()
 }
 
 // sameDevice reports whether the surface is configured against device. The
-// seam exposes the device's core state, not the root pointer, so identity is
-// compared there: an adapter value built per call would never compare equal to
-// the stored one. A nil device, or a nil core on either side, is no match.
+// destination compares the core device identity, so an adapter value built per
+// call never compares equal to the stored one. A nil device, or a nil core on
+// either side, is no match.
 func (s *Surface) sameDevice(device *Device) bool {
-	if s == nil || s.device == nil || device == nil {
+	if s == nil || s.impl == nil || device == nil {
 		return false
 	}
-	coreDevice := s.device.Core()
-	return coreDevice != nil && coreDevice == device.core
+	return s.impl.SameDevice(device.core)
 }
 
 func (s *Surface) discardForDevice(device *Device) {
-	if s == nil || s.core == nil || !s.sameDevice(device) {
+	if s == nil || s.impl == nil || device == nil {
 		return
 	}
-	s.core.DiscardTexture()
+	s.impl.DiscardForDevice(device.core)
 }
 
 func (s *Surface) retireDevice(device *Device) {
-	if s == nil || s.core == nil || !s.sameDevice(device) {
+	if s == nil || s.impl == nil || device == nil {
 		return
 	}
-	// The swapchainTexture holds a reference to this device's TrackerIndex
-	// allocator. Destroy it before retiring the device to prevent leaks
-	// and dangling references.
-	s.destroySwapchainTexture()
-	s.core.RetireDevice(device.core)
-	s.device = nil
+	s.impl.RetireDevice(device.core)
 }
 
-func (s *Surface) createHALSurface(backend gputypes.Backend) (hal.Surface, error) {
-	targetInstance := s.instance.core.HALInstanceForBackend(backend)
-	if targetInstance == nil {
-		return nil, fmt.Errorf("wgpu: no HAL instance for backend %v", backend)
-	}
-	halTarget, err := s.target.halTarget()
-	if err != nil {
-		return nil, err
-	}
-	return createHALSurfaceForTarget(targetInstance, backend, halTarget)
-}
-
-func createHALSurfaceForTarget(targetInstance hal.Instance, backend gputypes.Backend, target hal.SurfaceTarget) (hal.Surface, error) {
-	halSurface, err := targetInstance.CreateSurface(target)
-	if errors.Is(err, hal.ErrUnsupportedSurfaceTarget) {
-		return nil, fmt.Errorf("%w: backend %v: %w", ErrUnsupportedSurfaceTarget, backend, err)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create surface for backend %v: %w", backend, err)
-	}
-	if halSurface == nil {
-		return nil, fmt.Errorf("wgpu: backend %v returned a nil surface", backend)
-	}
-	return halSurface, nil
-}
-
-// ensureHALSurface creates or re-creates the HAL surface for the given backend.
-func (s *Surface) ensureHALSurface(backend gputypes.Backend) error {
-	if s.surfaceCreated && s.currentBackend == backend {
-		return nil
-	}
-	halSurface := s.halSurfaces[backend]
-	if halSurface == nil {
-		var err error
-		halSurface, err = s.createHALSurface(backend)
-		if err != nil {
-			return err
-		}
-		if s.halSurfaces == nil {
-			s.halSurfaces = make(map[gputypes.Backend]hal.Surface)
-		}
-		s.halSurfaces[backend] = halSurface
-	}
-	if s.core.State() != core.SurfaceStateUnconfigured {
-		s.core.Unconfigure()
-	}
-	s.core.SetRawSurface(halSurface)
-	s.currentBackend = backend
-	s.surfaceCreated = true
-	return nil
-}
-
-// halSurfaceForBackend returns the retained surface that belongs to an
-// adapter's backend. Legacy surfaces wrapped from one HAL handle have no
-// backend map, so they retain the historical active-surface fallback.
-func (s *Surface) halSurfaceForBackend(backend gputypes.Backend) hal.Surface {
-	if s == nil || s.released || s.core == nil {
-		return nil
-	}
-	if len(s.halSurfaces) != 0 {
-		return s.halSurfaces[backend]
-	}
-	return s.core.RawSurface()
-}
-
-func (s *Surface) halSurfacesForAdapterRequest() map[gputypes.Backend]hal.Surface {
-	if s == nil || s.released || s.core == nil {
-		return nil
-	}
-	result := make(map[gputypes.Backend]hal.Surface, len(s.halSurfaces))
-	for backend, halSurface := range s.halSurfaces {
-		result[backend] = halSurface
-	}
-	if len(result) == 0 {
-		if raw := s.core.RawSurface(); raw != nil {
-			result[s.currentBackend] = raw
-		}
-	}
-	return result
-}
-
-// Release releases the surface.
+// Release releases the surface: the implementation destroys the HAL surfaces,
+// and this layer then unregisters the surface from its instance and drops the
+// target ownership source, in the pre-move order.
 func (s *Surface) Release() {
-	if s.released {
-		return
-	}
-	s.released = true
-	s.destroySwapchainTexture()
-	if s.core != nil {
-		destroyHALSurfaces(s.core, s.halSurfaces, s.currentBackend, s.surfaceCreated)
-	}
-	s.core = nil
-	s.halSurfaces = nil
+	s.impl.Release()
 	if s.instance != nil {
 		s.instance.unregisterSurface(s)
 		s.instance = nil
@@ -696,51 +477,12 @@ func (s *Surface) Release() {
 	s.targetSource = nil
 }
 
-// destroySwapchainTexture releases the cached core.Texture's TrackerIndex.
-// The core.Texture for a swapchain does not own the HAL texture (that is
-// owned by the swapchain), so we only release the tracking data to recycle
-// the TrackerIndex. We must NOT call core.Texture.Destroy() which would
-// attempt to destroy the swapchain's HAL image.
-func (s *Surface) destroySwapchainTexture() {
-	if s.swapchainTexture != nil {
-		td := s.swapchainTexture.TrackingData()
-		if td != nil {
-			td.Release()
-		}
-		s.swapchainTexture = nil
-	}
-}
-
-func destroyHALSurfaces(coreSurface *core.Surface, surfaces map[gputypes.Backend]hal.Surface, currentBackend gputypes.Backend, currentSet bool) {
-	if coreSurface != nil {
-		coreSurface.Destroy()
-	}
-	for backend, halSurface := range surfaces {
-		if currentSet && backend == currentBackend {
-			continue
-		}
-		if halSurface != nil {
-			halSurface.Destroy()
-		}
-	}
-}
-
 // SurfaceTexture is a texture acquired from a surface for rendering.
+//
+// The implementation is embedded by value: an acquisition allocates the public
+// wrapper once, exactly as before the move (ADR-070 §15.7).
 type SurfaceTexture struct {
-	hal         hal.SurfaceTexture
-	surface     *Surface
-	device      surface.DeviceHost
-	lease       uint64
-	coreTexture *core.Texture // for TrackerIndex-based barrier generation
-}
-
-func (st *SurfaceTexture) isUsable() bool {
-	if st == nil || st.hal == nil || st.surface == nil ||
-		st.surface.released || st.surface.core == nil ||
-		st.device == nil || st.device.IsReleased() {
-		return false
-	}
-	return st.surface.core.AcquisitionValid(st.lease)
+	impl surface.SurfaceTexture
 }
 
 // AsTexture returns a lightweight Texture wrapper around this surface texture,
@@ -750,76 +492,50 @@ func (st *SurfaceTexture) isUsable() bool {
 // The returned Texture shares the underlying HAL resource — do not Release() it
 // independently. Its lifetime is tied to this SurfaceTexture.
 func (st *SurfaceTexture) AsTexture() *Texture {
-	if !st.isUsable() {
+	if st == nil {
 		return nil
 	}
-	return st.borrowedTexture()
-}
-
-// borrowedTexture builds the Texture wrapper that borrows this surface texture.
-// The format is the surface format: copy and upload validation reads it from
-// the wrapper.
-func (st *SurfaceTexture) borrowedTexture() *Texture {
-	var format gputypes.TextureFormat
-	if st.coreTexture != nil {
-		format = st.coreTexture.Format()
-	} else if cfg := st.surface.core.Config(); cfg != nil {
-		format = cfg.Format
+	res := st.impl.Resource()
+	if res == nil {
+		return nil
 	}
-	impl := resource.NewSurfaceTexture(st.hal, st.device, format, st.surface.core, st.lease, st.coreTexture)
-	tex := &Texture{impl: impl}
-	impl.Pub = tex
+	tex := &Texture{impl: res}
+	res.Pub = tex
 	return tex
 }
 
 // CreateView creates a texture view of this surface texture.
 func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) {
-	if !st.isUsable() {
+	if st == nil {
 		return nil, ErrReleased
 	}
-	halDevice := st.device.HALDevice()
-	if halDevice == nil {
-		return nil, ErrReleased
-	}
-
-	var halDesc *hal.TextureViewDescriptor
-	if desc != nil {
-		halDesc = &hal.TextureViewDescriptor{
-			Label:           desc.Label,
-			Format:          desc.Format,
-			Dimension:       desc.Dimension,
-			Aspect:          desc.Aspect,
-			BaseMipLevel:    desc.BaseMipLevel,
-			MipLevelCount:   desc.MipLevelCount,
-			BaseArrayLayer:  desc.BaseArrayLayer,
-			ArrayLayerCount: desc.ArrayLayerCount,
-		}
-	}
-
-	halView, err := halDevice.CreateTextureView(st.hal, halDesc)
+	rv, err := st.impl.CreateView(surfaceTextureViewDescriptor(desc))
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
+		return nil, err
 	}
+	// Cache the public wrapper of the view's borrowed parent texture: the
+	// pre-move view creation built it, and TextureView.Texture reads it.
+	if parent := rv.Texture(); parent != nil && parent.Pub == nil {
+		parent.Pub = &Texture{impl: parent}
+	}
+	return &TextureView{impl: rv}, nil
+}
 
-	// A surface texture is a single-layer 2D texture with one mip level.
-	parent := st.borrowedTexture()
-	init := &resource.TextureViewInit{
-		HAL:          halView,
-		Device:       st.device,
-		Parent:       parent.impl,
-		Surface:      st.surface.core,
-		SurfaceLease: st.lease,
-		Dimension:    gputypes.TextureViewDimension2D,
+// surfaceTextureViewDescriptor converts the public view descriptor into the
+// surface domain's mirror, or nil for an absent descriptor: the destination
+// derives the defaults exactly as the public method did.
+func surfaceTextureViewDescriptor(desc *TextureViewDescriptor) *surface.TextureViewDescriptor {
+	if desc == nil {
+		return nil
 	}
-	if halDesc != nil {
-		init.Dimension = resolveViewDimension(nil, halDesc.Dimension)
-		if init.Dimension == gputypes.TextureViewDimensionUndefined {
-			init.Dimension = gputypes.TextureViewDimension2D
-		}
-		init.BaseMipLevel = halDesc.BaseMipLevel
-		init.MipLevelCount = halDesc.MipLevelCount
-		init.Format = halDesc.Format
-		init.Aspect = halDesc.Aspect
+	return &surface.TextureViewDescriptor{
+		Label:           desc.Label,
+		Format:          desc.Format,
+		Dimension:       desc.Dimension,
+		Aspect:          desc.Aspect,
+		BaseMipLevel:    desc.BaseMipLevel,
+		MipLevelCount:   desc.MipLevelCount,
+		BaseArrayLayer:  desc.BaseArrayLayer,
+		ArrayLayerCount: desc.ArrayLayerCount,
 	}
-	return &TextureView{impl: resource.NewTextureView(init)}, nil
 }

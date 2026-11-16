@@ -3,13 +3,9 @@
 package wgpu
 
 import (
-	"errors"
 	"fmt"
 	"image"
 
-	rwgpu "github.com/go-webgpu/webgpu/wgpu"
-	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/resource"
 	"github.com/gogpu/wgpu/internal/surface"
 )
 
@@ -31,22 +27,15 @@ var _ interface {
 
 // Surface represents a platform rendering surface.
 // On Rust backend, this wraps go-webgpu/webgpu Surface.
+//
+// The lifecycle implementation lives in internal/surface (ADR-070 S10); this
+// type is the declaration layer the public API is frozen on, and it keeps the
+// target ownership source, which is a public value the destination cannot name.
 type Surface struct {
-	r *rwgpu.Surface
-	// device is the seam view of the device the surface is configured
-	// against; nil until Configure succeeds or after Unconfigure. All device
-	// access below goes through it, so the implementation can move to
-	// internal/surface without naming a root type.
-	device   surface.DeviceHost
-	released bool
+	impl *surface.Surface
 
 	// targetSource is retained only for CreateSurfaceFromTarget.
 	targetSource SurfaceTarget
-
-	// Cached configuration for texture creation.
-	configFormat gputypes.TextureFormat
-	configWidth  uint32
-	configHeight uint32
 }
 
 // CreateSurface creates a rendering surface from legacy platform-specific
@@ -104,153 +93,151 @@ func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource Surfac
 		return nil, fmt.Errorf("wgpu: failed to create surface: %w", err)
 	}
 
-	return &Surface{r: rs, targetSource: targetSource}, nil
+	return &Surface{impl: surface.NewR(rs), targetSource: targetSource}, nil
 }
 
 // Configure configures the surface for presentation.
 func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error {
-	if s.released {
-		return ErrReleased
-	}
-	if config == nil {
-		return fmt.Errorf("wgpu: surface configuration is nil")
-	}
-	if device == nil {
-		return fmt.Errorf("wgpu: device is nil")
-	}
-	host := newSurfaceDeviceHost(device)
+	return s.impl.Configure(newSurfaceDeviceHost(device), surfaceConfiguration(config))
+}
 
-	rConfig := &rwgpu.SurfaceConfiguration{
-		Format:      config.Format,
-		Usage:       config.Usage,
+// surfaceConfiguration converts the public surface configuration into the
+// surface domain's mirror, or nil for an absent configuration: the destination
+// reports the same nil-configuration error the public method did.
+func surfaceConfiguration(config *SurfaceConfiguration) *surface.SurfaceConfiguration {
+	if config == nil {
+		return nil
+	}
+	return &surface.SurfaceConfiguration{
 		Width:       config.Width,
 		Height:      config.Height,
-		AlphaMode:   config.AlphaMode,
+		Format:      config.Format,
+		Usage:       config.Usage,
 		PresentMode: config.PresentMode,
+		AlphaMode:   config.AlphaMode,
 	}
-
-	if err := s.r.Configure(host.R(), rConfig); err != nil {
-		return fmt.Errorf("wgpu: failed to configure surface: %w", err)
-	}
-
-	s.device = host
-	s.configFormat = config.Format
-	s.configWidth = config.Width
-	s.configHeight = config.Height
-	return nil
 }
 
 // Unconfigure removes the surface configuration.
 func (s *Surface) Unconfigure() {
-	if s.released {
-		return
-	}
-	s.r.Unconfigure()
-	s.device = nil
+	s.impl.Unconfigure()
 }
 
 // GetCurrentTexture acquires the next texture for rendering.
 // Returns the surface texture and whether the surface is suboptimal.
 func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
-	if s.released {
-		return nil, false, ErrReleased
-	}
-	if s.device == nil {
-		return nil, false, fmt.Errorf("wgpu: surface not configured")
-	}
-
-	rst, suboptimal, err := s.r.GetCurrentTexture()
+	impl, suboptimal, err := s.impl.GetCurrentTexture()
 	if err != nil {
-		return nil, false, fmt.Errorf("wgpu: %w", err)
+		return nil, false, err
 	}
-
-	impl := resource.NewTexture(rst.Texture, s.configFormat)
-	tex := &Texture{impl: impl}
-	impl.Pub = tex
-	return &SurfaceTexture{
-		r:       rst,
-		texture: tex,
-		surface: s,
-	}, suboptimal, nil
+	st := &SurfaceTexture{impl: impl}
+	// The rust surface creates one resource texture per acquisition; the public
+	// wrapper is cached on it, so AsTexture and Texture keep returning the same
+	// handle the pre-move field held.
+	if res := st.impl.Resource(); res != nil {
+		st.texture = &Texture{impl: res}
+		res.Pub = st.texture
+	}
+	return st, suboptimal, nil
 }
 
 // Present presents a surface texture to the screen.
 func (s *Surface) Present(texture *SurfaceTexture) error {
-	if s.released {
-		return ErrReleased
-	}
-	if texture == nil {
-		return fmt.Errorf("wgpu: surface texture is nil")
-	}
-	// go-webgpu Present takes variadic *SurfaceTexture.
-	return s.r.Present(texture.r)
+	return s.impl.Present(surfaceTextureRef(texture))
 }
 
 // PresentWithDamage presents a surface texture, optionally with damage rects.
 // On Rust backend, damage rects are ignored. wgpu-native does not support them.
 func (s *Surface) PresentWithDamage(st *SurfaceTexture, _ []image.Rectangle) error {
-	return s.Present(st)
+	return s.impl.PresentWithDamage(surfaceTextureRef(st), nil)
 }
 
 // ReadPixels is not supported by the Rust FFI backend.
 // Headless surface readback is a Pure-Go software-backend extension.
 func (s *Surface) ReadPixels() ([]byte, error) {
-	if s == nil || s.released {
+	if s == nil {
 		return nil, ErrReleased
 	}
-	if s.device == nil {
-		return nil, fmt.Errorf("wgpu: surface not configured")
-	}
-	return nil, fmt.Errorf("wgpu: ReadPixels not supported on this backend")
+	return s.impl.ReadPixels()
 }
 
 // ActualExtent returns the configured surface dimensions.
 func (s *Surface) ActualExtent() (width, height uint32) {
-	if s.released {
-		return 0, 0
-	}
-	return s.configWidth, s.configHeight
+	return s.impl.ActualExtent()
 }
 
 // DiscardTexture discards the acquired surface texture without presenting it.
 // On Rust backend, this is a no-op.
 func (s *Surface) DiscardTexture() {
-	// No-op: wgpu-native does not support texture discard.
+	s.impl.DiscardTexture()
 }
 
 // PresentPixels is not supported on Rust FFI backend.
-// Software-backend extension for direct pixel presentation.
+// Software-backend extension for direct pixel presentation. The backend never
+// reads the pixels, so the declaration layer passes the destination the zero
+// values; the golden records the unnamed parameters this signature has always
+// had.
 func (s *Surface) PresentPixels(_ []byte, _, _ uint32, _ []image.Rectangle) error {
-	return errors.New("wgpu: PresentPixels is not supported on the Rust backend")
+	return s.impl.PresentPixels(nil, 0, 0, nil)
 }
 
 // WritePixels is not supported on Rust FFI backend.
-// Software-backend extension for direct framebuffer write.
+// Software-backend extension for direct framebuffer write. The pixels are
+// never read, as for PresentPixels.
 func (s *Surface) WritePixels(_ []byte, _, _ uint32) error {
-	return errors.New("wgpu: WritePixels is not supported on the Rust backend")
+	return s.impl.WritePixels(nil, 0, 0)
 }
 
 // SetPresentsWithTransaction is a no-op on Rust backend.
 // Core Animation transactions are macOS-only.
-func (s *Surface) SetPresentsWithTransaction(_ bool) {}
+func (s *Surface) SetPresentsWithTransaction(_ bool) {
+	s.impl.SetPresentsWithTransaction(false)
+}
 
-// Release releases the surface.
+// Release releases the surface: the implementation releases the go-webgpu
+// surface, and this layer then drops the target ownership source.
 func (s *Surface) Release() {
-	if s.released {
-		return
-	}
-	s.released = true
-	if s.r != nil {
-		s.r.Release()
-	}
+	s.impl.Release()
 	s.targetSource = nil
 }
 
+// surfaceTextureRef returns the implementation handle of st, or nil for an
+// absent wrapper: the destination reports the same nil-texture error.
+func surfaceTextureRef(st *SurfaceTexture) *surface.SurfaceTexture {
+	if st == nil {
+		return nil
+	}
+	return &st.impl
+}
+
+// surfaceTextureViewDescriptor converts the public view descriptor into the
+// surface domain's mirror, or nil for an absent descriptor.
+func surfaceTextureViewDescriptor(desc *TextureViewDescriptor) *surface.TextureViewDescriptor {
+	if desc == nil {
+		return nil
+	}
+	return &surface.TextureViewDescriptor{
+		Label:           desc.Label,
+		Format:          desc.Format,
+		Dimension:       desc.Dimension,
+		Aspect:          desc.Aspect,
+		BaseMipLevel:    desc.BaseMipLevel,
+		MipLevelCount:   desc.MipLevelCount,
+		BaseArrayLayer:  desc.BaseArrayLayer,
+		ArrayLayerCount: desc.ArrayLayerCount,
+	}
+}
+
 // SurfaceTexture is a texture acquired from a surface for rendering.
+//
+// The implementation is embedded by value: an acquisition allocates the public
+// wrapper once, exactly as before the move (ADR-070 §15.7).
 type SurfaceTexture struct {
-	r       *rwgpu.SurfaceTexture
+	impl surface.SurfaceTexture
+
+	// texture is the public wrapper of the acquisition's resource texture,
+	// cached on it so repeated accessors return one handle.
 	texture *Texture
-	surface *Surface
 }
 
 // AsTexture returns the underlying Texture for direct WriteTexture access.
@@ -258,30 +245,11 @@ func (st *SurfaceTexture) AsTexture() *Texture { return st.texture }
 
 // CreateView creates a texture view of this surface texture.
 func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView, error) {
-	if st.texture == nil || st.texture.impl.Rust() == nil {
-		return nil, ErrReleased
-	}
-
-	var rDesc *rwgpu.TextureViewDescriptor
-	if desc != nil {
-		rDesc = &rwgpu.TextureViewDescriptor{
-			Label:           desc.Label,
-			Format:          desc.Format,
-			Dimension:       desc.Dimension,
-			Aspect:          rwgpu.TextureAspect(desc.Aspect),
-			BaseMipLevel:    desc.BaseMipLevel,
-			MipLevelCount:   desc.MipLevelCount,
-			BaseArrayLayer:  desc.BaseArrayLayer,
-			ArrayLayerCount: desc.ArrayLayerCount,
-		}
-	}
-
-	rv, err := st.texture.impl.Rust().CreateView(rDesc)
+	rv, err := st.impl.CreateView(surfaceTextureViewDescriptor(desc))
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create surface texture view: %w", err)
+		return nil, err
 	}
-
-	return &TextureView{impl: resource.NewTextureView(rv, st.AsTexture().impl)}, nil
+	return &TextureView{impl: rv}, nil
 }
 
 // Texture returns the underlying Texture.

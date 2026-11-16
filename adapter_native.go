@@ -162,7 +162,7 @@ type SurfaceCapabilities struct {
 // Returns nil if the adapter has no HAL (core-only path) or the surface is nil.
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
 	if a == nil || a.released || a.instance == nil || a.instance.isReleased() ||
-		surface == nil || surface.released || surface.instance != a.instance {
+		surface == nil || surface.impl.Released() || surface.instance != a.instance {
 		return nil
 	}
 
@@ -173,7 +173,7 @@ func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities 
 		}
 	}
 
-	halSurface := surface.halSurfaceForBackend(a.info.Backend)
+	halSurface := surface.impl.HALSurfaceForBackend(a.info.Backend)
 	if halSurface == nil {
 		return nil
 	}

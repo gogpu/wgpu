@@ -30,7 +30,7 @@ func (d *Device) halHandles() hal.Handles {
 
 // halHandles is the browser-build body of Surface.HAL.
 func (s *Surface) halHandles() hal.Handles {
-	if s == nil || s.released {
+	if s == nil || s.impl.Released() {
 		return hal.Handles{}
 	}
 	return hal.Handles{Kind: hal.KindBrowser}

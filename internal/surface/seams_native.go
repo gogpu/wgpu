@@ -5,9 +5,9 @@
 
 // Package surface holds the surface domain's implementation (ADR-070 S10).
 //
-// Today it declares the domain's seam only: the device view a surface
-// configures, acquires and presents through. The Surface implementation moves
-// here in the S10 Move; the root package keeps a declaration layer over it.
+// This context is the native one: the Surface implementation and the seam view
+// of the device it configures, acquires and presents through live here. The
+// root package keeps a declaration layer over it.
 package surface
 
 // This file declares the surface domain's seam view of the device. It is the

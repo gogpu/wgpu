@@ -50,7 +50,7 @@ func (d *Device) halHandles() hal.Handles {
 // halHandles is the "rust"-build body of Surface.HAL. WebGPUHandles names no
 // surface object, so only the Kind is set.
 func (s *Surface) halHandles() hal.Handles {
-	if s == nil || s.released {
+	if s == nil || s.impl.Released() {
 		return hal.Handles{}
 	}
 	return hal.Handles{Kind: hal.KindWebGPU}

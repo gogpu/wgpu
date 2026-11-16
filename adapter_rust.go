@@ -91,11 +91,15 @@ type SurfaceCapabilities struct {
 
 // GetSurfaceCapabilities returns the capabilities of a surface for this adapter.
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
-	if a.released || surface == nil || surface.r == nil {
+	if a.released || surface == nil {
+		return nil
+	}
+	rSurface := surface.impl.R()
+	if rSurface == nil {
 		return nil
 	}
 
-	caps, err := surface.r.GetCapabilities(a.r)
+	caps, err := rSurface.GetCapabilities(a.r)
 	if err != nil {
 		return nil
 	}

@@ -75,7 +75,7 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 			ForceFallbackAdapter: opts.ForceFallbackAdapter,
 		}
 		if opts.CompatibleSurface != nil {
-			rOpts.CompatibleSurface = opts.CompatibleSurface.r
+			rOpts.CompatibleSurface = opts.CompatibleSurface.impl.R()
 		}
 	}
 

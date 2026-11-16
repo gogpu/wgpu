@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // SetTestRenderPipelineRequiredVertexBuffers sets the requiredVertexBuffers
@@ -277,7 +278,7 @@ func NewDeviceFromHALForTest(
 
 // NewSurfaceFromHALForTest wraps a HAL surface in a Surface.
 func NewSurfaceFromHALForTest(halSurface hal.Surface, label string) *Surface {
-	return &Surface{core: core.NewSurface(halSurface, label)}
+	return &Surface{impl: surface.NewFromHAL(core.NewSurface(halSurface, label))}
 }
 
 // NewTextureFromHALForTest wraps a HAL texture in a Texture.

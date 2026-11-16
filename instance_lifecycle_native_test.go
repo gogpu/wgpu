@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
 type instanceLifecycleDevice struct {
@@ -74,14 +75,16 @@ func TestSurfaceReleaseRetainsTargetSourceThroughHALDestroy(t *testing.T) {
 	firstRawSurface := &instanceLifecycleTargetSourceSurface{events: &events}
 	secondRawSurface := &instanceLifecycleTargetSourceSurface{events: &events}
 	surface := &Surface{
-		core:           core.NewSurface(firstRawSurface, "target-source-lifecycle-test"),
-		targetSource:   targetSource,
-		currentBackend: gputypes.BackendVulkan,
-		surfaceCreated: true,
-		halSurfaces: map[gputypes.Backend]hal.Surface{
-			gputypes.BackendVulkan: firstRawSurface,
-			gputypes.BackendGL:     secondRawSurface,
-		},
+		impl: surfacepkg.New(surfacepkg.Init{
+			Core:           core.NewSurface(firstRawSurface, "target-source-lifecycle-test"),
+			Backend:        gputypes.BackendVulkan,
+			SurfaceCreated: true,
+			HALSurfaces: map[gputypes.Backend]hal.Surface{
+				gputypes.BackendVulkan: firstRawSurface,
+				gputypes.BackendGL:     secondRawSurface,
+			},
+		}),
+		targetSource: targetSource,
 	}
 	firstRawSurface.surface = surface
 	secondRawSurface.surface = surface
@@ -110,7 +113,7 @@ func TestInstanceReleaseDestroysDevicesBeforeSurfaces(t *testing.T) {
 	if err := instance.adoptDevice(device); err != nil {
 		t.Fatalf("adopt device: %v", err)
 	}
-	surface := &Surface{core: core.NewSurface(&instanceLifecycleSurface{events: &events}, "lifecycle-test")}
+	surface := &Surface{impl: surfacepkg.NewFromHAL(core.NewSurface(&instanceLifecycleSurface{events: &events}, "lifecycle-test"))}
 	if err := instance.adoptSurface(surface); err != nil {
 		t.Fatalf("adopt surface: %v", err)
 	}
@@ -120,7 +123,7 @@ func TestInstanceReleaseDestroysDevicesBeforeSurfaces(t *testing.T) {
 	if !slices.Equal(events, want) {
 		t.Fatalf("release events = %v, want %v", events, want)
 	}
-	if surface.core.RawSurface() != nil {
+	if surface.impl.Core().RawSurface() != nil {
 		t.Fatal("retained surface exposed HAL after instance release")
 	}
 
@@ -143,9 +146,11 @@ func TestInstanceReleaseRetiresAcquisitionBeforeDeviceAndPlatformSurface(t *test
 
 	rawSurface := &instanceLifecycleConfiguredSurface{events: &events}
 	surface := &Surface{
-		core:           core.NewSurface(rawSurface, "configured-lifecycle-test"),
-		surfaceCreated: true,
-		currentBackend: gputypes.BackendEmpty,
+		impl: surfacepkg.New(surfacepkg.Init{
+			Core:           core.NewSurface(rawSurface, "configured-lifecycle-test"),
+			SurfaceCreated: true,
+			Backend:        gputypes.BackendEmpty,
+		}),
 	}
 	if err := instance.adoptSurface(surface); err != nil {
 		t.Fatalf("adopt surface: %v", err)
@@ -169,7 +174,7 @@ func TestInstanceReleaseRetiresAcquisitionBeforeDeviceAndPlatformSurface(t *test
 	if !slices.Equal(events, want) {
 		t.Fatalf("release events = %v, want %v", events, want)
 	}
-	if surface.core != nil {
+	if surface.impl.Core() != nil {
 		t.Fatal("surface retained core state after instance release")
 	}
 }
@@ -187,9 +192,11 @@ func TestSurfaceConfigureRejectsDeviceFromAnotherInstance(t *testing.T) {
 	}
 
 	surface := &Surface{
-		core:           core.NewSurface(&noop.Surface{}, "cross-instance-test"),
-		surfaceCreated: true,
-		currentBackend: gputypes.BackendEmpty,
+		impl: surfacepkg.New(surfacepkg.Init{
+			Core:           core.NewSurface(&noop.Surface{}, "cross-instance-test"),
+			SurfaceCreated: true,
+			Backend:        gputypes.BackendEmpty,
+		}),
 	}
 	if err := second.adoptSurface(surface); err != nil {
 		t.Fatalf("adopt surface: %v", err)
@@ -205,8 +212,8 @@ func TestSurfaceConfigureRejectsDeviceFromAnotherInstance(t *testing.T) {
 	if err == nil {
 		t.Fatal("Configure accepted a device from another instance")
 	}
-	if surface.core.State() != core.SurfaceStateUnconfigured {
-		t.Fatalf("surface state = %v, want unconfigured", surface.core.State())
+	if surface.impl.Core().State() != core.SurfaceStateUnconfigured {
+		t.Fatalf("surface state = %v, want unconfigured", surface.impl.Core().State())
 	}
 }
 
@@ -232,7 +239,7 @@ func TestReleasedInstanceRejectsLateOwnership(t *testing.T) {
 		t.Fatal("adoptDevice accepted nil")
 	}
 
-	surface := &Surface{core: core.NewSurface(&noop.Surface{}, "late-surface")}
+	surface := &Surface{impl: surfacepkg.NewFromHAL(core.NewSurface(&noop.Surface{}, "late-surface"))}
 	if err := instance.adoptSurface(surface); !errors.Is(err, ErrReleased) {
 		t.Fatalf("adoptSurface after release = %v, want ErrReleased", err)
 	}

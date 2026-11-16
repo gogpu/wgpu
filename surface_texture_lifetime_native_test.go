@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
 // mockBatchingQueue is the batching HAL queue double for the pending-writes
@@ -58,10 +59,11 @@ func newAcquiredSurfaceForLifetimeTest(t *testing.T) (*Surface, *SurfaceTexture,
 
 	rawSurface := &noop.Surface{}
 	surface := &Surface{
-		core:           core.NewSurface(rawSurface, "surface-texture-lifetime-test"),
-		device:         newSurfaceDeviceHost(device),
-		surfaceCreated: true,
-		currentBackend: gputypes.BackendEmpty,
+		impl: surfacepkg.New(surfacepkg.Init{
+			Core:           core.NewSurface(rawSurface, "surface-texture-lifetime-test"),
+			Backend:        gputypes.BackendEmpty,
+			SurfaceCreated: true,
+		}),
 	}
 	config := &SurfaceConfiguration{
 		Width:       1,
@@ -500,20 +502,8 @@ func TestSurfaceTextureDerivedWrappersInvalidateAfterPresentAndRelease(t *testin
 	}
 }
 
-func TestSurfacePresentRejectsTextureFromAnotherAcquisition(t *testing.T) {
-	surface, surfaceTexture, device, _ := newAcquiredSurfaceForLifetimeTest(t)
-	defer device.Release()
-
-	other := &SurfaceTexture{hal: surfaceTexture.hal, surface: surface, device: newSurfaceDeviceHost(device), lease: surfaceTexture.lease + 1}
-	if err := surface.Present(other); !errors.Is(err, ErrReleased) {
-		t.Fatalf("Present with foreign token = %v, want ErrReleased", err)
-	}
-	if surface.core.State() != core.SurfaceStateAcquired {
-		t.Fatalf("surface state after rejected Present = %v, want acquired", surface.core.State())
-	}
-	surface.DiscardTexture()
-	surface.Release()
-}
+// TestSurfacePresentRejectsTextureFromAnotherAcquisition moved to
+// internal/surface with the implementation it exercises (ADR-070 S10).
 
 func TestSurfaceTextureLeaseAcrossReconfigureAndUnconfigure(t *testing.T) {
 	surface, surfaceTexture, device, rawDevice := newAcquiredSurfaceForLifetimeTest(t)
@@ -570,97 +560,8 @@ func TestSurfaceTextureLeaseAcrossReconfigureAndUnconfigure(t *testing.T) {
 	surface.Release()
 }
 
-// TestSurfaceSwapchainTextureCaching verifies that GetCurrentTexture reuses
-// the same core.Texture (and TrackerIndex) across frames instead of leaking
-// a new TrackerIndex every frame (#307).
-func TestSurfaceSwapchainTextureCaching(t *testing.T) {
-	t.Parallel()
-
-	rawDevice := &surfaceTextureLifetimeDevice{}
-	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "cache-test")
-	device := newTestDeviceWithQueue(coreDevice, nil, &noop.Queue{}, nil)
-	defer device.Release()
-
-	rawSurface := &noop.Surface{}
-	surface := &Surface{
-		core:           core.NewSurface(rawSurface, "cache-test"),
-		device:         newSurfaceDeviceHost(device),
-		surfaceCreated: true,
-		currentBackend: gputypes.BackendEmpty,
-	}
-	config := &SurfaceConfiguration{
-		Width:       1,
-		Height:      1,
-		Format:      gputypes.TextureFormatRGBA8Unorm,
-		Usage:       gputypes.TextureUsageRenderAttachment,
-		PresentMode: gputypes.PresentModeFifo,
-		AlphaMode:   gputypes.CompositeAlphaModeAuto,
-	}
-	if err := surface.Configure(device, config); err != nil {
-		t.Fatalf("Configure: %v", err)
-	}
-
-	// Simulate 100 frames — TrackerIndex must stay stable.
-	var firstIndex uint32
-	for i := range 100 {
-		st, _, err := surface.GetCurrentTexture()
-		if err != nil {
-			t.Fatalf("frame %d: GetCurrentTexture: %v", i, err)
-		}
-		if st.coreTexture == nil {
-			t.Fatalf("frame %d: coreTexture is nil", i)
-		}
-		td := st.coreTexture.TrackingData()
-		if td == nil || !td.Index().IsValid() {
-			t.Fatalf("frame %d: invalid TrackerIndex", i)
-		}
-		idx := uint32(td.Index())
-		if i == 0 {
-			firstIndex = idx
-		} else if idx != firstIndex {
-			t.Fatalf("frame %d: TrackerIndex changed from %d to %d (leak!)", i, firstIndex, idx)
-		}
-		if err := surface.Present(st); err != nil {
-			t.Fatalf("frame %d: Present: %v", i, err)
-		}
-	}
-
-	// After 100 frames, texture allocator should have exactly 1 active texture index
-	// (the cached swapchain texture), not 100.
-	texAlloc := coreDevice.TrackerIndices().Textures()
-	if texAlloc.Size() < 1 {
-		t.Fatalf("expected at least 1 active texture index, got %d", texAlloc.Size())
-	}
-
-	// Unconfigure should release the cached TrackerIndex.
-	surface.Unconfigure()
-	if surface.swapchainTexture != nil {
-		t.Fatal("swapchainTexture should be nil after Unconfigure")
-	}
-
-	// Reconfigure and verify a fresh TrackerIndex is allocated.
-	if err := surface.Configure(device, config); err != nil {
-		t.Fatalf("re-Configure: %v", err)
-	}
-	st, _, err := surface.GetCurrentTexture()
-	if err != nil {
-		t.Fatalf("GetCurrentTexture after reconfigure: %v", err)
-	}
-	if st.coreTexture == nil {
-		t.Fatal("coreTexture nil after reconfigure")
-	}
-	// The reused index from the free list should be the same as firstIndex.
-	td := st.coreTexture.TrackingData()
-	if td == nil || !td.Index().IsValid() {
-		t.Fatal("invalid TrackerIndex after reconfigure")
-	}
-	if err := surface.Present(st); err != nil {
-		t.Fatalf("Present after reconfigure: %v", err)
-	}
-
-	surface.Release()
-}
-
+// TestSurfaceSwapchainTextureCaching moved to internal/surface with the
+// implementation it exercises (ADR-070 S10).
 func TestSurfaceTextureDerivedWrappersInvalidateAfterDeviceRelease(t *testing.T) {
 	surface, surfaceTexture, device, rawDevice := newAcquiredSurfaceForLifetimeTest(t)
 

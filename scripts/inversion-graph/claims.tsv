@@ -42,3 +42,9 @@ target	internal/queue	internal/browser	wasm	S9
 target	internal/queue	internal/stencilblit	native	S9
 target	internal/encoder	internal/stencilblit	native	S9
 target	internal/stencilblit	internal/hal	all	S9
+target	internal/surface	internal/core	all	S10
+target	internal/surface	internal/hal	all	S10
+target	internal/surface	internal/resource	all	S10
+target	internal/surface	internal/browser	wasm	S10
+inverted	internal/surface	internal/device	all	S10
+inverted	internal/surface	internal/instance	native	S10

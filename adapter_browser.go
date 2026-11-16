@@ -104,13 +104,15 @@ func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities 
 	}
 
 	// Put the preferred format first (Rust wgpu does the same swap).
-	if surface != nil && surface.browser != nil {
-		preferredStr := surface.browser.GetPreferredCanvasFormat()
-		preferredFmt := browser.TextureFormatFromJS(preferredStr)
-		for i, f := range formats {
-			if f == preferredFmt {
-				formats[0], formats[i] = formats[i], formats[0]
-				break
+	if surface != nil {
+		if bs := surface.impl.Browser(); bs != nil {
+			preferredStr := bs.GetPreferredCanvasFormat()
+			preferredFmt := browser.TextureFormatFromJS(preferredStr)
+			for i, f := range formats {
+				if f == preferredFmt {
+					formats[0], formats[i] = formats[i], formats[0]
+					break
+				}
 			}
 		}
 	}

@@ -10,6 +10,6 @@ internal/queue	internal/device	native	N	queue_native.go:27 device *Device -> dev
 internal/encoder	internal/device	native+rust	N	2026-11-16: the encoder holds no root device: it reaches the device through the DeviceHost seam (internal/encoder/seams.go:81; CommandEncoder.device, internal/encoder/encoder_native.go:23), implemented by the root adapter encoder_host_native.go:18; the command buffer's device is the same seam (encoder_native.go:1063), so the destination imports no internal/device
 internal/resource	internal/device	native+rust	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206 -> deviceHost
 internal/pipeline	internal/device	native+rust	N	2026-11-16: the native RenderPipeline.device field is the core.DeviceView seam (internal/pipeline/pipeline_native.go:30); the native ComputePipeline and the two rust device fields are deleted, so the destination imports no internal/device
-internal/surface	internal/device	all	N	surface_native.go:47 -> deviceHost with HALQueue()
-internal/surface	internal/instance	native	N	surface_native.go:46 -> instanceHost interface
+internal/surface	internal/device	all	N	2026-11-16: the implementation's device field is the DeviceHost seam (internal/surface/seams_native.go: core.DeviceView + HALQueue); it holds no internal/device reference, which the root declaration layer keeps until S11
+internal/surface	internal/instance	native	N	2026-11-16: the implementation holds no instance reference (ADR-070 S10 ruling A dissolved); the root declaration layer owns the instance pointer and passes the HAL instance as a parameter
 internal/device	internal/instance	native+rust	N	device_native.go:25 -> instanceHost interface (the cut is this side, not instance -> device)

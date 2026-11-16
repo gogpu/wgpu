@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	_ "github.com/gogpu/wgpu/internal/hal/software"
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
 const headlessTriangleWGSL = `
@@ -188,10 +189,10 @@ func newConfiguredWrappedSurface(t *testing.T, raw hal.Surface) *Surface {
 	t.Helper()
 
 	device := newDeviceFromHAL(&noop.Device{}, &noop.Queue{}, 0, DefaultLimits(), "readback-wrapper")
-	surface := &Surface{core: core.NewSurface(raw, "readback-wrapper")}
-	// The wrapper owns an already-created raw surface. Set the same internal
-	// creation fact that Instance-created surfaces carry before Configure.
-	surface.surfaceCreated = true
+	surface := &Surface{impl: surfacepkg.New(surfacepkg.Init{
+		Core:           core.NewSurface(raw, "readback-wrapper"),
+		SurfaceCreated: true,
+	})}
 	t.Cleanup(func() {
 		surface.Unconfigure()
 		surface.Release()

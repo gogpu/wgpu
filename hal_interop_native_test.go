@@ -10,6 +10,7 @@ import (
 	publichal "github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
 // TestHALAccessorSignatures pins the method set: all four accessors take no
@@ -76,7 +77,7 @@ func TestHALNativeAdapterAndSurface(t *testing.T) {
 		t.Fatalf("adapter without HAL HAL() = %+v, want zero Handles", got)
 	}
 
-	surface := &Surface{core: core.NewSurface(&noop.Surface{}, "hal-test")}
+	surface := &Surface{impl: surfacepkg.NewFromHAL(core.NewSurface(&noop.Surface{}, "hal-test"))}
 	defer surface.Release()
 	want := publichal.Handles{Kind: publichal.KindNoop}
 	if got := surface.HAL(); got != want {
@@ -99,7 +100,7 @@ func TestHALNativeInstanceWithoutHAL(t *testing.T) {
 // release path must keep nil-ing the HAL object its accessor reports.
 func TestHALNativeReleasedObjects(t *testing.T) {
 	t.Run("Surface", func(t *testing.T) {
-		surface := &Surface{core: core.NewSurface(&noop.Surface{}, "hal-test")}
+		surface := &Surface{impl: surfacepkg.NewFromHAL(core.NewSurface(&noop.Surface{}, "hal-test"))}
 		surface.Release()
 		if got := surface.HAL(); got != (publichal.Handles{}) {
 			t.Fatalf("released surface HAL() = %+v, want zero Handles", got)

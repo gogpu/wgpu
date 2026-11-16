@@ -7,8 +7,7 @@
 //
 // On the browser build the domain's whole view of the device is the GPUDevice
 // wrapper a canvas context is configured against. The Surface implementation
-// moves here in the S10 Move; the root package keeps a declaration layer over
-// it.
+// lives here; the root package keeps a declaration layer over it.
 package surface
 
 import "github.com/gogpu/wgpu/internal/browser"
