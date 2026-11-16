@@ -15,3 +15,7 @@ target	internal/resource	internal/hal	all	S1
 inverted	internal/resource	internal/device	native+rust	S1
 target	internal/resource	internal/core/track	native	S2
 target	internal/resource	internal/shaderir	native	S2
+target	internal/pipeline	internal/resource	all	S3
+target	internal/pipeline	internal/hal	all	S3
+target	internal/pipeline	internal/core	all	S3
+target	internal/pipeline	internal/browser	wasm	S3

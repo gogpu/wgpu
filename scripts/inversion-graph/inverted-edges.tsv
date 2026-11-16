@@ -9,7 +9,7 @@
 internal/queue	internal/device	native	N	queue_native.go:27 device *Device -> deviceHost interface
 internal/encoder	internal/device	native+rust	N	encoder_native.go:22, :1089 device *Device -> deviceHost interface
 internal/resource	internal/device	native+rust	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206 -> deviceHost
-internal/pipeline	internal/device	native+rust	N	pipeline_native.go:62,167 (dead fields, deleted); shader_native.go:18 -> deviceHost
+internal/pipeline	internal/device	native+rust	N	2026-11-16: the native RenderPipeline.device field is the core.DeviceView seam (internal/pipeline/pipeline_native.go:30); the native ComputePipeline and the two rust device fields are deleted, so the destination imports no internal/device
 internal/surface	internal/device	all	N	surface_native.go:47 -> deviceHost with HALQueue()
 internal/surface	internal/instance	native	N	surface_native.go:46 -> instanceHost interface
 internal/device	internal/instance	native+rust	N	device_native.go:25 -> instanceHost interface (the cut is this side, not instance -> device)
