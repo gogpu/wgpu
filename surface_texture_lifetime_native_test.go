@@ -150,7 +150,7 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	if device.queue.pending.HasPendingWork() {
 		t.Fatal("rejected pending batch remained active")
 	}
-	stats := device.queue.pending.belt.stats()
+	stats := device.queue.pending.belt.Stats()
 	if stats.ActiveChunks != 0 || stats.FreeChunks != 1 || stats.ClosedSubs != 0 {
 		t.Fatalf("staging belt after rejection = %+v, want one recycled free chunk", stats)
 	}
@@ -186,7 +186,7 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 	if device.queue.pending.HasPendingWork() {
 		t.Fatal("failed submitted batch remained active")
 	}
-	stats := device.queue.pending.belt.stats()
+	stats := device.queue.pending.belt.Stats()
 	if stats.ActiveChunks != 0 || stats.FreeChunks != 1 || stats.ClosedSubs != 0 {
 		t.Fatalf("staging belt after failed submit = %+v, want one recycled free chunk", stats)
 	}

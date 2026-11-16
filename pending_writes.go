@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/staging"
 )
 
 // pendingWrites accumulates WriteBuffer operations into a
@@ -43,7 +44,7 @@ type pendingWrites struct {
 
 	// belt manages reusable staging buffer chunks for zero-allocation
 	// buffer writes. nil for non-batching backends.
-	belt *stagingBelt
+	belt *staging.Belt
 
 	// encoder is the shared command encoder for recording copy commands.
 	// nil until the first write in a batch. Acquired from pool by activate().
@@ -152,7 +153,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPoo
 		if sizer, ok := halDevice.(hal.MaxStagingBufferSizer); ok {
 			maxStaging = sizer.MaxStagingBufferSize()
 		}
-		pw.belt = newStagingBelt(halDevice, halQueue, 0, 0, maxStaging)
+		pw.belt = staging.New(halDevice, halQueue, 0, 0, maxStaging)
 	}
 	return pw
 }
@@ -187,7 +188,7 @@ func (pw *pendingWrites) writeBufferFor(ref *core.ResourceRef, buffer hal.Buffer
 	// Allocate from staging belt (ring-buffer of reusable chunks).
 	// Zero heap allocations in steady state — chunks are pre-allocated
 	// and recycled after GPU completion. Matches Rust wgpu StagingBelt.
-	alloc, err := pw.belt.allocate(dataLen, data)
+	alloc, err := pw.belt.Allocate(dataLen, data)
 	if err != nil {
 		return fmt.Errorf("wgpu: pending writes: staging belt allocate: %w", err)
 	}
@@ -208,26 +209,26 @@ func (pw *pendingWrites) writeBufferFor(ref *core.ResourceRef, buffer hal.Buffer
 	// Check if the allocation was chunked (BUG-VK-001).
 	// For chunked writes, we issue one CopyBufferToBuffer per chunk at
 	// the correct destination offset. Each chunk has its own staging buffer.
-	if chunks := pw.belt.takeChunkedAllocations(); len(chunks) > 1 {
+	if chunks := pw.belt.TakeChunkedAllocations(); len(chunks) > 1 {
 		dstOffset := offset
 		for _, chunk := range chunks {
 			copyRegion := [1]hal.BufferCopy{{
-				SrcOffset: chunk.offset,
+				SrcOffset: chunk.Offset,
 				DstOffset: dstOffset,
-				Size:      chunk.size,
+				Size:      chunk.Size,
 			}}
-			enc.CopyBufferToBuffer(chunk.buffer, buffer, copyRegion[:])
-			dstOffset += chunk.size
+			enc.CopyBufferToBuffer(chunk.Buffer, buffer, copyRegion[:])
+			dstOffset += chunk.Size
 		}
 	} else {
 		// Normal (non-chunked) path: single CopyBufferToBuffer.
 		// Use pre-allocated pw.copyRegion to avoid heap escape through interface call.
 		pw.copyRegion[0] = hal.BufferCopy{
-			SrcOffset: alloc.offset,
+			SrcOffset: alloc.Offset,
 			DstOffset: offset,
 			Size:      dataLen,
 		}
-		enc.CopyBufferToBuffer(alloc.buffer, buffer, pw.copyRegion[:])
+		enc.CopyBufferToBuffer(alloc.Buffer, buffer, pw.copyRegion[:])
 	}
 
 	// Keep the destination alive until the submission completes.
@@ -336,7 +337,7 @@ func (pw *pendingWrites) writeTextureFor(
 	stagingData := alignTextureDataInto(&pw.alignBuf, data, layout.Offset, bytesPerRow, alignedBytesPerRow, rowsPerImage, depthOrLayers, stagingSize)
 
 	// Allocate from staging belt (ring-buffer of reusable chunks).
-	alloc, err := pw.belt.allocate(stagingSize, stagingData)
+	alloc, err := pw.belt.Allocate(stagingSize, stagingData)
 	if err != nil {
 		return fmt.Errorf("wgpu: pending writes: staging belt allocate texture: %w", err)
 	}
@@ -361,14 +362,14 @@ func (pw *pendingWrites) writeTextureFor(
 	// Record copy command (stack-allocate to avoid slice heap escape).
 	texCopy := [1]hal.BufferTextureCopy{{
 		BufferLayout: hal.ImageDataLayout{
-			Offset:       alloc.offset,
+			Offset:       alloc.Offset,
 			BytesPerRow:  alignedBytesPerRow,
 			RowsPerImage: rowsPerImage,
 		},
 		TextureBase: *dst,
 		Size:        *size,
 	}}
-	enc.CopyBufferToTexture(alloc.buffer, dst.Texture, texCopy[:])
+	enc.CopyBufferToTexture(alloc.Buffer, dst.Texture, texCopy[:])
 
 	// Track destination texture. AddPendingRef prevents premature Destroy (BUG-DX12-006).
 	// Staging buffer is managed by the belt (not tracked individually).
@@ -541,7 +542,7 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 	// Belt is the sole owner of all staging resources (chunks + oversized).
 	// recall() handles destruction after GPU completion — no double-destroy.
 	if pw.belt != nil {
-		pw.belt.finish(0) // submissionIndex set by caller via setLastSubmissionIndex
+		pw.belt.Finish(0) // submissionIndex set by caller via SetLastSubmissionIndex
 	}
 
 	var flushedDstTextures []hal.Texture
@@ -587,7 +588,7 @@ func (pw *pendingWrites) discardRecording() {
 	dropRefs(pw.dstRefs)
 	pw.dstRefs = nil
 	if pw.belt != nil {
-		pw.belt.discardActive()
+		pw.belt.DiscardActive()
 	}
 
 	pw.isRecording = false
@@ -601,7 +602,7 @@ func (pw *pendingWrites) discardRecording() {
 // with pw.mu held.
 func (pw *pendingWrites) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
 	if pw.belt != nil {
-		pw.belt.discardLastClosed()
+		pw.belt.DiscardLastClosed()
 	}
 	for _, texture := range dstTextures {
 		texture.DecPendingRef()
@@ -640,7 +641,7 @@ func dropRefs(refs []*core.ResourceRef) {
 func (pw *pendingWrites) maintain(completedIndex uint64) {
 	// Recycle staging belt chunks from completed submissions.
 	if pw.belt != nil {
-		pw.belt.recall(completedIndex)
+		pw.belt.Recall(completedIndex)
 	}
 
 	// Find the cutoff point — all submissions with index <= completedIndex are done.
@@ -722,7 +723,7 @@ func (pw *pendingWrites) destroy() {
 
 	// Destroy the staging belt (releases all chunk buffers).
 	if pw.belt != nil {
-		pw.belt.destroy()
+		pw.belt.Destroy()
 	}
 
 	// Clear pool reference — pool is owned by Device, not PendingWrites.

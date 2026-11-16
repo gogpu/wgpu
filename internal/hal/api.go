@@ -360,7 +360,7 @@ type Queue interface {
 // allocation size, leading to SIGSEGV (BUG-VK-001).
 //
 // Backends that do not implement this interface default to 64MB
-// (stagingBeltMaxOversizedSize), which is safe for DX12, Metal, and GLES.
+// (the staging belt's MaxOversizedSize), which is safe for DX12, Metal, and GLES.
 type MaxStagingBufferSizer interface {
 	// MaxStagingBufferSize returns the maximum size in bytes for a single
 	// staging buffer allocation. Returns 0 to use the default (64MB).

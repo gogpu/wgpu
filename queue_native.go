@@ -173,9 +173,9 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 			})
 		}
 		// Update the staging belt with the actual submission index
-		// (belt.finish() was called during flush() before Submit).
+		// (belt.Finish() was called during flush() before Submit).
 		if q.pending.belt != nil {
-			q.pending.belt.setLastSubmissionIndex(subIdx)
+			q.pending.belt.SetLastSubmissionIndex(subIdx)
 		}
 		q.pending.maintain(q.hal.PollCompleted())
 		q.pending.mu.Unlock()

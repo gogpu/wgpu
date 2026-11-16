@@ -14,6 +14,7 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/staging"
 )
 
 // --- Mock types for batching backend tests ---
@@ -257,7 +258,7 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 	}
 
 	// Belt should have an active chunk (staging is managed by belt, not pw.staging).
-	s := pw.belt.stats()
+	s := pw.belt.Stats()
 	activeChunks := s.ActiveChunks
 	if activeChunks != 1 {
 		t.Errorf("expected 1 active belt chunk, got %d", activeChunks)
@@ -343,7 +344,7 @@ func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 	}
 
 	// Belt should have an active chunk (staging is managed by belt, not pw.staging).
-	s := pw.belt.stats()
+	s := pw.belt.Stats()
 	activeChunks := s.ActiveChunks
 	if activeChunks != 1 {
 		t.Errorf("expected 1 active belt chunk, got %d", activeChunks)
@@ -605,7 +606,7 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	}
 
 	// Belt chunks should have moved to closedSubmissions.
-	s := pw.belt.stats()
+	s := pw.belt.Stats()
 	closedSubs := s.ClosedSubs
 	if closedSubs != 1 {
 		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
@@ -707,7 +708,7 @@ func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 	}
 
 	// Belt chunks should have moved to closedSubmissions.
-	s := pw.belt.stats()
+	s := pw.belt.Stats()
 	closedSubs := s.ClosedSubs
 	if closedSubs != 1 {
 		t.Errorf("expected 1 closed belt submission, got %d", closedSubs)
@@ -1155,7 +1156,7 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	}
 
 	// Both writes fit in the same belt chunk (4 bytes each, chunk=256KB).
-	s := pw.belt.stats()
+	s := pw.belt.Stats()
 	activeChunks := s.ActiveChunks
 	if activeChunks != 1 {
 		t.Errorf("expected 1 active belt chunk (both writes fit), got %d", activeChunks)
@@ -1177,7 +1178,7 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	// No oversized buffers — both writes fit in belt chunks.
 
 	// Belt chunks moved to closed.
-	s = pw.belt.stats()
+	s = pw.belt.Stats()
 	if s.ClosedSubs != 1 {
 		t.Errorf("expected 1 closed belt submission, got %d", s.ClosedSubs)
 	}
@@ -1317,8 +1318,8 @@ func TestPendingWrites_MaxStagingBufferSizerWiring(t *testing.T) {
 		t.Fatal("expected non-nil belt for batching backend")
 	}
 
-	if pw.belt.maxStagingBufferSize != 1<<20 {
-		t.Errorf("belt.maxStagingBufferSize = %d, want %d", pw.belt.maxStagingBufferSize, 1<<20)
+	if pw.belt.MaxStagingBufferSize != 1<<20 {
+		t.Errorf("belt.MaxStagingBufferSize = %d, want %d", pw.belt.MaxStagingBufferSize, 1<<20)
 	}
 }
 
@@ -1336,8 +1337,8 @@ func TestPendingWrites_MaxStagingBufferSizerDefaultWhenNotImplemented(t *testing
 		t.Fatal("expected non-nil belt for batching backend")
 	}
 
-	if pw.belt.maxStagingBufferSize != stagingBeltMaxOversizedSize {
-		t.Errorf("belt.maxStagingBufferSize = %d, want default %d",
-			pw.belt.maxStagingBufferSize, stagingBeltMaxOversizedSize)
+	if pw.belt.MaxStagingBufferSize != staging.MaxOversizedSize {
+		t.Errorf("belt.MaxStagingBufferSize = %d, want default %d",
+			pw.belt.MaxStagingBufferSize, staging.MaxOversizedSize)
 	}
 }

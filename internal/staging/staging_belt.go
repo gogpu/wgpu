@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package staging
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
-// stagingBelt manages reusable staging buffer chunks for zero-allocation
+// Belt manages reusable staging buffer chunks for zero-allocation
 // GPU copy operations. Instead of creating a new staging buffer per
 // WriteBuffer/WriteTexture call (heap allocations every frame), it
 // sub-allocates from pre-allocated chunks via bump pointer.
@@ -30,25 +30,25 @@ import (
 //
 // Steady-state allocation cost: 0 heap allocs per writeBuffer call.
 // New chunks are created only during warmup or traffic spikes.
-type stagingBelt struct {
+type Belt struct {
 	halDevice hal.Device
 	halQueue  hal.Queue
 	chunkSize uint64 // size of each pre-allocated chunk
 	alignment uint64 // minimum sub-allocation alignment (power of two)
 
-	// maxStagingBufferSize caps the maximum size of a single staging buffer.
-	// Set to min(stagingBeltMaxOversizedSize, device maxMemoryAllocationSize).
+	// MaxStagingBufferSize caps the maximum size of a single staging buffer.
+	// Set to min(MaxOversizedSize, device maxMemoryAllocationSize).
 	// Writes larger than this are automatically chunked into multiple
 	// staging buffers + CopyBufferToBuffer commands (BUG-VK-001).
-	maxStagingBufferSize uint64
+	MaxStagingBufferSize uint64
 
 	// activeChunks are being sub-allocated via bump pointer.
 	// Typically 1 chunk is active; more are activated when the current
 	// chunk's remaining space can't fit an allocation.
-	activeChunks []stagingChunk
+	activeChunks []chunk
 
 	// freeChunks are recycled (GPU done, offset reset to 0).
-	freeChunks []stagingChunk
+	freeChunks []chunk
 
 	// closedSubmissions track chunks that are in-flight on the GPU,
 	// keyed by submission index. recall() recycles them after completion.
@@ -63,11 +63,11 @@ type stagingBelt struct {
 	// Consumed by pendingWrites.writeBuffer to issue CopyBufferToBuffer for
 	// each chunk. Reset at the start of each allocateChunked call.
 	// Only valid between allocateChunked and the next writeBuffer call.
-	chunkedAllocs []stagingChunkedAllocation
+	chunkedAllocs []ChunkedAllocation
 }
 
-// stagingChunk is a large staging buffer with a bump-pointer allocator.
-type stagingChunk struct {
+// chunk is a large staging buffer with a bump-pointer allocator.
+type chunk struct {
 	buffer hal.Buffer
 	size   uint64
 	offset uint64 // next allocation starts here (bump pointer)
@@ -77,63 +77,63 @@ type stagingChunk struct {
 // After the GPU completes this submission, chunks are recycled to freeChunks.
 type closedSubmission struct {
 	submissionIndex uint64
-	chunks          []stagingChunk
+	chunks          []chunk
 	oversized       []hal.Buffer
 }
 
-// stagingBeltDefaultChunkSize is 256KB — large enough for typical per-frame
+// DefaultChunkSize is 256KB — large enough for typical per-frame
 // uploads (uniform/vertex/index buffers are 64B-16KB each, ~20 per frame)
 // but small enough to not waste memory when idle.
-const stagingBeltDefaultChunkSize = 256 * 1024
+const DefaultChunkSize = 256 * 1024
 
-// stagingBeltDefaultAlignment is the default minimum alignment for sub-allocations.
+// DefaultAlignment is the default minimum alignment for sub-allocations.
 // WebGPU COPY_BUFFER_ALIGNMENT = 4. Rust wgpu uses MAP_ALIGNMENT = 8.
 // We default to 8 (Rust parity) — good balance between spec compliance and
-// cache performance. Configurable via newStagingBelt alignment parameter.
-const stagingBeltDefaultAlignment uint64 = 8
+// cache performance. Configurable via New alignment parameter.
+const DefaultAlignment uint64 = 8
 
-// stagingBeltMaxOversizedSize caps individual staging buffer allocations at 64MB.
+// MaxOversizedSize caps individual staging buffer allocations at 64MB.
 // Rust wgpu caps staging buffers at 1 << 26 (64MB). This prevents
 // vkAllocateMemory from failing when size exceeds maxMemoryAllocationSize,
 // which causes SIGSEGV via null/partial mapped pointer (BUG-VK-001).
 // Writes larger than this are automatically chunked.
-const stagingBeltMaxOversizedSize uint64 = 64 << 20 // 64 MB
+const MaxOversizedSize uint64 = 64 << 20 // 64 MB
 
-// newStagingBelt creates a staging belt with the given chunk size and alignment.
+// New creates a staging belt with the given chunk size and alignment.
 // If chunkSize is 0, uses the default (256KB).
 // If alignment is 0, uses the default (8 bytes, Rust wgpu parity).
 // If maxStagingBufferSize is 0, uses the default (64MB, Rust wgpu parity).
 // Alignment must be a power of two.
 // Matches Rust wgpu StagingBelt::allocate() where alignment is per-allocation;
 // we simplify to per-belt since the belt is internal to pendingWrites.
-func newStagingBelt(halDevice hal.Device, halQueue hal.Queue, chunkSize, alignment, maxStagingBufferSize uint64) *stagingBelt { //nolint:unparam // alignment and maxStagingBufferSize are configurable for testing and future callers
+func New(halDevice hal.Device, halQueue hal.Queue, chunkSize, alignment, maxStagingBufferSize uint64) *Belt {
 	if chunkSize == 0 {
-		chunkSize = stagingBeltDefaultChunkSize
+		chunkSize = DefaultChunkSize
 	}
 	if alignment == 0 {
-		alignment = stagingBeltDefaultAlignment
+		alignment = DefaultAlignment
 	}
 	if maxStagingBufferSize == 0 {
-		maxStagingBufferSize = stagingBeltMaxOversizedSize
+		maxStagingBufferSize = MaxOversizedSize
 	}
-	return &stagingBelt{
+	return &Belt{
 		halDevice:            halDevice,
 		halQueue:             halQueue,
 		chunkSize:            chunkSize,
 		alignment:            alignment,
-		maxStagingBufferSize: maxStagingBufferSize,
+		MaxStagingBufferSize: maxStagingBufferSize,
 	}
 }
 
-// stagingAllocation is the result of a belt allocation: a buffer region
+// Allocation is the result of a belt allocation: a buffer region
 // where data can be written via HAL WriteBuffer, then copied to the
 // destination via CopyBufferToBuffer.
-type stagingAllocation struct {
-	buffer hal.Buffer // the staging chunk's buffer
-	offset uint64     // offset within the buffer
+type Allocation struct {
+	Buffer hal.Buffer // the staging chunk's buffer
+	Offset uint64     // offset within the buffer
 }
 
-// allocate reserves `size` bytes from the belt and writes `data` into
+// Allocate reserves `size` bytes from the belt and writes `data` into
 // the allocated region. Returns the buffer and offset for use in
 // CopyBufferToBuffer commands.
 //
@@ -144,9 +144,9 @@ type stagingAllocation struct {
 //  4. For oversized writes (> chunkSize), create a one-off buffer
 //
 // Zero allocations in steady state — all chunks are pre-allocated.
-func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, error) {
+func (b *Belt) Allocate(size uint64, data []byte) (Allocation, error) {
 	if size == 0 {
-		return stagingAllocation{}, nil
+		return Allocation{}, nil
 	}
 
 	alignedSize := alignUp64(size, b.alignment)
@@ -161,9 +161,9 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 	for i := range b.activeChunks {
 		alloc, ok := b.activeChunks[i].tryAllocate(alignedSize)
 		if ok {
-			if err := b.halQueue.WriteBuffer(alloc.buffer, alloc.offset, data); err != nil {
+			if err := b.halQueue.WriteBuffer(alloc.Buffer, alloc.Offset, data); err != nil {
 				b.activeChunks[i].rollback(alignedSize)
-				return stagingAllocation{}, fmt.Errorf("staging belt: write to active chunk: %w", err)
+				return Allocation{}, fmt.Errorf("staging belt: write to active chunk: %w", err)
 			}
 			return alloc, nil
 		}
@@ -175,9 +175,9 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 		b.freeChunks = b.freeChunks[:len(b.freeChunks)-1]
 		alloc, _ := chunk.tryAllocate(alignedSize)
 		b.activeChunks = append(b.activeChunks, chunk)
-		if err := b.halQueue.WriteBuffer(alloc.buffer, alloc.offset, data); err != nil {
+		if err := b.halQueue.WriteBuffer(alloc.Buffer, alloc.Offset, data); err != nil {
 			b.activeChunks[len(b.activeChunks)-1].rollback(alignedSize)
-			return stagingAllocation{}, fmt.Errorf("staging belt: write to recycled chunk: %w", err)
+			return Allocation{}, fmt.Errorf("staging belt: write to recycled chunk: %w", err)
 		}
 		return alloc, nil
 	}
@@ -185,19 +185,19 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 	// No free chunks — create a new one.
 	chunk, err := b.createChunk(b.chunkSize)
 	if err != nil {
-		return stagingAllocation{}, err
+		return Allocation{}, err
 	}
 	alloc, _ := chunk.tryAllocate(alignedSize)
 	b.activeChunks = append(b.activeChunks, chunk)
-	if err := b.halQueue.WriteBuffer(alloc.buffer, alloc.offset, data); err != nil {
+	if err := b.halQueue.WriteBuffer(alloc.Buffer, alloc.Offset, data); err != nil {
 		chunk.rollback(alignedSize)
-		return stagingAllocation{}, fmt.Errorf("staging belt: write to new chunk: %w", err)
+		return Allocation{}, fmt.Errorf("staging belt: write to new chunk: %w", err)
 	}
 	return alloc, nil
 }
 
 // allocateOversized creates one or more one-off staging buffers for writes
-// larger than chunkSize. Each staging buffer is capped at maxStagingBufferSize
+// larger than chunkSize. Each staging buffer is capped at MaxStagingBufferSize
 // (default 64MB, matching Rust wgpu's 1 << 26 cap). Writes larger than this
 // cap are split into multiple staging buffers.
 //
@@ -208,9 +208,9 @@ func (b *stagingBelt) allocate(size uint64, data []byte) (stagingAllocation, err
 //
 // Defense-in-depth: validates that CreateBuffer returns a usable mapped
 // pointer before writing data, preventing SIGSEGV (BUG-VK-001 Fix 3).
-func (b *stagingBelt) allocateOversized(size uint64, data []byte) (stagingAllocation, error) {
+func (b *Belt) allocateOversized(size uint64, data []byte) (Allocation, error) {
 	// If the write fits in a single staging buffer, use the simple path.
-	if size <= b.maxStagingBufferSize {
+	if size <= b.MaxStagingBufferSize {
 		return b.allocateSingleOversized(size, data)
 	}
 
@@ -223,7 +223,7 @@ func (b *stagingBelt) allocateOversized(size uint64, data []byte) (stagingAlloca
 
 // allocateSingleOversized creates a single one-off staging buffer.
 // Validates the mapped pointer before writing (BUG-VK-001 Fix 3).
-func (b *stagingBelt) allocateSingleOversized(size uint64, data []byte) (stagingAllocation, error) {
+func (b *Belt) allocateSingleOversized(size uint64, data []byte) (Allocation, error) {
 	desc := hal.BufferDescriptor{
 		Label:            "(wgpu internal) staging oversized",
 		Size:             size,
@@ -232,30 +232,30 @@ func (b *stagingBelt) allocateSingleOversized(size uint64, data []byte) (staging
 	}
 	buf, err := b.halDevice.CreateBuffer(&desc)
 	if err != nil {
-		return stagingAllocation{}, fmt.Errorf("staging belt: create oversized buffer (%d bytes): %w", size, err)
+		return Allocation{}, fmt.Errorf("staging belt: create oversized buffer (%d bytes): %w", size, err)
 	}
 	if err := b.halQueue.WriteBuffer(buf, 0, data); err != nil {
 		b.halDevice.DestroyBuffer(buf)
-		return stagingAllocation{}, fmt.Errorf("staging belt: write oversized buffer: %w", err)
+		return Allocation{}, fmt.Errorf("staging belt: write oversized buffer: %w", err)
 	}
 	b.oversized = append(b.oversized, buf)
-	return stagingAllocation{buffer: buf, offset: 0}, nil
+	return Allocation{Buffer: buf, Offset: 0}, nil
 }
 
-// stagingChunkedAllocation holds one chunk of a multi-chunk oversized write.
+// ChunkedAllocation holds one chunk of a multi-chunk oversized write.
 // Used by allocateChunked to return all chunks for CopyBufferToBuffer commands.
-type stagingChunkedAllocation struct {
-	buffer hal.Buffer // staging buffer for this chunk
-	offset uint64     // always 0 for oversized (dedicated buffer per chunk)
-	size   uint64     // bytes of data in this chunk
+type ChunkedAllocation struct {
+	Buffer hal.Buffer // staging buffer for this chunk
+	Offset uint64     // always 0 for oversized (dedicated buffer per chunk)
+	Size   uint64     // bytes of data in this chunk
 }
 
 // allocateChunked splits a large write into multiple staging buffers, each
-// capped at maxStagingBufferSize. Returns the first chunk as the primary
+// capped at MaxStagingBufferSize. Returns the first chunk as the primary
 // allocation and stores all chunks in b.chunkedAllocs for the caller to
 // issue CopyBufferToBuffer commands.
-func (b *stagingBelt) allocateChunked(totalSize uint64, data []byte) (stagingAllocation, error) {
-	maxChunk := b.maxStagingBufferSize
+func (b *Belt) allocateChunked(totalSize uint64, data []byte) (Allocation, error) {
+	maxChunk := b.MaxStagingBufferSize
 	remaining := totalSize
 	dataOffset := uint64(0)
 
@@ -272,16 +272,16 @@ func (b *stagingBelt) allocateChunked(totalSize uint64, data []byte) (stagingAll
 		if err != nil {
 			// Clean up any chunks we already allocated.
 			for _, ca := range b.chunkedAllocs {
-				b.halDevice.DestroyBuffer(ca.buffer)
+				b.halDevice.DestroyBuffer(ca.Buffer)
 			}
 			b.chunkedAllocs = b.chunkedAllocs[:0]
-			return stagingAllocation{}, fmt.Errorf("staging belt: allocate chunk at offset %d: %w", dataOffset, err)
+			return Allocation{}, fmt.Errorf("staging belt: allocate chunk at offset %d: %w", dataOffset, err)
 		}
 
-		b.chunkedAllocs = append(b.chunkedAllocs, stagingChunkedAllocation{
-			buffer: alloc.buffer,
-			offset: alloc.offset,
-			size:   chunkSize,
+		b.chunkedAllocs = append(b.chunkedAllocs, ChunkedAllocation{
+			Buffer: alloc.Buffer,
+			Offset: alloc.Offset,
+			Size:   chunkSize,
 		})
 
 		dataOffset += chunkSize
@@ -289,15 +289,15 @@ func (b *stagingBelt) allocateChunked(totalSize uint64, data []byte) (stagingAll
 	}
 
 	if len(b.chunkedAllocs) == 0 {
-		return stagingAllocation{}, nil
+		return Allocation{}, nil
 	}
 
 	// Return the first chunk as the primary allocation.
 	first := b.chunkedAllocs[0]
-	return stagingAllocation{buffer: first.buffer, offset: first.offset}, nil
+	return Allocation{Buffer: first.Buffer, Offset: first.Offset}, nil
 }
 
-// takeChunkedAllocations hands the chunk allocations of the last allocate
+// TakeChunkedAllocations hands the chunk allocations of the last allocate
 // call to the caller when the write was split across staging buffers, and
 // resets the belt's bookkeeping. The caller issues one CopyBufferToBuffer per
 // entry. Returns an empty slice on the normal (single-buffer) path.
@@ -305,13 +305,13 @@ func (b *stagingBelt) allocateChunked(totalSize uint64, data []byte) (stagingAll
 // The returned slice aliases the belt's own storage: it stays valid only until
 // the next allocate call, which is the same lifetime the caller had when it
 // read the field directly.
-func (b *stagingBelt) takeChunkedAllocations() []stagingChunkedAllocation {
+func (b *Belt) TakeChunkedAllocations() []ChunkedAllocation {
 	chunks := b.chunkedAllocs
 	b.chunkedAllocs = b.chunkedAllocs[:0]
 	return chunks
 }
 
-// finish moves all active chunks and oversized buffers to closed state.
+// Finish moves all active chunks and oversized buffers to closed state.
 // Called at flush() time when the command encoder is about to be submitted.
 // The submission index is not yet known — call setLastSubmissionIndex()
 // after HAL Submit returns with the actual index.
@@ -319,7 +319,7 @@ func (b *stagingBelt) takeChunkedAllocations() []stagingChunkedAllocation {
 // The belt is the sole owner of all staging resources (chunks + oversized).
 // recall() handles destruction of oversized buffers after GPU completion.
 // No buffers are returned to the caller — this avoids double-destroy bugs.
-func (b *stagingBelt) finish(submissionIndex uint64) {
+func (b *Belt) Finish(submissionIndex uint64) {
 	if len(b.activeChunks) == 0 && len(b.oversized) == 0 {
 		return
 	}
@@ -337,10 +337,10 @@ func (b *stagingBelt) finish(submissionIndex uint64) {
 	b.oversized = nil
 }
 
-// discardActive abandons allocations whose copy commands will not be
+// DiscardActive abandons allocations whose copy commands will not be
 // submitted. Regular chunks return directly to the free pool; oversized
 // one-off buffers are destroyed. The caller serializes access.
-func (b *stagingBelt) discardActive() {
+func (b *Belt) DiscardActive() {
 	for i := range b.activeChunks {
 		b.activeChunks[i].offset = 0
 		b.freeChunks = append(b.freeChunks, b.activeChunks[i])
@@ -356,9 +356,9 @@ func (b *stagingBelt) discardActive() {
 	b.chunkedAllocs = nil
 }
 
-// discardLastClosed rolls back the batch most recently finished with the
+// DiscardLastClosed rolls back the batch most recently finished with the
 // placeholder submission index. It is used only when HAL rejects Submit.
-func (b *stagingBelt) discardLastClosed() {
+func (b *Belt) DiscardLastClosed() {
 	last := len(b.closedSubmissions) - 1
 	if last < 0 || b.closedSubmissions[last].submissionIndex != 0 {
 		return
@@ -374,18 +374,18 @@ func (b *stagingBelt) discardLastClosed() {
 	}
 }
 
-// setLastSubmissionIndex updates the most recently finished batch with the
+// SetLastSubmissionIndex updates the most recently finished batch with the
 // actual GPU submission index (known only after HAL Submit returns).
 // Must be called after finish() and after HAL Submit.
-func (b *stagingBelt) setLastSubmissionIndex(index uint64) {
+func (b *Belt) SetLastSubmissionIndex(index uint64) {
 	if len(b.closedSubmissions) > 0 {
 		b.closedSubmissions[len(b.closedSubmissions)-1].submissionIndex = index
 	}
 }
 
-// recall recycles chunks from completed submissions back to the free pool.
+// Recall recycles chunks from completed submissions back to the free pool.
 // Called from maintain() after the GPU reports completion of a submission.
-func (b *stagingBelt) recall(completedIndex uint64) {
+func (b *Belt) Recall(completedIndex uint64) {
 	cutoff := 0
 	for i, sub := range b.closedSubmissions {
 		if sub.submissionIndex > completedIndex {
@@ -411,7 +411,7 @@ func (b *stagingBelt) recall(completedIndex uint64) {
 }
 
 // createChunk allocates a new staging chunk buffer.
-func (b *stagingBelt) createChunk(size uint64) (stagingChunk, error) {
+func (b *Belt) createChunk(size uint64) (chunk, error) {
 	desc := hal.BufferDescriptor{
 		Label:            "(wgpu internal) staging chunk",
 		Size:             size,
@@ -420,34 +420,34 @@ func (b *stagingBelt) createChunk(size uint64) (stagingChunk, error) {
 	}
 	buf, err := b.halDevice.CreateBuffer(&desc)
 	if err != nil {
-		return stagingChunk{}, fmt.Errorf("staging belt: create chunk (%d bytes): %w", size, err)
+		return chunk{}, fmt.Errorf("staging belt: create chunk (%d bytes): %w", size, err)
 	}
-	return stagingChunk{buffer: buf, size: size, offset: 0}, nil
+	return chunk{buffer: buf, size: size, offset: 0}, nil
 }
 
 // tryAllocate checks if `size` bytes fit in the chunk and reserves the space.
 // Returns the allocation start offset and true if it fits. On success, the
 // caller MUST write data; on WriteBuffer failure, call rollback(alignedSize).
-func (c *stagingChunk) tryAllocate(alignedSize uint64) (stagingAllocation, bool) {
+func (c *chunk) tryAllocate(alignedSize uint64) (Allocation, bool) {
 	start := c.offset
 	end := start + alignedSize
 	if end > c.size {
-		return stagingAllocation{}, false
+		return Allocation{}, false
 	}
 	c.offset = end
-	return stagingAllocation{buffer: c.buffer, offset: start}, true
+	return Allocation{Buffer: c.buffer, Offset: start}, true
 }
 
 // rollback reverts a tryAllocate when the subsequent WriteBuffer fails.
 // This prevents leaving a gap in the chunk (DeepSeek review finding).
-func (c *stagingChunk) rollback(alignedSize uint64) {
+func (c *chunk) rollback(alignedSize uint64) {
 	if c.offset >= alignedSize {
 		c.offset -= alignedSize
 	}
 }
 
-// destroy releases all chunk buffers (active, free, and closed).
-func (b *stagingBelt) destroy() {
+// Destroy releases all chunk buffers (active, free, and closed).
+func (b *Belt) Destroy() {
 	for _, chunk := range b.activeChunks {
 		b.halDevice.DestroyBuffer(chunk.buffer)
 	}
@@ -478,17 +478,17 @@ func (b *stagingBelt) destroy() {
 	b.chunkedAllocs = nil
 }
 
-// beltStats holds belt statistics for diagnostics/logging.
-type beltStats struct {
+// Stats holds belt statistics for diagnostics/logging.
+type Stats struct {
 	ActiveChunks   int
 	FreeChunks     int
 	ClosedSubs     int
 	TotalAllocated uint64
 }
 
-// stats returns belt statistics for diagnostics/logging.
-func (b *stagingBelt) stats() beltStats {
-	s := beltStats{
+// Stats returns belt statistics for diagnostics/logging.
+func (b *Belt) Stats() Stats {
+	s := Stats{
 		ActiveChunks: len(b.activeChunks),
 		FreeChunks:   len(b.freeChunks),
 		ClosedSubs:   len(b.closedSubmissions),

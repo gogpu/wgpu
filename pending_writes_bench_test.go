@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/staging"
 )
 
 // benchBatchingQueue is a zero-allocation mock for benchmarks.
@@ -60,7 +61,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	pw.mu.Lock()
 	pw.flush()
 	if pw.belt != nil {
-		pw.belt.setLastSubmissionIndex(1)
+		pw.belt.SetLastSubmissionIndex(1)
 	}
 	pw.maintain(1) // recall completed → chunk moves to freeChunks
 	pw.mu.Unlock()
@@ -75,7 +76,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 			pw.mu.Lock()
 			pw.flush()
 			if pw.belt != nil {
-				pw.belt.setLastSubmissionIndex(subIdx)
+				pw.belt.SetLastSubmissionIndex(subIdx)
 			}
 			pw.maintain(subIdx) // recall immediately (noop is synchronous)
 			subIdx++
@@ -138,24 +139,24 @@ func BenchmarkAlignUp(b *testing.B) {
 func BenchmarkStagingBelt_AllocateSteadyState(b *testing.B) {
 	dev := &noop.Device{}
 	q := &noop.Queue{}
-	belt := newStagingBelt(dev, q, 0, 0, 0)
-	defer belt.destroy()
+	belt := staging.New(dev, q, 0, 0, 0)
+	defer belt.Destroy()
 
 	data := make([]byte, 256)
 
 	// Warmup: create chunk, finish, recall.
-	belt.allocate(256, data)
-	belt.finish(1)
-	belt.recall(1)
+	belt.Allocate(256, data)
+	belt.Finish(1)
+	belt.Recall(1)
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	subIdx := uint64(2)
 	for i := 0; i < b.N; i++ {
-		belt.allocate(256, data)
+		belt.Allocate(256, data)
 		if i%20 == 19 {
-			belt.finish(subIdx)
-			belt.recall(subIdx)
+			belt.Finish(subIdx)
+			belt.Recall(subIdx)
 			subIdx++
 		}
 	}
