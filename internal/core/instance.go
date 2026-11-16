@@ -274,6 +274,11 @@ func (i *Instance) registerExposedAdapters(halInstance hal.Instance) []AdapterID
 // ForceFallbackAdapter under the default set. A reduced explicit mask keeps its
 // meaning (ADR-079: Backends=DX12 does not silently gain software).
 func (i *Instance) admitsSoftwareFallback() bool {
+	if i.useMock {
+		// A mock instance is a test double over fabricated adapters; a force
+		// request must not reach the real software backend through it.
+		return false
+	}
 	if i.backends&gputypes.BackendsSoftware != 0 {
 		return false // enumerated normally; Auto and force requests both see it
 	}
@@ -545,10 +550,19 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 	allAdapterIDs := append([]AdapterID(nil), i.adapters...)
 	i.mu.RUnlock()
 
+	// ADR-083 §2.3: the lazily admitted fallback adapters are candidates too.
+	// The caller's surface map was built before the first force request, so it
+	// cannot name the software backend; the software HAL surface is created on
+	// demand at configure (surface_native.go), which is why a missing surface
+	// hint must not drop a fallback adapter — the map stays authoritative for
+	// the hardware backends, whose instances existed when it was built.
+	fallbackIDs := make(map[AdapterID]struct{})
 	if options != nil && options.ForceFallbackAdapter {
-		// ADR-083 §2.3: the software backend is a fallback candidate only;
-		// a surface request that asked for a fallback admits it here too.
-		allAdapterIDs = append(allAdapterIDs, i.ensureFallbackAdapters()...)
+		fallback := i.ensureFallbackAdapters()
+		allAdapterIDs = append(allAdapterIDs, fallback...)
+		for _, id := range fallback {
+			fallbackIDs[id] = struct{}{}
+		}
 	}
 
 	hub := GetGlobal().Hub()
@@ -564,6 +578,12 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 		}
 		surfaceHint := surfaceForBackend(adapter.Backend)
 		if surfaceHint == nil {
+			// A fallback adapter without a surface hint is still a candidate:
+			// its HAL surface is created on demand at configure. Hardware
+			// backends keep the caller's map as the authority.
+			if _, isFallback := fallbackIDs[adapterID]; isFallback {
+				candidates = append(candidates, adapterID)
+			}
 			continue
 		}
 
@@ -794,6 +814,11 @@ func (i *Instance) HALInstanceMap() map[gputypes.Backend]hal.Instance {
 func (i *Instance) Destroy() {
 	i.surfaceRequestMu.Lock()
 	defer i.surfaceRequestMu.Unlock()
+	// fallbackMu before i.mu: the same order ensureFallbackAdapters takes, so a
+	// Release racing an in-flight force request cannot race the slice header or
+	// leave a registered fallback adapter behind.
+	i.fallbackMu.Lock()
+	defer i.fallbackMu.Unlock()
 
 	i.mu.Lock()
 	defer i.mu.Unlock()

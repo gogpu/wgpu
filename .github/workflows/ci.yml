@@ -195,7 +195,15 @@ jobs:
     # root tests drive it; its own tests alone reach 47.1%).
     - name: Run tests
       shell: bash
-      run: go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic -coverpkg=./... ./...
+      run: |
+        # -coverpkg=./... only where the profile is uploaded (ubuntu): it
+        # instruments every package, and the other matrix legs produce a profile
+        # no one reads.
+        coverpkg=
+        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          coverpkg="-coverpkg=./..."
+        fi
+        go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic $coverpkg ./...
 
     # Race detection uses the toolchain's -race (ThreadSanitizer, needs cgo).
     # With CGO_ENABLED=1 goffi links the real runtime/cgo instead of its

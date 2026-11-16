@@ -145,3 +145,62 @@ func TestDefaultSetAsExplicitMaskAdmitsFallback(t *testing.T) {
 		t.Fatalf("ForceFallbackAdapter picked %v, want %v", got, gputypes.BackendSoftware)
 	}
 }
+
+// TestForceFallbackAdapterReachesSoftwareInSurfaceRequest pins the review's F1:
+// the caller's surface map is built before the first force request and cannot
+// carry a software key, so the fallback adapter must stay a candidate without a
+// surface hint (its HAL surface is created on demand at configure).
+func TestForceFallbackAdapterReachesSoftwareInSurfaceRequest(t *testing.T) {
+	GetGlobal().Clear()
+	useProviders(t, hardwareTestProvider(fakeExposed("Iris Xe", gputypes.BackendVulkan, gputypes.DeviceTypeIntegratedGPU)), softwareTestProvider())
+
+	instance := NewInstance(&gputypes.InstanceDescriptor{})
+	t.Cleanup(instance.Destroy)
+
+	id, err := instance.RequestAdapterWithSurfaces(
+		&gputypes.RequestAdapterOptions{ForceFallbackAdapter: true},
+		map[gputypes.Backend]hal.Surface{gputypes.BackendVulkan: nil},
+	)
+	if err != nil {
+		t.Fatalf("force surface RequestAdapter: %v", err)
+	}
+	if got := adapterBackend(t, id); got != gputypes.BackendSoftware {
+		t.Fatalf("force surface request picked %v, want %v", got, gputypes.BackendSoftware)
+	}
+}
+
+// TestDefaultMaskWithOnlySoftwareRegistered pins the ADR-083 §2.2 split on a
+// build whose only registered backend is software: Auto reports
+// ErrNoBackendRegistered (the hardware mask admitted nothing), and the force
+// request still reaches software.
+func TestDefaultMaskWithOnlySoftwareRegistered(t *testing.T) {
+	GetGlobal().Clear()
+	useProviders(t, softwareTestProvider())
+
+	instance := NewInstance(&gputypes.InstanceDescriptor{})
+	t.Cleanup(instance.Destroy)
+
+	if _, err := instance.RequestAdapter(nil); !errors.Is(err, ErrNoBackendRegistered) {
+		t.Fatalf("auto RequestAdapter error = %v, want ErrNoBackendRegistered", err)
+	}
+	id, err := instance.RequestAdapter(&gputypes.RequestAdapterOptions{ForceFallbackAdapter: true})
+	if err != nil {
+		t.Fatalf("force RequestAdapter: %v", err)
+	}
+	if got := adapterBackend(t, id); got != gputypes.BackendSoftware {
+		t.Fatalf("ForceFallbackAdapter picked %v, want %v", got, gputypes.BackendSoftware)
+	}
+}
+
+// TestMockInstanceDoesNotReachSoftwareFallback pins the review's F3: a mock
+// instance is a test double; a force request on it must not create the real
+// software backend.
+func TestMockInstanceDoesNotReachSoftwareFallback(t *testing.T) {
+	GetGlobal().Clear()
+	instance := NewInstanceWithMock(nil)
+	t.Cleanup(instance.Destroy)
+
+	if _, err := instance.RequestAdapter(&gputypes.RequestAdapterOptions{ForceFallbackAdapter: true}); !errors.Is(err, ErrNoFallbackAdapter) {
+		t.Fatalf("force RequestAdapter on a mock instance error = %v, want ErrNoFallbackAdapter", err)
+	}
+}

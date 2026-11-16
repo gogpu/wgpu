@@ -40,7 +40,7 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   a hardware adapter reports `wgpu.ErrNoHardwareAdapter` from a plain `RequestAdapter`, and `gogpu` retries with the
   software mask on that sentinel. Select it explicitly with `Backends: gputypes.BackendsSoftware` (normal
   enumeration) or with `RequestAdapterOptions.ForceFallbackAdapter`, which reaches the software backend under the
-  default mask and prefers it over other CPU adapters (ADR-079).
+  default mask, requests with a compatible surface included, and prefers it over other CPU adapters (ADR-079).
 - **naga v0.22.1** (from v0.21.12). v0.22.0 and v0.22.1 are the SPIR-V input frontend's Phase 3 work — row-major
   matrix members on read and a spec-correct store, projected samples of arrayed images, the storage-expression
   budget, positioned post-parse errors, `nagac --from-spirv` — plus the IR's name-presence model and the
