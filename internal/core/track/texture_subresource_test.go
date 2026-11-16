@@ -262,3 +262,164 @@ func checkTransitions(t *testing.T, what string, got, want []TexturePendingTrans
 		}
 	}
 }
+
+// TestTextureTracker_AppendSingleSubresources checks a queue write of some
+// subresources: an untracked texture starts Uninitialized, a write of one
+// level of a whole texture moves that level alone with one barrier over it,
+// and a later write moves each level from its own state.
+func TestTextureTracker_AppendSingleSubresources(t *testing.T) {
+	t.Parallel()
+	device := NewTextureTracker()
+	scratch := make([]TexturePendingTransition, 0, 4)
+
+	got := device.AppendSingle(scratch, 3, selectMipLevel(1), TextureUsesCopyDst)
+	want := []TexturePendingTransition{{
+		Index:    3,
+		Selector: selectMipLevel(1),
+		Usage:    TextureStateTransition{From: TextureUsesUninitialized, To: TextureUsesCopyDst},
+	}}
+	checkTransitions(t, "level 1 of an untracked texture", got, want)
+	if &got[0] != &scratch[:1][0] {
+		t.Error("AppendSingle did not append to the caller's slice")
+	}
+	if usage := device.states[3].subresourceUsage(1, 1); usage != TextureUsesCopyDst {
+		t.Errorf("level 1 = %v, want CopyDst", usage)
+	}
+	if usage := device.states[3].subresourceUsage(0, 0); usage != TextureUsesUninitialized {
+		t.Errorf("level 0 = %v, want Uninitialized", usage)
+	}
+	if usage := device.states[3].subresourceUsage(3, 0); usage != TextureUsesNone {
+		t.Errorf("level 3 of a texture of 3 = %v, want None", usage)
+	}
+
+	// The same usage again over the whole texture: levels 0 and 2 move from
+	// Uninitialized, level 1 needs a barrier between two writes.
+	got = device.AppendSingle(nil, 3, TextureSelector{}, TextureUsesCopyDst)
+	if len(got) != 3 || got[0].Usage.From != TextureUsesUninitialized || got[1].Usage.From != TextureUsesCopyDst ||
+		got[2].Usage.From != TextureUsesUninitialized {
+		t.Fatalf("whole write: %+v, want levels 0, 1 and 2 from Uninitialized, CopyDst and Uninitialized", got)
+	}
+
+	// A usage the whole texture already has, over one level, needs no split.
+	device.InsertSingle(4, TextureUsesResource)
+	if got := device.AppendSingle(nil, 4, selectMipLevel(2), TextureUsesResource); len(got) != 0 {
+		t.Errorf("Resource over Resource: %+v, want no transition", got)
+	}
+	if !device.states[4].isWhole() {
+		t.Error("a usage the texture already has split its state")
+	}
+}
+
+// TestTextureTracker_DeprecatedSetSingle checks the whole-texture form: it
+// answers the one transition of a whole texture, and only the first of a
+// texture whose subresources differ.
+func TestTextureTracker_DeprecatedSetSingle(t *testing.T) {
+	t.Parallel()
+	device := NewTextureTracker()
+	transition, needed := device.SetSingle(1, TextureUsesCopyDst)
+	if !needed || transition.Usage.From != TextureUsesUninitialized || !transition.Selector.SelectsAll() {
+		t.Fatalf("first write = %+v, %v; want Uninitialized -> CopyDst over the whole texture", transition, needed)
+	}
+	device.InsertSingle(2, TextureUsesResource)
+	if _, needed := device.SetSingle(2, TextureUsesResource); needed {
+		t.Error("Resource -> Resource is ordered, no transition expected")
+	}
+	device.AppendSingle(nil, 1, selectMipLevel(1), TextureUsesResource)
+	transition, needed = device.SetSingle(1, TextureUsesCopySrc)
+	if !needed || transition.Selector.BaseMipLevel != 0 || transition.Usage.From != TextureUsesCopyDst {
+		t.Errorf("levels that differ = %+v, %v; want the first, level 0 from CopyDst", transition, needed)
+	}
+	if usage := (TextureState{}).Usage(); usage != TextureUsesNone {
+		t.Errorf("TextureState{}.Usage() = %v, want None", usage)
+	}
+}
+
+// TestTextureTracker_MergeEncoderInsertsSplitEnd checks a texture the device
+// does not track yet: a command buffer that first used it whole and left its
+// levels in different states hands the device those states, with no
+// barrier.
+func TestTextureTracker_MergeEncoderInsertsSplitEnd(t *testing.T) {
+	t.Parallel()
+	encoder := NewEncoderTextureTracker()
+	encoder.AppendSingle(nil, 6, TextureSelector{}, TextureUsesCopyDst)
+	encoder.AppendSingle(nil, 6, selectMipLevel(2), TextureUsesResource)
+
+	device := NewTextureTracker()
+	if got := device.MergeEncoder(encoder); len(got) != 0 {
+		t.Fatalf("untracked texture: %+v, want no transition", got)
+	}
+	if usage := device.states[6].subresourceUsage(2, 1); usage != TextureUsesResource {
+		t.Errorf("level 2 = %v, want Resource", usage)
+	}
+	if usage := device.states[6].subresourceUsage(0, 1); usage != TextureUsesCopyDst {
+		t.Errorf("level 0 = %v, want CopyDst", usage)
+	}
+
+	// The device's split storage is reused when the texture is tracked
+	// again from the same command buffer.
+	device.Remove(6)
+	if got := device.MergeEncoder(encoder); len(got) != 0 {
+		t.Fatalf("texture tracked again: %+v, want no transition", got)
+	}
+	if usage := device.states[6].subresourceUsage(2, 0); usage != TextureUsesResource {
+		t.Errorf("level 2 after reuse = %v, want Resource", usage)
+	}
+}
+
+// TestTextureUsageScope_NoUsage checks that a usage of nothing changes
+// nothing: the scope owns the texture with no usage, and merging the scope
+// moves nothing.
+func TestTextureUsageScope_NoUsage(t *testing.T) {
+	t.Parallel()
+	scope := NewTextureUsageScope()
+	if got := scope.GetUsage(2); got != TextureUsesNone {
+		t.Errorf("unused texture = %v, want None", got)
+	}
+	if err := scope.SetUsage(2, TextureUsesNone); err != nil {
+		t.Fatal(err)
+	}
+	encoder := NewEncoderTextureTracker()
+	if got := encoder.SetFromScope(scope); len(got) != 0 {
+		t.Errorf("SetFromScope: %+v, want nothing", got)
+	}
+	device := NewTextureTracker()
+	device.InsertSingle(2, TextureUsesResource)
+	if got := device.MergeEncoder(encoder); len(got) != 0 {
+		t.Errorf("MergeEncoder: %+v, want nothing", got)
+	}
+	if got := device.GetUsage(2); got != TextureUsesResource {
+		t.Errorf("device usage = %v, want Resource as before", got)
+	}
+}
+
+// TestTextureUsageScope_GrowsAndReusesStates checks a scope past its first
+// capacity, and that states a Clear dropped start afresh when taken back.
+func TestTextureUsageScope_GrowsAndReusesStates(t *testing.T) {
+	t.Parallel()
+	scope := NewTextureUsageScope()
+	const index TrackerIndex = 40
+	if err := scope.SetSubresourceUsage(index, selectMipLevel(0), TextureUsesColorTarget); err != nil {
+		t.Fatal(err)
+	}
+	if err := scope.SetSubresourceUsage(index, selectMipLevel(0), TextureUsesColorTarget); err != nil {
+		t.Fatalf("the same usage again: %v", err)
+	}
+	scope.Clear()
+	if err := scope.SetUsage(index, TextureUsesResource); err != nil {
+		t.Fatalf("after Clear: %v, want the dropped state forgotten", err)
+	}
+	if got := scope.GetUsage(index); got != TextureUsesResource {
+		t.Errorf("after Clear = %v, want Resource for every subresource", got)
+	}
+}
+
+// TestTextureState_CollapseWhole checks that collapsing a whole state keeps
+// it as it is.
+func TestTextureState_CollapseWhole(t *testing.T) {
+	t.Parallel()
+	state := textureState{usage: TextureUsesResource}
+	state.collapse()
+	if !state.isWhole() || state.usage != TextureUsesResource {
+		t.Errorf("collapse of a whole state = %+v, want it unchanged", state)
+	}
+}
