@@ -77,18 +77,21 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetPipeline: pipeline is nil"))
 		return
 	}
+	impl := pipeline.impl
 	p.pipelineSet = true
-	p.requiredVertexBuffers = pipeline.requiredVertexBuffers
-	p.currentStripIndexFormat = pipeline.stripIndexFormat
-	if pipeline.blendConstantRequired {
+	// A zero-value pipeline has no implementation: the reads below are
+	// nil-safe and yield the zero values the pre-move type carried.
+	p.requiredVertexBuffers = impl.RequiredVertexBuffers()
+	p.currentStripIndexFormat = impl.StripIndexFormat()
+	if impl.BlendConstantRequired() {
 		p.blendConstantRequired = true
 	}
-	p.binder.updateExpectations(pipeline.bindGroupLayouts)
-	p.binder.updateLateBufferBindingsFromPipeline(pipeline.lateSizedBufferGroups)
-	p.trackRef(pipeline.ref)
+	p.binder.updateExpectations(impl.BindGroupLayouts())
+	p.binder.updateLateBufferBindingsFromPipeline(impl.LateSizedBufferGroups())
+	p.trackRef(impl.Ref())
 	raw := p.core.RawPass()
-	if raw != nil && pipeline.hal != nil {
-		raw.SetPipeline(pipeline.hal)
+	if raw != nil && impl.HAL() != nil {
+		raw.SetPipeline(impl.HAL())
 	}
 }
 

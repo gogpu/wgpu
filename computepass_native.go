@@ -55,14 +55,17 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetPipeline: pipeline is nil"))
 		return
 	}
+	impl := pipeline.impl
 	p.pipelineSet = true
 	p.currentPipeline = pipeline
-	p.binder.updateExpectations(pipeline.bindGroupLayouts)
-	p.binder.updateLateBufferBindingsFromPipeline(pipeline.lateSizedBufferGroups)
-	p.trackRef(pipeline.ref)
+	// A zero-value pipeline has no implementation: the reads below are
+	// nil-safe and yield the zero values the pre-move type carried.
+	p.binder.updateExpectations(impl.BindGroupLayouts())
+	p.binder.updateLateBufferBindingsFromPipeline(impl.LateSizedBufferGroups())
+	p.trackRef(impl.Ref())
 	raw := p.core.RawPass()
-	if raw != nil && pipeline.hal != nil {
-		raw.SetPipeline(pipeline.hal)
+	if raw != nil && impl.HAL() != nil {
+		raw.SetPipeline(impl.HAL())
 	}
 }
 
@@ -346,8 +349,8 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 // Matches Rust wgpu-core compute.rs:1001-1036 (reset state after validation).
 func (p *ComputePassEncoder) restoreComputeState(raw hal.ComputePassEncoder) {
 	// Restore user's compute pipeline.
-	if p.pipelineSet && p.currentPipeline != nil && p.currentPipeline.hal != nil {
-		raw.SetPipeline(p.currentPipeline.hal)
+	if p.pipelineSet && p.currentPipeline != nil && p.currentPipeline.impl.HAL() != nil {
+		raw.SetPipeline(p.currentPipeline.impl.HAL())
 	}
 
 	// Restore user's bind groups: the new backend pass has none.

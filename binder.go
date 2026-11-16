@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -208,7 +209,7 @@ func (b *binder) activeGroup(i uint32) *resource.BindGroup {
 // entries already have BoundSize filled, and we just add ShaderExpectSize.
 //
 // Matches Rust wgpu-core's Binder::change_pipeline_layout (command/bind.rs:341-375).
-func (b *binder) updateLateBufferBindingsFromPipeline(lateGroups [MaxBindGroups]LateSizedBufferGroup) {
+func (b *binder) updateLateBufferBindingsFromPipeline(lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup) {
 	for i, lateGroup := range lateGroups {
 		payload := &b.payloads[i]
 		payload.lateBindingsEffectiveCount = len(lateGroup.ShaderSizes)

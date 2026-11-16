@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga/ir"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
@@ -576,8 +577,8 @@ func TestCheckLateBufferBindingsPass(t *testing.T) {
 	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// Pipeline requires 64 bytes, buffer has 128 bytes — should pass.
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
-	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
+	lateGroups[0] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 128}})
@@ -594,8 +595,8 @@ func TestCheckLateBufferBindingsExactSize(t *testing.T) {
 	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// Pipeline requires 64 bytes, buffer has exactly 64 bytes — should pass.
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
-	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
+	lateGroups[0] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 64}})
@@ -612,8 +613,8 @@ func TestCheckLateBufferBindingsFail(t *testing.T) {
 	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// Pipeline requires 64 bytes, buffer has only 32 — should fail.
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
-	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
+	lateGroups[0] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 5, Size: 32}})
@@ -643,7 +644,7 @@ func TestCheckLateBufferBindingsNoLateEntries(t *testing.T) {
 	b.updateExpectations([]*resource.BindGroupLayout{l})
 
 	// No late groups — should always pass.
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	if err := b.checkLateBufferBindings(); err != nil {
@@ -664,8 +665,8 @@ func TestCheckLateBufferBindingsBindGroupBeforePipeline(t *testing.T) {
 	b.assignBindGroup(0, bg)
 
 	// Then set pipeline (should merge into existing entries).
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
-	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
+	lateGroups[0] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	if err := b.checkLateBufferBindings(); err != nil {
@@ -681,8 +682,8 @@ func TestCheckLateBufferBindingsPipelineBeforeBindGroup(t *testing.T) {
 	b.assign(0, l)
 
 	// Set pipeline FIRST.
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
-	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
+	lateGroups[0] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	// Then set bind group with insufficient size.
@@ -707,9 +708,9 @@ func TestCheckLateBufferBindingsMultipleGroups(t *testing.T) {
 	b.assign(1, l1)
 
 	// Group 0: ok (128 >= 64), Group 1: undersized (16 < 48).
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
-	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
-	lateGroups[1] = LateSizedBufferGroup{ShaderSizes: []uint64{48}}
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
+	lateGroups[0] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	lateGroups[1] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{48}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	bg0 := newTestBinderBindGroup(l0, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 128}})
@@ -779,8 +780,8 @@ func TestBinderResetClearsLateBindings(t *testing.T) {
 	l := &resource.BindGroupLayout{}
 	b.updateExpectations([]*resource.BindGroupLayout{l})
 
-	var lateGroups [MaxBindGroups]LateSizedBufferGroup
-	lateGroups[0] = LateSizedBufferGroup{ShaderSizes: []uint64{64}}
+	var lateGroups [MaxBindGroups]pipeline.LateSizedBufferGroup
+	lateGroups[0] = pipeline.LateSizedBufferGroup{ShaderSizes: []uint64{64}}
 	b.updateLateBufferBindingsFromPipeline(lateGroups)
 
 	bg := newTestBinderBindGroup(l, []resource.LateBufferBindingInfo{{BindingIndex: 0, Size: 32}})

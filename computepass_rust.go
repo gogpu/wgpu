@@ -15,10 +15,10 @@ type ComputePassEncoder struct {
 
 // SetPipeline sets the active compute pipeline.
 func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
-	if pipeline == nil || pipeline.r == nil {
+	if pipeline == nil || pipeline.impl.R() == nil {
 		return
 	}
-	p.r.SetPipeline(pipeline.r)
+	p.r.SetPipeline(pipeline.impl.R())
 }
 
 // SetBindGroup sets a bind group for the given index.

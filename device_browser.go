@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 	"github.com/gogpu/wgpu/internal/pipeconst"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -234,10 +235,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	}
 	jsDesc := convertRenderPipelineDescriptor(desc)
 	bp := d.browser.CreateRenderPipelineFromDesc(jsDesc)
-	return &RenderPipeline{
-		browser:  bp,
-		released: false,
-	}, nil
+	return &RenderPipeline{impl: pipeline.NewRenderPipeline(bp)}, nil
 }
 
 // CreateComputePipeline creates a compute pipeline from the given descriptor.
@@ -267,10 +265,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		desc.Label, layoutRef, moduleRef, desc.EntryPoint, desc.Constants,
 	)
 	bp := d.browser.CreateComputePipelineFromDesc(jsDesc)
-	return &ComputePipeline{
-		browser:  bp,
-		released: false,
-	}, nil
+	return &ComputePipeline{impl: pipeline.NewComputePipeline(bp)}, nil
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.

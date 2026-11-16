@@ -19,10 +19,10 @@ type RenderPassEncoder struct {
 
 // SetPipeline sets the active render pipeline.
 func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
-	if pipeline == nil || pipeline.r == nil {
+	if pipeline == nil || pipeline.impl.R() == nil {
 		return
 	}
-	p.r.SetPipeline(pipeline.r)
+	p.r.SetPipeline(pipeline.impl.R())
 }
 
 // SetBindGroup sets a bind group for the given index.

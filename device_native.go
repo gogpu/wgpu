@@ -15,6 +15,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -1071,20 +1072,20 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	}
 
 	passContext, writesDepth, writesStencil := renderPipelineTargets(desc)
-	return &RenderPipeline{
-		hal:                   halPipeline,
-		device:                d.seamView(),
-		bindGroupCount:        bgCount,
-		bindGroupLayouts:      bgLayouts,
-		requiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
-		blendConstantRequired: needsBlendConstant,
-		stripIndexFormat:      desc.Primitive.StripIndexFormat,
-		lateSizedBufferGroups: lateGroups,
-		passContext:           passContext,
-		writesDepth:           writesDepth,
-		writesStencil:         writesStencil,
-		ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, rpOnZero),
-	}, nil
+	return &RenderPipeline{impl: pipeline.NewRenderPipeline(&pipeline.RenderPipelineInit{
+		HAL:                   halPipeline,
+		Device:                d.seamView(),
+		BindGroupCount:        bgCount,
+		BindGroupLayouts:      bgLayouts,
+		RequiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
+		BlendConstantRequired: needsBlendConstant,
+		StripIndexFormat:      desc.Primitive.StripIndexFormat,
+		LateSizedBufferGroups: lateGroups,
+		PassContext:           passContext,
+		WritesDepth:           writesDepth,
+		WritesStencil:         writesStencil,
+		Ref:                   core.NewResourceRef("RenderPipeline:"+desc.Label, rpOnZero),
+	})}, nil
 }
 
 // validateRenderStageOverrides applies the pipeline constants of the vertex
@@ -1153,8 +1154,8 @@ func mergeShaderBindingSizes(vertex, fragment map[ir.ResourceBinding]uint64) map
 func makeLateSizedBufferGroups(
 	shaderBindingSizes map[ir.ResourceBinding]uint64,
 	layouts []*resource.BindGroupLayout,
-) [MaxBindGroups]LateSizedBufferGroup {
-	var groups [MaxBindGroups]LateSizedBufferGroup
+) [MaxBindGroups]pipeline.LateSizedBufferGroup {
+	var groups [MaxBindGroups]pipeline.LateSizedBufferGroup
 
 	for groupIdx, bgl := range layouts {
 		if bgl == nil {
@@ -1174,7 +1175,7 @@ func makeLateSizedBufferGroups(
 			shaderSize := shaderBindingSizes[rb] // 0 if not found
 			sizes = append(sizes, shaderSize)
 		}
-		groups[groupIdx] = LateSizedBufferGroup{ShaderSizes: sizes}
+		groups[groupIdx] = pipeline.LateSizedBufferGroup{ShaderSizes: sizes}
 	}
 
 	return groups
@@ -1295,13 +1296,13 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		destroy()
 	}
 
-	return &ComputePipeline{
-		hal:                   halPipeline,
-		bindGroupCount:        bgCount,
-		bindGroupLayouts:      bgLayouts,
-		lateSizedBufferGroups: lateGroups,
-		ref:                   core.NewResourceRef("ComputePipeline:"+desc.Label, cpOnZero),
-	}, nil
+	return &ComputePipeline{impl: pipeline.NewComputePipeline(&pipeline.ComputePipelineInit{
+		HAL:                   halPipeline,
+		BindGroupCount:        bgCount,
+		BindGroupLayouts:      bgLayouts,
+		LateSizedBufferGroups: lateGroups,
+		Ref:                   core.NewResourceRef("ComputePipeline:"+desc.Label, cpOnZero),
+	})}, nil
 }
 
 // validateComputeShader checks the compute entry point against the device

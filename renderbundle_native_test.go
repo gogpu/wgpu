@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -73,13 +74,23 @@ func (r *bundleTestRig) beginPass(t *testing.T, color bool) (*CommandEncoder, *R
 
 // pipeline returns a pipeline rendering to formats with the given layouts.
 func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*resource.BindGroupLayout) *RenderPipeline {
-	return &RenderPipeline{
-		hal:              &testHALResource{},
-		device:           r.device.seamView(),
-		bindGroupLayouts: layouts,
-		passContext:      core.RenderPassContext{ColorFormats: formats, SampleCount: 1},
-		ref:              core.NewResourceRef("RenderPipeline:test", nil),
+	return r.pipelineInit(&pipeline.RenderPipelineInit{
+		BindGroupLayouts: layouts,
+		PassContext:      core.RenderPassContext{ColorFormats: formats, SampleCount: 1},
+	})
+}
+
+// pipelineInit returns a pipeline over init, with the rig's device, a HAL
+// double and a fresh ref filled in where init leaves them unset.
+func (r *bundleTestRig) pipelineInit(init *pipeline.RenderPipelineInit) *RenderPipeline {
+	init.Device = r.device.seamView()
+	if init.HAL == nil {
+		init.HAL = &testHALResource{}
 	}
+	if init.Ref == nil {
+		init.Ref = core.NewResourceRef("RenderPipeline:test", nil)
+	}
+	return &RenderPipeline{impl: pipeline.NewRenderPipeline(init)}
 }
 
 func (r *bundleTestRig) group(layout *resource.BindGroupLayout) *BindGroup {
@@ -165,12 +176,13 @@ func TestRenderBundleFinishValidation(t *testing.T) {
 	other := newBundleTestRig()
 	draw := gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}
 	released := rig.pipeline(rgba8Formats)
-	released.released = true
-	depthWriter := rig.pipeline(nil)
-	depthWriter.passContext.DepthStencilFormat = gputypes.TextureFormatDepth32Float
-	depthWriter.writesDepth = true
+	released.Release()
+	depthWriter := rig.pipelineInit(&pipeline.RenderPipelineInit{
+		PassContext: core.RenderPassContext{DepthStencilFormat: gputypes.TextureFormatDepth32Float, SampleCount: 1},
+		WritesDepth: true,
+	})
 	needsVertex := rig.pipeline(rgba8Formats)
-	needsVertex.requiredVertexBuffers = 1
+	needsVertex.impl.SetRequiredVertexBuffers(1)
 	uniform := rig.buffer(t, BufferUsageUniform)
 	vertex := rig.buffer(t, BufferUsageVertex)
 	index := rig.buffer(t, BufferUsageIndex)
@@ -244,13 +256,13 @@ func TestRenderBundleReplay(t *testing.T) {
 	rig := newBundleTestRig()
 	layout := rebindLayout(false)
 	group := rig.group(layout)
-	pipeline := rig.pipeline(rgba8Formats, layout)
+	pipe := rig.pipeline(rgba8Formats, layout)
 	vertex := rig.buffer(t, BufferUsageVertex)
 	index := rig.buffer(t, BufferUsageIndex)
 
 	enc := rig.encoder(t, nil)
 	enc.SetBindGroup(0, group, nil)
-	enc.SetPipeline(pipeline)
+	enc.SetPipeline(pipe)
 	enc.SetVertexBuffer(1, vertex, 4)
 	enc.SetIndexBuffer(index, gputypes.IndexFormatUint16, 2)
 	enc.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
@@ -319,18 +331,18 @@ func TestRenderBundleEncoderAfterFinish(t *testing.T) {
 func TestRenderBundleKeepsResources(t *testing.T) {
 	rig := newBundleTestRig()
 	layout := rebindLayout(false)
-	pipeline := rig.pipeline(rgba8Formats, layout)
+	pipe := rig.pipeline(rgba8Formats, layout)
 	group := rig.group(layout)
 	enc := rig.encoder(t, nil)
-	enc.SetPipeline(pipeline)
+	enc.SetPipeline(pipe)
 	enc.SetBindGroup(0, group, nil)
-	enc.SetPipeline(pipeline)
+	enc.SetPipeline(pipe)
 	enc.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
 	bundle, err := enc.Finish(nil)
 	if err != nil {
 		t.Fatalf("Finish() error = %v", err)
 	}
-	if got := pipeline.ref.RefCount(); got != 2 {
+	if got := pipe.impl.Ref().RefCount(); got != 2 {
 		t.Fatalf("pipeline refs after Finish = %d, want 2 (one per resource, however often it is used)", got)
 	}
 

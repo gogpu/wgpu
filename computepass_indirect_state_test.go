@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -25,8 +26,8 @@ type recordingComputePass struct {
 	calls []computeCall
 }
 
-func (p *recordingComputePass) SetPipeline(pipeline hal.ComputePipeline) {
-	p.calls = append(p.calls, computeCall{op: "pipeline", pipeline: pipeline})
+func (p *recordingComputePass) SetPipeline(halPipeline hal.ComputePipeline) {
+	p.calls = append(p.calls, computeCall{op: "pipeline", pipeline: halPipeline})
 }
 
 func (p *recordingComputePass) SetBindGroup(index uint32, _ hal.BindGroup, _ []uint32) {
@@ -77,7 +78,10 @@ func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 	}
 
 	l := rebindLayout(false)
-	userPipeline := &ComputePipeline{hal: &testHALResource{}, bindGroupLayouts: []*resource.BindGroupLayout{l}}
+	userPipeline := &ComputePipeline{impl: pipeline.NewComputePipeline(&pipeline.ComputePipelineInit{
+		HAL:              &testHALResource{},
+		BindGroupLayouts: []*resource.BindGroupLayout{l},
+	})}
 	pass.SetPipeline(userPipeline)
 	pass.SetBindGroup(0, &BindGroup{impl: rebindGroup(l)}, nil)
 	pass.DispatchIndirect(indirect, 0)
@@ -97,7 +101,7 @@ func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 		t.Errorf("validation pass calls = %+v, want the validation pipeline first", got)
 	}
 	want := []computeCall{
-		{op: "pipeline", pipeline: userPipeline.hal},
+		{op: "pipeline", pipeline: userPipeline.impl.HAL()},
 		{op: "group", index: 0},
 		{op: "dispatchIndirect"},
 	}

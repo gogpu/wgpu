@@ -76,23 +76,27 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 	if pipeline == nil {
 		return fmt.Errorf("SetPipeline: %w: pipeline is nil", errBundleCommand)
 	}
-	if pipeline.released {
+	// A zero-value pipeline has no implementation: its reads are nil-safe and
+	// yield the zero values the pre-move type carried, so its nil device view
+	// fails the identity check below as errBundleDevice, not a panic.
+	if pipeline.impl.IsReleased() {
 		return fmt.Errorf("SetPipeline: pipeline: %w", ErrReleased)
 	}
-	if pipeline.device != s.device.seamView() {
+	if pipeline.impl.Device() != s.device.seamView() {
 		return fmt.Errorf("SetPipeline: pipeline: %w", errBundleDevice)
 	}
-	if err := s.target.context.CheckCompatible(&pipeline.passContext, refLabel(pipeline.ref)); err != nil {
+	passContext := pipeline.impl.PassContext()
+	if err := s.target.context.CheckCompatible(&passContext, refLabel(pipeline.impl.Ref())); err != nil {
 		return fmt.Errorf("SetPipeline: %w", err)
 	}
-	if (pipeline.writesDepth && s.target.depthReadOnly) || (pipeline.writesStencil && s.target.stencilReadOnly) {
+	if (pipeline.impl.WritesDepth() && s.target.depthReadOnly) || (pipeline.impl.WritesStencil() && s.target.stencilReadOnly) {
 		return fmt.Errorf("SetPipeline: %w", errBundleDepthWrite)
 	}
 	s.commands = append(s.commands, bundleCommand{kind: bundleSetPipeline, pipeline: pipeline})
 	s.pipeline = pipeline
-	s.binder.updateExpectations(pipeline.bindGroupLayouts)
-	s.binder.updateLateBufferBindingsFromPipeline(pipeline.lateSizedBufferGroups)
-	s.keep(pipeline.ref)
+	s.binder.updateExpectations(pipeline.impl.BindGroupLayouts())
+	s.binder.updateLateBufferBindingsFromPipeline(pipeline.impl.LateSizedBufferGroups())
+	s.keep(pipeline.impl.Ref())
 	return nil
 }
 
@@ -199,9 +203,9 @@ func (s *bundleState) isReady(method string, indexed bool) error {
 	if err := s.binder.checkLateBufferBindings(); err != nil {
 		return fmt.Errorf("%s: %w: %w", method, ErrDrawLateBufferTooSmall, err)
 	}
-	if s.vertexBufferCount < s.pipeline.requiredVertexBuffers {
+	if s.vertexBufferCount < s.pipeline.impl.RequiredVertexBuffers() {
 		return fmt.Errorf("%s: pipeline requires %d vertex buffer(s) but only %d set: %w",
-			method, s.pipeline.requiredVertexBuffers, s.vertexBufferCount, ErrDrawMissingVertexBuffer)
+			method, s.pipeline.impl.RequiredVertexBuffers(), s.vertexBufferCount, ErrDrawMissingVertexBuffer)
 	}
 	if !indexed {
 		return nil
@@ -209,7 +213,7 @@ func (s *bundleState) isReady(method string, indexed bool) error {
 	if !s.indexBufferSet {
 		return fmt.Errorf("%s: no index buffer set (call SetIndexBuffer first): %w", method, ErrDrawMissingIndexBuffer)
 	}
-	if strip := s.pipeline.stripIndexFormat; strip != nil && s.indexFormat != *strip {
+	if strip := s.pipeline.impl.StripIndexFormat(); strip != nil && s.indexFormat != *strip {
 		return fmt.Errorf("%s: index buffer format %v does not match pipeline strip index format %v: %w",
 			method, s.indexFormat, *strip, ErrDrawIndexFormatMismatch)
 	}

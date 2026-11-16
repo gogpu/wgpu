@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -15,16 +16,37 @@ import (
 // field of a RenderPipeline for testing. A free function rather than a method
 // for the reason BindGroupTestRef is one (ADR-070 §11 grain note): a test-only
 // method of a type that moves to an extraction package cannot stay behind,
-// while a function over the type can.
+// while a function over the type can. A zero-value wrapper gets a fresh
+// implementation, so the hook works on the zero values the public tests build.
 func SetTestRenderPipelineRequiredVertexBuffers(p *RenderPipeline, count uint32) {
-	p.requiredVertexBuffers = count
+	testRenderPipelineImpl(p).SetRequiredVertexBuffers(count)
+}
+
+// testRenderPipelineImpl returns the pipeline's implementation, giving a
+// zero-value wrapper a fresh one: the pre-move hooks wrote the fields of a
+// zero-value struct directly, and the tests build their fixtures that way.
+func testRenderPipelineImpl(p *RenderPipeline) *pipeline.RenderPipeline {
+	if p.impl == nil {
+		p.impl = pipeline.NewRenderPipeline(&pipeline.RenderPipelineInit{})
+	}
+	return p.impl
 }
 
 // RenderPipelineTestRef returns the ResourceRef for a RenderPipeline (testing only).
-func RenderPipelineTestRef(p *RenderPipeline) *core.ResourceRef { return p.ref }
+func RenderPipelineTestRef(p *RenderPipeline) *core.ResourceRef {
+	if p == nil || p.impl == nil {
+		return nil
+	}
+	return p.impl.Ref()
+}
 
 // ComputePipelineTestRef returns the ResourceRef for a ComputePipeline (testing only).
-func ComputePipelineTestRef(p *ComputePipeline) *core.ResourceRef { return p.ref }
+func ComputePipelineTestRef(p *ComputePipeline) *core.ResourceRef {
+	if p == nil || p.impl == nil {
+		return nil
+	}
+	return p.impl.Ref()
+}
 
 // BindGroupTestRef returns the ResourceRef for a BindGroup (testing only).
 // It is a free function rather than a method: a test-only method of a type that
@@ -117,8 +139,16 @@ func SetTestRenderPipelineBindGroupLayouts(p *RenderPipeline, layouts []*BindGro
 	for i, l := range layouts {
 		impls[i] = testBindGroupLayoutImpl(l)
 	}
-	p.bindGroupLayouts = impls
-	p.bindGroupCount = uint32(len(impls))
+	testRenderPipelineImpl(p).SetBindGroupLayouts(impls)
+}
+
+// testComputePipelineImpl returns the pipeline's implementation, giving a
+// zero-value wrapper a fresh one for the reason testRenderPipelineImpl does.
+func testComputePipelineImpl(p *ComputePipeline) *pipeline.ComputePipeline {
+	if p.impl == nil {
+		p.impl = pipeline.NewComputePipeline(&pipeline.ComputePipelineInit{})
+	}
+	return p.impl
 }
 
 // SetTestComputePipelineBindGroupLayouts sets the bindGroupLayouts field on a
@@ -128,8 +158,7 @@ func SetTestComputePipelineBindGroupLayouts(p *ComputePipeline, layouts []*BindG
 	for i, l := range layouts {
 		impls[i] = testBindGroupLayoutImpl(l)
 	}
-	p.bindGroupLayouts = impls
-	p.bindGroupCount = uint32(len(impls))
+	testComputePipelineImpl(p).SetBindGroupLayouts(impls)
 }
 
 // SetTestBindGroupLayoutEntries sets the entries field on a BindGroupLayout for
@@ -155,7 +184,7 @@ func SetTestBindGroupLayout(g *BindGroup, layout *BindGroupLayout) {
 // the expected IndexFormat for strip topologies. A free function for the reason
 // BindGroupTestRef is one.
 func SetTestRenderPipelineStripIndexFormat(p *RenderPipeline, format *gputypes.IndexFormat) {
-	p.stripIndexFormat = format
+	testRenderPipelineImpl(p).SetStripIndexFormat(format)
 }
 
 // TestMaintainAfterIdle exposes the private maintainAfterIdle for targeted coverage tests.

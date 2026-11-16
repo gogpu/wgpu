@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/gputypes"
 
 	"github.com/gogpu/wgpu/internal/pipeconst"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -314,7 +315,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		return nil, fmt.Errorf("wgpu: failed to create render pipeline: %w", err)
 	}
 
-	return &RenderPipeline{r: rp}, nil
+	return &RenderPipeline{impl: pipeline.NewRenderPipeline(rp)}, nil
 }
 
 // errRustConstantsUnmapped is returned for a programmable stage with pipeline
@@ -380,7 +381,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, fmt.Errorf("wgpu: failed to create compute pipeline: %w", err)
 	}
 
-	return &ComputePipeline{r: rp}, nil
+	return &ComputePipeline{impl: pipeline.NewComputePipeline(rp)}, nil
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.
