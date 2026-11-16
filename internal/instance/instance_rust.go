@@ -59,8 +59,14 @@ func (i *Instance) IsReleased() bool {
 // RequestAdapter requests an adapter for the options the declaration layer
 // converted (a nil pointer is the public nil) and the compatible surface
 // implementation, or nil.
+//
+// A nil receiver is the declaration layer's zero value, which holds no
+// wgpu-native instance. Pre-move that handle answered the rust binding's
+// nil-or-released error; the guard answers the released sentinel instead, so a
+// zero and a released handle answer one value and the call cannot panic
+// (ADR-070 S12 review, P2-CORE-034).
 func (i *Instance) RequestAdapter(opts *gputypes.RequestAdapterOptions, compatible *surface.Surface) (*Adapter, error) {
-	if i.released {
+	if i == nil || i.released {
 		return nil, core.ErrReleased
 	}
 

@@ -26,7 +26,8 @@ package surface
 // only for three root-side facts — the cross-instance rejection on Configure,
 // the HAL instance a backend's raw surface is created on, and the unregister on
 // release — all of which the root declaration layer performs, since the root
-// owns the surface's instance pointer until S12. The seam is therefore the
+// keeps the surface's instance identity pointer (the instance itself moved to
+// internal/instance in S12). The seam is therefore the
 // embed plus HALQueue: four methods by §15.3's count (Core, IsReleased,
 // HALDevice, HALQueue), one of them declared here. The inverted
 // surface → instance edge still holds: the implementation holds no instance

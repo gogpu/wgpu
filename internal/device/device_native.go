@@ -91,8 +91,9 @@ func New(coreDevice *core.Device, q *queue.Queue, pool *encoder.Pool) *Device {
 }
 
 // SetInstance wires the device to the instance that adopted it. It is called
-// once by the root declaration layer's setInstance, which is also where the
-// device's instance identity cache lives; nothing else writes the seam.
+// once at construction by internal/instance's Adapter.RequestDevice; the root
+// declaration layer separately records the instance identity the returned
+// device carries. Nothing else writes the seam.
 func (d *Device) SetInstance(h InstanceHost) {
 	if d == nil || h == nil {
 		return

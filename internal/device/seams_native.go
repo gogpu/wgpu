@@ -9,15 +9,15 @@ package device
 // is the measured access set of the moving device code on tree 1d1778e
 // (device_native.go): the teardown scan that collects the surfaces configured
 // against the device (Release, :1678) and the unregister that removes the
-// device from the instance's registry (:1689). The concrete instance stays in
-// the root package until S12 moves it into internal/instance; the root host
-// adapts at the call boundary, where it can name its own types.
+// device from the instance's registry (:1689). The concrete instance lives in
+// internal/instance since S12 and implements this interface directly, so no
+// host adapter stands between the two domains.
 //
-// SetInstance on the device (declared with the type, next commit) takes the
-// host and never *instance.Instance, so the cut holds in both directions: the
-// device names no instance type, and the instance domain declares no seam of
-// its own for this. The root wires the host at construction, in
-// Instance.adoptDevice, which is the one place a device learns its instance.
+// SetInstance on the device takes the host and never *instance.Instance, so the
+// cut holds in both directions: the device names no instance type, and the
+// instance domain declares no seam of its own for this. The instance side wires
+// the host at construction, in internal/instance's Adapter.RequestDevice, which
+// is the one place a device learns its instance.
 //
 // Supersession (2026-11-16, lead ruling). ADR-070 §15.3 sized this seam as
 // `core.InstanceHost`, expressed in core-level types. That shape cannot fit
@@ -43,7 +43,7 @@ import (
 // InstanceHost is the device domain's view of the instance that owns it: the
 // surfaces configured against this device, and the removal of the device from
 // the instance's registry. Every instance facility the device calls is here;
-// the root host is the only implementation until S12 moves the instance.
+// internal/instance's Instance is the only implementation on the native build.
 //
 // The device view is the shared core.DeviceView for the same reason every
 // other child seam takes one: the host filters the instance's surfaces by the

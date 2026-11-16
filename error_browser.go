@@ -19,10 +19,12 @@ var (
 	// browser sentinel binds it, so one value serves the whole browser API.
 	ErrReleased = core.ErrReleased
 
-	// Adapter-selection sentinels (ADR-083 §2.2). internal/core has no files in
-	// the js/wasm build, and the browser's WebGPU reports its own errors, so they
-	// are declared here with the messages of the native build. This build never
-	// returns them; they exist for source compatibility.
+	// Adapter-selection sentinels (ADR-083 §2.2). internal/core declares no
+	// adapter-selection sentinels in the js/wasm build (its released sentinel,
+	// error_released.go, is untagged and shared), and the browser's WebGPU
+	// reports its own errors, so they are declared here with the messages of the
+	// native build. This build never returns them; they exist for source
+	// compatibility.
 	//
 	// ErrNoBackendRegistered: the requested backend mask selects no registered
 	// backend (compiled out or excluded).

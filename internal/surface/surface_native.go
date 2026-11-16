@@ -8,10 +8,10 @@
 // This context is the native one: the implementation configures a HAL surface
 // through a core.Surface, acquires swapchain images through it and presents
 // them through the HAL queue. The device is reached through the DeviceHost
-// seam (seams_native.go); the instance stays in the root package, which owns
-// the surface's instance pointer until S12 and passes the one HAL value the
-// implementation needs — the hal.Instance a backend's raw surface is created
-// on — in as a parameter.
+// seam (seams_native.go); the instance lives in internal/instance since S12,
+// and the root keeps the surface's instance identity pointer and passes the one
+// HAL value the implementation needs — the hal.Instance a backend's raw surface
+// is created on — in as a parameter.
 package surface
 
 import (
