@@ -24,7 +24,7 @@ type ComputePassEncoder struct {
 
 	// test, when non-nil, records the public calls for package wgputest;
 	// testPass is this pass's dense index.
-	test     testHooks
+	test     core.TestHooks
 	testPass int
 	// pipelineSet tracks whether SetPipeline has been called.
 	// Dispatch commands require a pipeline to be set first.

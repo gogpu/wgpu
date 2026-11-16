@@ -596,7 +596,7 @@ func TestEncoderPoolFinishTransfersEncoder(t *testing.T) {
 	}
 
 	// After Finish, the CommandBuffer should carry the HAL encoder.
-	if cmdBuf.TestHALEncoder() == nil {
+	if wgpu.CommandBufferTestHALEncoder(cmdBuf) == nil {
 		t.Fatal("CommandBuffer.halEncoder is nil after Finish — encoder was not transferred from pool")
 	}
 }
@@ -647,7 +647,7 @@ func TestEncoderPoolRecyclesAfterSubmit(t *testing.T) {
 
 	// After submit, the CommandBuffer's halEncoder should be nil
 	// (ownership moved to deferred callback).
-	if cmdBuf.TestHALEncoder() != nil {
+	if wgpu.CommandBufferTestHALEncoder(cmdBuf) != nil {
 		t.Fatal("CommandBuffer.halEncoder should be nil after Submit — ownership not transferred to deferred callback")
 	}
 }

@@ -231,7 +231,7 @@ func TestEncoderTrackBufferLazyInit(t *testing.T) {
 	}
 
 	// Verify refs were transferred (encoder is empty after Finish).
-	if enc.TestTrackedRefs() != nil {
+	if wgpu.CommandEncoderTestTrackedRefs(enc) != nil {
 		t.Error("encoder should have nil trackedRefs after Finish")
 	}
 	cmdBuf.Release()

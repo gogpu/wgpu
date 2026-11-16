@@ -7,20 +7,25 @@ import (
 	"fmt"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // CommandEncoder records GPU commands for later submission.
 // On Rust backend, this wraps go-webgpu/webgpu CommandEncoder.
+//
+// The former device field is gone: it was write-only (ADR-070 §13.14, B13;
+// every rust error path reads the wrapped encoder, not the device), and the
+// destination of the encoder move may not hold a root device pointer.
 type CommandEncoder struct {
 	r        *rwgpu.CommandEncoder
-	device   *Device
 	released bool
 }
 
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 
 	rDesc, err := convertRenderPassDescriptorRust(desc)
@@ -38,7 +43,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 // BeginComputePass begins a compute pass.
 func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*ComputePassEncoder, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 
 	var rDesc *rwgpu.ComputePassDescriptor
@@ -167,7 +172,7 @@ func (e *CommandEncoder) DiscardEncoding() {
 // Finish completes command recording and returns a CommandBuffer.
 func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 	e.released = true
 

@@ -9,7 +9,9 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // CommandEncoder records GPU commands for later submission.
@@ -25,7 +27,7 @@ type CommandEncoder struct {
 
 	// test, when non-nil, records the public calls for package wgputest;
 	// testEncoder is this user encoder's dense index.
-	test        testHooks
+	test        core.TestHooks
 	testEncoder int
 	// trackedRefs accumulates Clone'd ResourceRefs from render/compute passes.
 	// Transferred to the CommandBuffer on Finish(), then to the DestroyQueue
@@ -359,7 +361,7 @@ func prepareCopyTextureUsages(requests []copyTextureUsage) ([]preparedCopyTextur
 // Call RenderPassEncoder.End() when done.
 func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 	if err := validateRenderPassTextureViews(desc); err != nil {
 		return nil, err
@@ -407,7 +409,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 // Call ComputePassEncoder.End() when done.
 func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*ComputePassEncoder, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 
 	var coreDesc *core.CoreComputePassDescriptor
@@ -466,7 +468,7 @@ func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *
 	halSrc := src.impl.HALBuffer()
 	halDst := dst.impl.HALBuffer()
 	if halSrc == nil || halDst == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: source or destination buffer is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToBuffer: source or destination buffer is released: %w", core.ErrReleased))
 		return
 	}
 	// WebGPU copyBufferToBuffer valid usage; Rust wgpu-core transfer.rs
@@ -514,18 +516,18 @@ func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions 
 	}
 	halSrc := src.impl.ResolveHAL()
 	if halSrc == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: source texture is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: source texture is released: %w", core.ErrReleased))
 		return
 	}
 	for _, region := range regions {
 		if region.TextureBase.Texture != nil && region.TextureBase.Texture.impl.ResolveHAL() == nil {
-			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: region texture is released: %w", ErrReleased))
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: region texture is released: %w", core.ErrReleased))
 			return
 		}
 	}
 	halDst := dst.impl.HALBuffer()
 	if halDst == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: destination buffer is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToBuffer: destination buffer is released: %w", core.ErrReleased))
 		return
 	}
 	if !e.validateBufferTextureCopies("CopyTextureToBuffer", core.CopySideSource, src.impl, dst, regions) {
@@ -577,13 +579,13 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 	halSrc := src.impl.ResolveHAL()
 	halDst := dst.impl.ResolveHAL()
 	if halSrc == nil || halDst == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: texture is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: texture is released: %w", core.ErrReleased))
 		return
 	}
 	for _, region := range regions {
 		if (region.Source.Texture != nil && region.Source.Texture.impl.ResolveHAL() == nil) ||
 			(region.Destination.Texture != nil && region.Destination.Texture.impl.ResolveHAL() == nil) {
-			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region texture is released: %w", ErrReleased))
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyTextureToTexture: region texture is released: %w", core.ErrReleased))
 			return
 		}
 	}
@@ -641,7 +643,7 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	validBarriers := make([]TextureBarrier, 0, len(barriers))
 	for _, b := range barriers {
 		if b.Texture != nil && b.Texture.impl.ResolveHAL() == nil {
-			e.setError(fmt.Errorf("wgpu: CommandEncoder.TransitionTextures: texture is released: %w", ErrReleased))
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.TransitionTextures: texture is released: %w", core.ErrReleased))
 			return
 		}
 		if b.Texture == nil || b.Texture.impl.ResolveHAL() == nil {
@@ -675,12 +677,12 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 	}
 	halDst := dst.impl.ResolveHAL()
 	if halDst == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: destination texture is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: destination texture is released: %w", core.ErrReleased))
 		return
 	}
 	halSrc := src.impl.HALBuffer()
 	if halSrc == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: source buffer is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: source buffer is released: %w", core.ErrReleased))
 		return
 	}
 	if !e.validateBufferTextureCopies("CopyBufferToTexture", core.CopySideDestination, dst.impl, src, regions) {
@@ -702,7 +704,7 @@ func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions 
 			return
 		}
 		if err := e.lowerStencilCopy(src, dst, regions[i]); err != nil {
-			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: %w", stencilBlitError(dst.impl.Format(), err)))
+			e.setError(fmt.Errorf("wgpu: CommandEncoder.CopyBufferToTexture: %w", core.StencilCopyNeedsBlitError(dst.impl.Format(), err)))
 			return
 		}
 		start = i + 1
@@ -727,7 +729,7 @@ func (e *CommandEncoder) lowerStencilCopy(src *Buffer, dst *Texture, region Buff
 		Size:         region.Size,
 	}})
 	e.trackTexture(dst.impl)
-	return u.record(e)
+	return u.Record(stencilRecorder{e})
 }
 
 // recordBufferToTexture records a validated buffer-to-texture copy of regions
@@ -774,14 +776,14 @@ func validateRenderPassTextureViews(desc *RenderPassDescriptor) error {
 	}
 	for _, attachment := range desc.ColorAttachments {
 		if attachment.View != nil && attachment.View.impl.ResolveHAL() == nil {
-			return fmt.Errorf("wgpu: BeginRenderPass: color attachment view is released: %w", ErrReleased)
+			return fmt.Errorf("wgpu: BeginRenderPass: color attachment view is released: %w", core.ErrReleased)
 		}
 		if attachment.ResolveTarget != nil && attachment.ResolveTarget.impl.ResolveHAL() == nil {
-			return fmt.Errorf("wgpu: BeginRenderPass: resolve target view is released: %w", ErrReleased)
+			return fmt.Errorf("wgpu: BeginRenderPass: resolve target view is released: %w", core.ErrReleased)
 		}
 	}
 	if attachment := desc.DepthStencilAttachment; attachment != nil && attachment.View != nil && attachment.View.impl.ResolveHAL() == nil {
-		return fmt.Errorf("wgpu: BeginRenderPass: depth/stencil attachment view is released: %w", ErrReleased)
+		return fmt.Errorf("wgpu: BeginRenderPass: depth/stencil attachment view is released: %w", core.ErrReleased)
 	}
 	return nil
 }
@@ -835,7 +837,7 @@ func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
 	}
 	halBuffer := buffer.impl.HALBuffer()
 	if halBuffer == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.ClearBuffer: buffer is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ClearBuffer: buffer is released: %w", core.ErrReleased))
 		return
 	}
 	if err := core.ValidateBufferClear(buffer.Usage(), buffer.Size(), offset, size); err != nil {
@@ -867,7 +869,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 		return
 	}
 	if dst.impl.IsReleased() {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", core.ErrReleased))
 		return
 	}
 
@@ -878,7 +880,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 
 	halDestination := dst.impl.HALBuffer()
 	if halDestination == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: destination buffer is released: %w", core.ErrReleased))
 		return
 	}
 
@@ -887,7 +889,7 @@ func (e *CommandEncoder) ResolveQuerySet(querySet *QuerySet, firstQuery, queryCo
 		halQuerySet = querySet.impl.HALQuerySet()
 	}
 	if halQuerySet == nil {
-		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is released: %w", ErrReleased))
+		e.setError(fmt.Errorf("wgpu: CommandEncoder.ResolveQuerySet: query set is released: %w", core.ErrReleased))
 		return
 	}
 
@@ -963,7 +965,7 @@ func (e *CommandEncoder) returnEncoderToPool(closed []hal.CommandBuffer) {
 // to be reset via ResetAll and returned to the Device's encoder pool.
 func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, core.ErrReleased
 	}
 	e.released = true
 	if e.device != nil {
@@ -1017,7 +1019,7 @@ type attachmentHALTextures map[*core.TextureView]hal.Texture
 
 // convert creates the core view for v and remembers its parent HAL texture.
 func (m attachmentHALTextures) convert(v *resource.TextureView) *core.TextureView {
-	cv := coreTextureViewFrom(v)
+	cv := resource.CoreTextureViewFrom(v)
 	if v.Parent() != nil {
 		m[cv] = v.Parent().ResolveHAL()
 	}
@@ -1094,19 +1096,9 @@ func convertRenderPassDesc(desc *RenderPassDescriptor) *core.RenderPassDescripto
 	return coreDesc
 }
 
-// coreTextureViewFrom creates a core.TextureView from a public TextureView,
-// wiring the Parent to the texture's coreTexture for TrackerIndex access.
-// The Parent reference lets core record the attachment in the render pass
-// usage scope and the command buffer tracker.
-func coreTextureViewFrom(v *resource.TextureView) *core.TextureView {
-	cv := &core.TextureView{HAL: v.ResolveHAL(), Dimension: v.Dimension(), BaseMipLevel: v.BaseMipLevel(),
-		BaseArrayLayer: v.BaseArrayLayer(), ArrayLayerCount: v.ArrayLayerCount(),
-		MipLevelCount: v.MipLevelCount(), Format: v.ViewFormat(), Aspect: v.Aspect(), InternalUsage: v.InternalUsage()}
-	if v.Parent() != nil && v.Parent().CoreTexture() != nil {
-		cv.Parent = v.Parent().CoreTexture()
-	}
-	return cv
-}
+// coreTextureViewFrom lives in internal/resource as CoreTextureViewFrom: the
+// stencil upload payload and the queue record against the same conversion, and
+// the destination of the encoder move cannot call a root helper.
 
 // CommandBuffer holds recorded GPU commands ready for submission.
 // Created by CommandEncoder.Finish().
@@ -1208,15 +1200,9 @@ func (cb *CommandBuffer) releaseInternal() {
 	cb.internal = nil
 }
 
-// releaseSubmittedInternal releases the frontend's own resources of every
-// submitted command buffer, once the submission holds their references.
-func releaseSubmittedInternal(commandBuffers []*CommandBuffer) {
-	for _, cb := range commandBuffers {
-		if cb != nil {
-			cb.releaseInternal()
-		}
-	}
-}
+// releaseSubmittedInternal now lives in queue_native.go, its only caller: a
+// free function over the command buffers cannot stay in this file once the
+// buffers move (the queue keeps calling it from the root package until S9).
 
 // dropUsedSets releases the encode-time validation sets. usedBuffers,
 // usedTextures, usedBindGroups and usedQuerySets exist only for
@@ -1269,10 +1255,9 @@ func (e *CommandEncoder) validateTextureToTextureCopies(src, dst *resource.Textu
 	return true
 }
 
-// isEmptyExtent reports a copy extent with a zero dimension.
-func isEmptyExtent(size Extent3D) bool {
-	return size.Width == 0 || size.Height == 0 || size.DepthOrArrayLayers == 0
-}
+// isEmptyExtent lives in internal/core as IsEmptyExtent: the queue drops
+// zero-size regions with the same rule, and the destination of the encoder
+// move cannot call a root helper.
 
 // nonEmptyBufferTextureRegions drops the regions of zero size. Rust ignores
 // such a copy after its validation and before touching the tracker
@@ -1283,7 +1268,7 @@ func isEmptyExtent(size Extent3D) bool {
 func nonEmptyBufferTextureRegions(regions []BufferTextureCopy) (kept []BufferTextureCopy, skip bool) {
 	kept = make([]BufferTextureCopy, 0, len(regions))
 	for i := range regions {
-		if !isEmptyExtent(regions[i].Size) {
+		if !core.IsEmptyExtent(gputypes.Extent3D(regions[i].Size)) {
 			kept = append(kept, regions[i])
 		}
 	}
@@ -1295,7 +1280,7 @@ func nonEmptyBufferTextureRegions(regions []BufferTextureCopy) (kept []BufferTex
 func nonEmptyTextureCopyRegions(regions []TextureCopy) (kept []TextureCopy, skip bool) {
 	kept = make([]TextureCopy, 0, len(regions))
 	for i := range regions {
-		if !isEmptyExtent(regions[i].Size) {
+		if !core.IsEmptyExtent(gputypes.Extent3D(regions[i].Size)) {
 			kept = append(kept, regions[i])
 		}
 	}
@@ -1353,3 +1338,119 @@ func validateBufferTextureRegion(side core.CopySide, texture *resource.Texture, 
 	}
 	return texture.CoreTexture().Device().RequireDepthTextureAndBufferCopies(view.Format)
 }
+
+// stencilRecorder adapts a CommandEncoder to stencilblit.Recorder, the seam by
+// which the stencil upload payload (still in the root package until S6) records
+// its passes into this encoder. It is an adapter rather than methods on
+// CommandEncoder itself: the interface's methods are exported, and the encoder
+// is a public type, which must not grow internal seam surface (ADR-070 §15.1).
+//
+// The adapter lives in this file so it travels with the encoder: the payload
+// never names the encoder type, and the destination never names the payload.
+type stencilRecorder struct{ e *CommandEncoder }
+
+var _ stencilblit.Recorder = stencilRecorder{}
+
+// Own hands a resource the blit created to the encoder, which releases it once
+// the command buffer is spent.
+func (r stencilRecorder) Own(x stencilblit.Releasable) { r.e.own(x) }
+
+// BeginLayerPass opens one blit layer's render pass, binds the layer's bind
+// group at index 0 and returns the pass's command recorder.
+//
+// The group is bound to the HAL pass directly: the frontend built both the
+// group and the pipeline layout for this pass alone, so the public pass
+// encoder's binder — a cache that validates user bind groups against a
+// pipeline layout — has nothing to check here. The group's usages still join
+// the pass's usage scope, so core transitions the resources it binds before
+// the pass (CoreCommandEncoder.EndRenderPass).
+func (r stencilRecorder) BeginLayerPass(desc *core.RenderPassDescriptor, group *resource.BindGroup) (stencilblit.PassRecorder, error) {
+	if r.e.released {
+		return nil, core.ErrReleased
+	}
+	corePass, err := r.e.core.BeginRenderPass(desc)
+	if err != nil {
+		return nil, err
+	}
+	if group != nil {
+		if err := corePass.MergeBindGroup(group.Usages()); err != nil {
+			// A deferred error, like the public pass encoder's: the pass stays
+			// open for End and the error surfaces at Finish.
+			r.e.setError(fmt.Errorf("wgpu: stencil blit: bind group: %w", err))
+		}
+	}
+	pass := &stencilPass{e: r.e, core: corePass, raw: corePass.RawPass(), group: group}
+	if r.e.test != nil {
+		pass.test = r.e.test
+		pass.testPass = r.e.test.PassBegan(r.e.testEncoder, false, desc.Label, nil, nil)
+		pass.test.BindGroupBound(pass.testPass, 0, nil)
+	}
+	return pass, nil
+}
+
+// stencilPass records one blit layer's commands. It drives the core pass for
+// the state core tracks (scissor, stencil reference, draws) and the HAL pass
+// for the pipeline and bind group bindings, for the reason BeginLayerPass
+// gives.
+type stencilPass struct {
+	e          *CommandEncoder
+	core       *core.CoreRenderPassEncoder
+	raw        hal.RenderPassEncoder
+	group      *resource.BindGroup
+	groupBound bool
+	test       core.TestHooks
+	testPass   int
+}
+
+var _ stencilblit.PassRecorder = (*stencilPass)(nil)
+
+// SetPipeline binds the HAL pipeline and keeps it alive until the GPU
+// completes the submission, as the public pass encoder does for user
+// pipelines (the blit's pipelines are device-cached; the reference outlives
+// device teardown races).
+func (p *stencilPass) SetPipeline(pl *pipeline.RenderPipeline) {
+	if pl == nil {
+		return
+	}
+	p.e.trackRef(pl.Ref())
+	if p.raw != nil && pl.HAL() != nil {
+		p.raw.SetPipeline(pl.HAL())
+	}
+}
+
+// SetStencilReference sets the stencil reference value.
+func (p *stencilPass) SetStencilReference(ref uint32) { p.core.SetStencilReference(ref) }
+
+// SetScissorRect sets the scissor rectangle for clipping.
+func (p *stencilPass) SetScissorRect(x, y, width, height uint32) {
+	p.core.SetScissorRect(gputypes.ScissorRect{X: x, Y: y, Width: width, Height: height})
+}
+
+// Draw draws primitives.
+func (p *stencilPass) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
+	args := gputypes.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstVertex: firstVertex, FirstInstance: firstInstance}
+	p.bindGroup()
+	p.core.Draw(args)
+	if p.test != nil {
+		p.test.Drew(p.testPass, args)
+	}
+}
+
+// bindGroup binds the layer's bind group to the HAL pass on the first draw,
+// not at the pass opening: a backend resolves the group's buffers and textures
+// against the CURRENT pipeline layout when it receives the group (GLES reads
+// it from the bound program's layout), and the pass's pipeline is set between
+// the opening and the first draw. The public pass encoder's binder defers its
+// backend binding to the first draw for the same reason.
+func (p *stencilPass) bindGroup() {
+	if p.groupBound || p.raw == nil || p.group == nil {
+		return
+	}
+	p.groupBound = true
+	if halGroup := p.group.HAL(); halGroup != nil {
+		p.raw.SetBindGroup(0, halGroup, nil)
+	}
+}
+
+// End ends the render pass.
+func (p *stencilPass) End() error { return p.core.End() }

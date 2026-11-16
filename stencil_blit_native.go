@@ -7,6 +7,9 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pipeline"
+	"github.com/gogpu/wgpu/internal/resource"
 	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
@@ -169,17 +172,41 @@ func (d *Device) createStencilBlitPipeline(e *stencilBlitEntry, format gputypes.
 	return p, nil
 }
 
+// impls returns the pipeline implementation handles the blit's pass recorder
+// draws with. The entry itself keeps the public wrappers: they own the
+// pipelines' references and are released with the cache.
+func (e *stencilBlitEntry) impls() stencilblit.Pipelines[*pipeline.RenderPipeline] {
+	var impls stencilblit.Pipelines[*pipeline.RenderPipeline]
+	if e.pipelines.Clear != nil {
+		impls.Clear = e.pipelines.Clear.impl
+	}
+	for bit, p := range e.pipelines.Bits {
+		if p != nil {
+			impls.Bits[bit] = p.impl
+		}
+	}
+	return impls
+}
+
 // stencilUpload is one upload into the stencil aspect of a combined
 // depth-stencil texture, lowered as stencilblit describes: the caller writes
 // the stencil bytes into temp (an R8Uint texture of the copy extent), then
-// record draws them into dst.
+// Record draws them into dst.
+//
+// The device is captured at creation rather than read off the encoder: the
+// payload stays in this package when the command encoder moves to
+// internal/encoder (ADR-070 S4), and a root device pointer is not something the
+// destination may hold.
 type stencilUpload struct {
+	device   *Device
 	dst      *Texture
 	mipLevel uint32
 	origin   Origin3D
 	size     Extent3D
 	temp     *Texture
 }
+
+var _ stencilblit.Upload = (*stencilUpload)(nil)
 
 // newStencilUpload creates the R8Uint texture an upload of size into the
 // stencil of dst at mipLevel and origin goes through.
@@ -196,7 +223,7 @@ func (d *Device) newStencilUpload(dst *Texture, mipLevel uint32, origin Origin3D
 	if err != nil {
 		return nil, fmt.Errorf("staging texture: %w", err)
 	}
-	return &stencilUpload{dst: dst, mipLevel: mipLevel, origin: origin, size: size, temp: temp}, nil
+	return &stencilUpload{device: d, dst: dst, mipLevel: mipLevel, origin: origin, size: size, temp: temp}, nil
 }
 
 // tempCopy returns the region of temp that holds the stencil bytes.
@@ -204,12 +231,15 @@ func (u *stencilUpload) tempCopy() ImageCopyTexture {
 	return ImageCopyTexture{Texture: u.temp, Aspect: gputypes.TextureAspectAll}
 }
 
-// record records into e, for each destination layer, the render pass that
+// Staging returns the R8Uint texture the caller writes the stencil bytes into.
+func (u *stencilUpload) Staging() *resource.Texture { return u.temp.impl }
+
+// Record records into r, for each destination layer, the render pass that
 // writes the layer's stencil from temp. Every pass it opens is ended. The
-// resources it creates are handed to e (CommandEncoder.own); the caller hands
-// it temp.
-func (u *stencilUpload) record(e *CommandEncoder) error {
-	d := e.device
+// resources it creates are handed to r (Recorder.Own); the caller hands it
+// temp.
+func (u *stencilUpload) Record(r stencilblit.Recorder) error {
+	d := u.device
 	layers := u.size.DepthOrArrayLayers
 	key := stencilblit.KeyFor(u.dst.Format(), layers)
 	entry, err := d.stencilBlitPipelines(key)
@@ -227,14 +257,15 @@ func (u *stencilUpload) record(e *CommandEncoder) error {
 	if err != nil {
 		return fmt.Errorf("source view: %w", err)
 	}
-	e.own(srcView)
-	params, err := u.paramsBuffer(d, layers)
+	r.Own(srcView)
+	params, err := u.paramsBuffer(layers)
 	if err != nil {
 		return err
 	}
-	e.own(params)
+	r.Own(params)
+	impls := entry.impls()
 	for layer := range layers {
-		if err := u.recordLayer(e, entry, srcView, params, layer); err != nil {
+		if err := u.recordLayer(r, entry, &impls, srcView, params, layer); err != nil {
 			return fmt.Errorf("layer %d: %w", u.origin.Z+layer, err)
 		}
 	}
@@ -245,9 +276,9 @@ func (u *stencilUpload) record(e *CommandEncoder) error {
 // stencilBlitParamsStride. It is written through a mapping at creation, so no
 // queue write is involved (Queue.WriteTexture records the blit with the queue
 // lock held).
-func (u *stencilUpload) paramsBuffer(d *Device, layers uint32) (*Buffer, error) {
+func (u *stencilUpload) paramsBuffer(layers uint32) (*Buffer, error) {
 	size := uint64(layers-1)*stencilBlitParamsStride + stencilblit.ParamsSize
-	buf, err := d.CreateBuffer(&BufferDescriptor{
+	buf, err := u.device.CreateBuffer(&BufferDescriptor{
 		Label:            stencilUploadLabel + " params",
 		Size:             size,
 		Usage:            gputypes.BufferUsageUniform,
@@ -274,8 +305,8 @@ func (u *stencilUpload) paramsBuffer(d *Device, layers uint32) (*Buffer, error) 
 	return buf, nil
 }
 
-func (u *stencilUpload) recordLayer(e *CommandEncoder, entry *stencilBlitEntry, srcView *TextureView, params *Buffer, layer uint32) error {
-	d := e.device
+func (u *stencilUpload) recordLayer(r stencilblit.Recorder, entry *stencilBlitEntry, impls *stencilblit.Pipelines[*pipeline.RenderPipeline], srcView *TextureView, params *Buffer, layer uint32) error {
+	d := u.device
 	group, err := d.CreateBindGroup(&BindGroupDescriptor{
 		Label:  stencilUploadLabel,
 		Layout: entry.bgl,
@@ -290,7 +321,7 @@ func (u *stencilUpload) recordLayer(e *CommandEncoder, entry *stencilBlitEntry, 
 	if err != nil {
 		return fmt.Errorf("bind group: %w", err)
 	}
-	e.own(group)
+	r.Own(group)
 	dstView, err := d.CreateTextureView(u.dst, &TextureViewDescriptor{
 		Label:           stencilUploadLabel + " destination",
 		Format:          u.dst.Format(),
@@ -304,7 +335,7 @@ func (u *stencilUpload) recordLayer(e *CommandEncoder, entry *stencilBlitEntry, 
 	if err != nil {
 		return fmt.Errorf("destination view: %w", err)
 	}
-	e.own(dstView)
+	r.Own(dstView)
 	// The destination needs only COPY_DST: rendering into it is the
 	// frontend's own use (Dawn's internal usages). Every depth/stencil texture
 	// is created render-attachable in the backend (Device.CreateTexture).
@@ -312,21 +343,11 @@ func (u *stencilUpload) recordLayer(e *CommandEncoder, entry *stencilBlitEntry, 
 
 	// Depth is loaded and stored as it is; the pipelines neither test nor
 	// write it. Stencil outside the scissor keeps its contents.
-	pass, err := e.BeginRenderPass(&RenderPassDescriptor{
-		Label: stencilUploadLabel,
-		DepthStencilAttachment: &RenderPassDepthStencilAttachment{
-			View:           dstView,
-			DepthLoadOp:    gputypes.LoadOpLoad,
-			DepthStoreOp:   gputypes.StoreOpStore,
-			StencilLoadOp:  gputypes.LoadOpLoad,
-			StencilStoreOp: gputypes.StoreOpStore,
-		},
-	})
+	pass, err := r.BeginLayerPass(stencilUploadPassDescriptor(u.dst, dstView), group.impl)
 	if err != nil {
 		return fmt.Errorf("render pass: %w", err)
 	}
-	pass.SetBindGroup(0, group, nil)
-	stencilblit.RecordLayer[*RenderPipeline](stencilBlitPass{pass}, &entry.pipelines,
+	stencilblit.RecordLayer[*pipeline.RenderPipeline](pass, impls,
 		u.origin.X, u.origin.Y, u.size.Width, u.size.Height)
 	if err := pass.End(); err != nil {
 		return fmt.Errorf("render pass: %w", err)
@@ -334,33 +355,23 @@ func (u *stencilUpload) recordLayer(e *CommandEncoder, entry *stencilBlitEntry, 
 	return nil
 }
 
-// stencilBlitPass adapts a RenderPassEncoder to stencilblit.Pass.
-type stencilBlitPass struct{ pass *RenderPassEncoder }
-
-var _ stencilblit.Pass[*RenderPipeline] = stencilBlitPass{}
-
-func (p stencilBlitPass) SetPipeline(pipeline *RenderPipeline) { p.pass.SetPipeline(pipeline) }
-
-func (p stencilBlitPass) SetStencilReference(ref uint32) { p.pass.SetStencilReference(ref) }
-
-func (p stencilBlitPass) SetScissorRect(x, y, width, height uint32) {
-	p.pass.SetScissorRect(gputypes.ScissorRect{X: x, Y: y, Width: width, Height: height})
-}
-
-func (p stencilBlitPass) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	p.pass.Draw(gputypes.DrawArgs{
-		VertexCount: vertexCount, InstanceCount: instanceCount,
-		FirstVertex: firstVertex, FirstInstance: firstInstance,
-	})
-}
-
-// stencilBlitError wraps a failure to set up the blit of an upload into the
-// stencil of format.
-func stencilBlitError(format gputypes.TextureFormat, err error) error {
-	return &core.TransferError{
-		Kind:   core.TransferErrorStencilCopyNeedsBlit,
-		Format: format,
-		Aspect: gputypes.TextureAspectStencilOnly,
-		Cause:  err,
+// stencilUploadPassDescriptor builds the core descriptor of one blit layer's
+// render pass: the layer's view of the destination, loading and storing depth
+// and stencil. The destination texture is the authority for the attachment's
+// HAL handle, like the public render pass conversion (a borrowed surface
+// texture shares one core texture across swapchain images).
+func stencilUploadPassDescriptor(dst *Texture, dstView *TextureView) *core.RenderPassDescriptor {
+	return &core.RenderPassDescriptor{
+		Label: stencilUploadLabel,
+		ResolveAttachmentTexture: func(*core.TextureView) hal.Texture {
+			return dst.impl.ResolveHAL()
+		},
+		DepthStencilAttachment: &core.RenderPassDepthStencilAttachment{
+			View:           resource.CoreTextureViewFrom(dstView.impl),
+			DepthLoadOp:    gputypes.LoadOpLoad,
+			DepthStoreOp:   gputypes.StoreOpStore,
+			StencilLoadOp:  gputypes.LoadOpLoad,
+			StencilStoreOp: gputypes.StoreOpStore,
+		},
 	}
 }

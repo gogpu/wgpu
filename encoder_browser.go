@@ -6,6 +6,7 @@ import (
 	"syscall/js"
 
 	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // CommandEncoder records GPU commands for later submission.
@@ -18,7 +19,7 @@ type CommandEncoder struct {
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, resource.ErrReleased
 	}
 	jsDesc := buildRenderPassDescriptorJS(desc)
 	bp := e.browser.BeginRenderPass(jsDesc)
@@ -31,7 +32,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 // BeginComputePass begins a compute pass.
 func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*ComputePassEncoder, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, resource.ErrReleased
 	}
 	label := ""
 	if desc != nil {
@@ -148,7 +149,7 @@ func (e *CommandEncoder) DiscardEncoding() {
 // Finish completes command recording and returns a CommandBuffer.
 func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	if e.released {
-		return nil, ErrReleased
+		return nil, resource.ErrReleased
 	}
 	e.released = true
 	bcb := e.browser.Finish(js.Undefined())

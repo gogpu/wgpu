@@ -29,7 +29,7 @@ type Queue struct {
 	pending   *pendingWrites
 
 	// test, when non-nil, records the public calls for package wgputest.
-	test testHooks
+	test core.TestHooks
 
 	// lastSubmissionIndex is the most recent submission index returned by
 	// hal.Queue.Submit(). Used by DestroyQueue to conservatively defer
@@ -393,7 +393,7 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	}
 	if dst.Texture.impl.NeedsStencilBlit(dst.Aspect) {
 		if err := q.writeStencilLocked(dst, data, layout, size); err != nil {
-			return fmt.Errorf("wgpu: WriteTexture: %w", stencilBlitError(dst.Texture.impl.Format(), err))
+			return fmt.Errorf("wgpu: WriteTexture: %w", core.StencilCopyNeedsBlitError(dst.Texture.impl.Format(), err))
 		}
 		return nil
 	}
@@ -443,7 +443,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 		encoder.DiscardEncoding()
 		return fmt.Errorf("staging upload: %w", err)
 	}
-	if err := u.record(encoder); err != nil {
+	if err := u.Record(stencilRecorder{encoder}); err != nil {
 		encoder.DiscardEncoding()
 		return err
 	}
@@ -480,7 +480,7 @@ func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataL
 			return false, err
 		}
 	}
-	return isEmptyExtent(*size), nil
+	return core.IsEmptyExtent(gputypes.Extent3D(*size)), nil
 }
 
 // SetSwapchainSuppressed temporarily disables swapchain semaphore binding
@@ -930,5 +930,20 @@ func (q *Queue) release() {
 	if q.pending != nil {
 		q.pending.destroy()
 		q.pending = nil
+	}
+}
+
+// releaseSubmittedInternal releases the frontend's own resources of every
+// submitted command buffer, once the submission holds their references.
+//
+// It lives here, next to its only caller, rather than with the command buffer
+// implementation: the buffers move to internal/encoder (ADR-070 S4) while the
+// queue stays in the root package until S9, and a free function over the public
+// wrapper cannot be called from, or live in, the destination.
+func releaseSubmittedInternal(commandBuffers []*CommandBuffer) {
+	for _, cb := range commandBuffers {
+		if cb != nil {
+			cb.releaseInternal()
+		}
 	}
 }

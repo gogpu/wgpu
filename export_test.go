@@ -60,14 +60,37 @@ func BindGroupTestRef(g *BindGroup) *core.ResourceRef {
 	return g.impl.Ref()
 }
 
-// TestTrackedRefs returns the tracked refs of a CommandBuffer (testing only).
-func (cb *CommandBuffer) TestTrackedRefs() []*core.ResourceRef { return cb.trackedRefs }
+// CommandBufferTestTrackedRefs returns the tracked refs of a CommandBuffer
+// (testing only). A free function rather than a method for the reason
+// BindGroupTestRef is one (ADR-070 §11 grain note): a test-only method of a
+// type that moves to an extraction package cannot stay behind, while a
+// function over the type can.
+func CommandBufferTestTrackedRefs(cb *CommandBuffer) []*core.ResourceRef {
+	if cb == nil {
+		return nil
+	}
+	return cb.trackedRefs
+}
 
-// TestTrackedRefs returns the tracked refs of a CommandEncoder (testing only).
-func (e *CommandEncoder) TestTrackedRefs() []*core.ResourceRef { return e.trackedRefs }
+// CommandEncoderTestTrackedRefs returns the tracked refs of a CommandEncoder
+// (testing only). A free function for the reason CommandBufferTestTrackedRefs
+// is one.
+func CommandEncoderTestTrackedRefs(e *CommandEncoder) []*core.ResourceRef {
+	if e == nil {
+		return nil
+	}
+	return e.trackedRefs
+}
 
-// TestHALEncoder returns the HAL encoder reference on a CommandBuffer (testing only).
-func (cb *CommandBuffer) TestHALEncoder() interface{} { return cb.halEncoder }
+// CommandBufferTestHALEncoder returns the HAL encoder reference on a
+// CommandBuffer (testing only). A free function for the reason
+// CommandBufferTestTrackedRefs is one.
+func CommandBufferTestHALEncoder(cb *CommandBuffer) interface{} {
+	if cb == nil {
+		return nil
+	}
+	return cb.halEncoder
+}
 
 // TestCmdEncoderPoolSize returns the number of free encoders in the device's pool (testing only).
 // Returns -1 if no pool is configured.

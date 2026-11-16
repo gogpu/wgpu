@@ -2037,6 +2037,21 @@ func (e *TransferError) rangeErrorText() string {
 	}
 }
 
+// StencilCopyNeedsBlitError wraps err, a failure to set up the stencil blit of
+// an upload into the stencil of format, as TransferErrorStencilCopyNeedsBlit.
+//
+// The constructor lives with the type it builds: the root package's stencil
+// payload and its callers (the command encoder and the queue) all wrap through
+// it, and the extracted domains can call it without importing the host.
+func StencilCopyNeedsBlitError(format gputypes.TextureFormat, err error) error {
+	return &TransferError{
+		Kind:   TransferErrorStencilCopyNeedsBlit,
+		Format: format,
+		Aspect: gputypes.TextureAspectStencilOnly,
+		Cause:  err,
+	}
+}
+
 // =============================================================================
 // Clear command Errors
 // =============================================================================

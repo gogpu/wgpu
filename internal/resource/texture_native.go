@@ -417,3 +417,21 @@ func (v *TextureView) Release() {
 		core.DestroyTextureViewDeferred(v.device, v.hal)
 	}
 }
+
+// CoreTextureViewFrom creates a core.TextureView from a TextureView, wiring
+// the Parent to the texture's core texture for TrackerIndex access. The Parent
+// reference lets core record the view's texture in a render pass usage scope
+// and in the command buffer tracker.
+//
+// It is exported for the root package's render pass conversion and its stencil
+// blit: both build core descriptors from views they hold, and core cannot host
+// the helper (it would have to import resource, which imports core).
+func CoreTextureViewFrom(v *TextureView) *core.TextureView {
+	cv := &core.TextureView{HAL: v.ResolveHAL(), Dimension: v.Dimension(), BaseMipLevel: v.BaseMipLevel(),
+		BaseArrayLayer: v.BaseArrayLayer(), ArrayLayerCount: v.ArrayLayerCount(),
+		MipLevelCount: v.MipLevelCount(), Format: v.ViewFormat(), Aspect: v.Aspect(), InternalUsage: v.InternalUsage()}
+	if v.Parent() != nil && v.Parent().CoreTexture() != nil {
+		cv.Parent = v.Parent().CoreTexture()
+	}
+	return cv
+}

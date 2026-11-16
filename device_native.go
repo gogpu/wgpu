@@ -31,7 +31,7 @@ type Device struct {
 	released atomic.Bool
 
 	// test, when non-nil, records the public calls for package wgputest.
-	test testHooks
+	test core.TestHooks
 
 	// recordings holds the command encoders and command buffers that still
 	// carry resource references; Release discards them.

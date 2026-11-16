@@ -402,7 +402,7 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 		return nil, fmt.Errorf("wgpu: failed to create command encoder: %w", err)
 	}
 
-	return &CommandEncoder{r: re, device: d}, nil
+	return &CommandEncoder{r: re}, nil
 }
 
 // CreateFence creates a GPU synchronization fence.

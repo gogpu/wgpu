@@ -395,7 +395,7 @@ func TestCreateTexture_HasCoreTexture(t *testing.T) {
 	}
 }
 
-// TestCoreTextureViewFrom_WiresParent verifies that coreTextureViewFrom
+// TestCoreTextureViewFrom_WiresParent verifies that resource.CoreTextureViewFrom
 // sets the Parent on the core.TextureView.
 func TestCoreTextureViewFrom_WiresParent(t *testing.T) {
 	_, _, device := newTestDeviceWithTracker(t)
@@ -421,9 +421,9 @@ func TestCoreTextureViewFrom_WiresParent(t *testing.T) {
 	}
 	defer view.Release()
 
-	cv := coreTextureViewFrom(view.impl)
+	cv := resource.CoreTextureViewFrom(view.impl)
 	if cv == nil {
-		t.Fatal("coreTextureViewFrom should not return nil")
+		t.Fatal("resource.CoreTextureViewFrom should not return nil")
 	}
 	if cv.Parent == nil {
 		t.Fatal("core.TextureView.Parent should be set from texture.coreTexture")
@@ -435,13 +435,13 @@ func TestCoreTextureViewFrom_WiresParent(t *testing.T) {
 	}
 }
 
-// TestCoreTextureViewFrom_NilTexture verifies that coreTextureViewFrom
+// TestCoreTextureViewFrom_NilTexture verifies that resource.CoreTextureViewFrom
 // handles a view with no texture gracefully.
 func TestCoreTextureViewFrom_NilTexture(t *testing.T) {
 	v := &resource.TextureView{}
-	cv := coreTextureViewFrom(v)
+	cv := resource.CoreTextureViewFrom(v)
 	if cv == nil {
-		t.Fatal("coreTextureViewFrom should not return nil")
+		t.Fatal("resource.CoreTextureViewFrom should not return nil")
 	}
 	if cv.Parent != nil {
 		t.Error("Parent should be nil when texture is nil")
