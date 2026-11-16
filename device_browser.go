@@ -9,6 +9,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/pipeconst"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -281,8 +282,7 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 	jsEncoder := d.browser.CreateCommandEncoder().Invoke(jsDesc)
 	be := browser.NewCommandEncoder(jsEncoder)
 	return &CommandEncoder{
-		browser:  be,
-		released: false,
+		impl: encoder.NewCommandEncoder(be),
 	}, nil
 }
 

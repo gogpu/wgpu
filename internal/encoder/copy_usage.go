@@ -1,18 +1,12 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package encoder
 
-// Staying-side shuttle (Prepare 2026-11-16). These declarations used to live
-// in encoder_native.go, one of the three encoder context files that S4's Move
-// relocates into internal/encoder. The staying white-box test
-// copy_usage_coverage_test.go names them, which is the planner's
-// `unexported-boundary` refusal class: a staying file naming an unexported
-// declaration that moves.
-//
-// With the declarations on the staying side the remaining direction is the
-// tolerated one: the moving encoder files reference them, and the Move defers
-// that through handRewrite. The Move relocates this file, its declarations and
-// copy_usage_coverage_test.go into internal/encoder.
+// The copy-usage scope helpers, relocated from the root package by S4's Move
+// (the "staying-side shuttle" file copy_usage_native.go of commit ae8631e).
+// They build one copy command's usage scope: the endpoints of a copy are
+// validated against each other only, and each usage is applied to the command
+// buffer tracker.
 
 import (
 	"github.com/gogpu/wgpu/internal/core"
@@ -34,12 +28,12 @@ type preparedCopyTextureUsage struct {
 
 // copyBufferUsage describes one buffer endpoint of a copy command.
 type copyBufferUsage struct {
-	buffer *Buffer
+	buffer *resource.Buffer
 	usage  track.BufferUses
 }
 
 type preparedCopyBufferUsage struct {
-	buffer *Buffer
+	buffer *resource.Buffer
 	index  track.TrackerIndex
 	usage  track.BufferUses
 }
@@ -55,7 +49,7 @@ func prepareCopyBufferUsages(requests []copyBufferUsage) ([]preparedCopyBufferUs
 	for _, request := range requests {
 		var cb *core.Buffer
 		if request.buffer != nil {
-			cb = request.buffer.impl.CoreBuffer()
+			cb = request.buffer.CoreBuffer()
 		}
 		if cb == nil {
 			continue
@@ -83,11 +77,11 @@ func prepareCopyBufferUsages(requests []copyBufferUsage) ([]preparedCopyBufferUs
 }
 
 // prepareCopyTextureUsages builds the texture part of one copy command's
-// usage scope: multiple roles of the same texture are merged, and
-// incompatible roles (a texture as both copy source and destination) are
-// rejected. Whole-texture granularity: a copy between disjoint subresources
-// of one texture, which WebGPU allows, is rejected as well until the
-// trackers become subresource-aware.
+// usage scope: multiple roles of the same texture are merged, and incompatible
+// roles (a texture as both copy source and destination) are rejected.
+// Whole-texture granularity: a copy between disjoint subresources of one
+// texture, which WebGPU allows, is rejected as well until the trackers become
+// subresource-aware.
 //
 // Reference: wgpu-core command/transfer.rs validate_copy_within_same_texture
 func prepareCopyTextureUsages(requests []copyTextureUsage) ([]preparedCopyTextureUsage, error) {

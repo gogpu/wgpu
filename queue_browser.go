@@ -24,10 +24,11 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	}
 	jsBuffers := make([]js.Value, 0, len(commandBuffers))
 	for _, cb := range commandBuffers {
-		if cb != nil && cb.browser != nil && !cb.released {
-			jsBuffers = append(jsBuffers, cb.browser.Ref())
-			cb.released = true
+		if cb == nil || cb.impl == nil || cb.impl.Browser() == nil || cb.impl.Released() {
+			continue
 		}
+		jsBuffers = append(jsBuffers, cb.impl.Browser().Ref())
+		cb.impl.MarkSubmitted()
 	}
 	q.browser.Submit(jsBuffers)
 	return 0, nil

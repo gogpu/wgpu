@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+
+	"github.com/gogpu/wgpu/internal/encoder"
 )
 
 // Queue handles command submission and data transfers.
@@ -27,11 +29,17 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		if cb == nil {
 			continue
 		}
+		// A zero-value command buffer is accepted and spent, exactly as the
+		// pre-move zero value was: its submitted flag was set and its nil rust
+		// buffer was skipped.
+		if cb.impl == nil {
+			cb.impl = &encoder.CommandBuffer{}
+		}
 		// Always mark non-nil command buffers as submitted to prevent reuse,
 		// even if the underlying rust buffer is nil (e.g., discarded encoding).
-		cb.submitted = true
-		if cb.r != nil {
-			rBuffers = append(rBuffers, cb.r)
+		cb.impl.MarkSubmitted()
+		if r := cb.impl.R(); r != nil {
+			rBuffers = append(rBuffers, r)
 		}
 	}
 

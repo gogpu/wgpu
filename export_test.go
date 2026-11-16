@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -66,30 +67,30 @@ func BindGroupTestRef(g *BindGroup) *core.ResourceRef {
 // type that moves to an extraction package cannot stay behind, while a
 // function over the type can.
 func CommandBufferTestTrackedRefs(cb *CommandBuffer) []*core.ResourceRef {
-	if cb == nil {
+	if cb == nil || cb.impl == nil {
 		return nil
 	}
-	return cb.trackedRefs
+	return cb.impl.TrackedRefs()
 }
 
 // CommandEncoderTestTrackedRefs returns the tracked refs of a CommandEncoder
 // (testing only). A free function for the reason CommandBufferTestTrackedRefs
 // is one.
 func CommandEncoderTestTrackedRefs(e *CommandEncoder) []*core.ResourceRef {
-	if e == nil {
+	if e == nil || e.impl == nil {
 		return nil
 	}
-	return e.trackedRefs
+	return e.impl.TrackedRefs()
 }
 
 // CommandBufferTestHALEncoder returns the HAL encoder reference on a
 // CommandBuffer (testing only). A free function for the reason
 // CommandBufferTestTrackedRefs is one.
 func CommandBufferTestHALEncoder(cb *CommandBuffer) interface{} {
-	if cb == nil {
+	if cb == nil || cb.impl == nil {
 		return nil
 	}
-	return cb.halEncoder
+	return cb.impl.HALEncoder()
 }
 
 // TestCmdEncoderPoolSize returns the number of free encoders in the device's pool (testing only).
@@ -235,9 +236,20 @@ func NewTestDeviceWithFeatures(features gputypes.Features) *Device {
 // NewTestCommandEncoderForDevice returns a minimal command encoder for validation tests.
 func NewTestCommandEncoderForDevice(device *Device) *CommandEncoder {
 	return &CommandEncoder{
+		impl: encoder.NewCommandEncoder(encoder.CommandEncoderInit{
+			Core:   &core.CoreCommandEncoder{},
+			Device: encoderDeviceHost{d: device},
+		}),
 		device: device,
-		core:   &core.CoreCommandEncoder{},
 	}
+}
+
+// NewReleasedTestCommandEncoder returns a command encoder already marked
+// released, for the white-box tests of the released paths.
+func NewReleasedTestCommandEncoder() *CommandEncoder {
+	impl := encoder.NewCommandEncoder(encoder.CommandEncoderInit{Core: &core.CoreCommandEncoder{}})
+	impl.SetReleasedForTest(true)
+	return &CommandEncoder{impl: impl}
 }
 
 // The HAL wrapping constructors and the HAL device handle are not public since

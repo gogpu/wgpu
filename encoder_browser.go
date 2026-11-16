@@ -3,230 +3,129 @@
 package wgpu
 
 import (
-	"syscall/js"
-
-	"github.com/gogpu/wgpu/internal/browser"
-	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/encoder"
 )
 
 // CommandEncoder records GPU commands for later submission.
-// On browser, this wraps a GPUCommandEncoder via internal/browser.CommandEncoder.
+// On browser, this wraps a GPUCommandEncoder via internal/encoder.
+//
+// The implementation lives in internal/encoder (ADR-070); this declaration is
+// the public surface.
 type CommandEncoder struct {
-	browser  *browser.CommandEncoder
-	released bool
+	impl *encoder.CommandEncoder
 }
 
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
-	if e.released {
-		return nil, resource.ErrReleased
+	bp, err := e.impl.BeginRenderPass(encoderRenderPassDescriptor(desc))
+	if err != nil {
+		return nil, err
 	}
-	jsDesc := buildRenderPassDescriptorJS(desc)
-	bp := e.browser.BeginRenderPass(jsDesc)
-	return &RenderPassEncoder{
-		browser:  bp,
-		released: false,
-	}, nil
+	return &RenderPassEncoder{browser: bp}, nil
 }
 
 // BeginComputePass begins a compute pass.
 func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*ComputePassEncoder, error) {
-	if e.released {
-		return nil, resource.ErrReleased
+	bp, err := e.impl.BeginComputePass(encoderComputePassDescriptor(desc))
+	if err != nil {
+		return nil, err
 	}
-	label := ""
-	if desc != nil {
-		label = desc.Label
-	}
-	jsDesc := browser.BuildComputePassDescriptor(label)
-	bp := e.browser.BeginComputePass(jsDesc)
-	return &ComputePassEncoder{
-		browser:  bp,
-		released: false,
-	}, nil
+	return &ComputePassEncoder{browser: bp}, nil
 }
 
 // CopyBufferToBuffer copies data between buffers.
 func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *Buffer, dstOffset uint64, size uint64) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	e.browser.CopyBufferToBuffer(
-		src.impl.Browser().Ref(), srcOffset,
-		dst.impl.Browser().Ref(), dstOffset,
-		size,
-	)
+	e.impl.CopyBufferToBuffer(encoderBuffer(src), srcOffset, encoderBuffer(dst), dstOffset, size)
 }
 
 // CopyBufferToTexture copies data from a buffer to a texture.
 func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions []BufferTextureCopy) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	for _, r := range regions {
-		srcObj := browser.BuildImageCopyBuffer(
-			src.impl.Browser().Ref(),
-			r.BufferLayout.Offset,
-			r.BufferLayout.BytesPerRow,
-			r.BufferLayout.RowsPerImage,
-		)
-		dstObj := browser.BuildImageCopyTexture(
-			dst.impl.Browser().Ref(),
-			r.TextureBase.MipLevel,
-			r.TextureBase.Origin.X, r.TextureBase.Origin.Y, r.TextureBase.Origin.Z,
-		)
-		sizeObj := browser.BuildExtent3D(r.Size.Width, r.Size.Height, r.Size.DepthOrArrayLayers)
-		e.browser.CopyBufferToTexture(srcObj, dstObj, sizeObj)
-	}
+	e.impl.CopyBufferToTexture(encoderBuffer(src), encoderTexture(dst), encoderBufferTextureCopies(regions))
 }
 
 // ClearBuffer clears a buffer region to zero.
 func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
-	if e.released || buffer == nil {
-		return
-	}
-	e.browser.ClearBuffer(buffer.impl.Browser().Ref(), offset, size)
+	e.impl.ClearBuffer(encoderBuffer(buffer), offset, size)
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
 func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions []BufferTextureCopy) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	for _, r := range regions {
-		srcObj := browser.BuildImageCopyTexture(
-			src.impl.Browser().Ref(),
-			r.TextureBase.MipLevel,
-			r.TextureBase.Origin.X, r.TextureBase.Origin.Y, r.TextureBase.Origin.Z,
-		)
-		dstObj := browser.BuildImageCopyBuffer(
-			dst.impl.Browser().Ref(),
-			r.BufferLayout.Offset,
-			r.BufferLayout.BytesPerRow,
-			r.BufferLayout.RowsPerImage,
-		)
-		sizeObj := browser.BuildExtent3D(r.Size.Width, r.Size.Height, r.Size.DepthOrArrayLayers)
-		e.browser.CopyTextureToBuffer(srcObj, dstObj, sizeObj)
-	}
+	e.impl.CopyTextureToBuffer(encoderTexture(src), encoderBuffer(dst), encoderBufferTextureCopies(regions))
 }
 
 // CopyTextureToTexture copies data between textures.
 func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []TextureCopy) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	for _, r := range regions {
-		srcObj := browser.BuildImageCopyTexture(
-			src.impl.Browser().Ref(),
-			r.Source.MipLevel,
-			r.Source.Origin.X, r.Source.Origin.Y, r.Source.Origin.Z,
-		)
-		dstObj := browser.BuildImageCopyTexture(
-			dst.impl.Browser().Ref(),
-			r.Destination.MipLevel,
-			r.Destination.Origin.X, r.Destination.Origin.Y, r.Destination.Origin.Z,
-		)
-		sizeObj := browser.BuildExtent3D(r.Size.Width, r.Size.Height, r.Size.DepthOrArrayLayers)
-		e.browser.CopyTextureToTexture(srcObj, dstObj, sizeObj)
-	}
+	e.impl.CopyTextureToTexture(encoderTexture(src), encoderTexture(dst), encoderTextureCopies(regions))
 }
 
 // TransitionTextures transitions texture states for synchronization.
 // On browser, this is a no-op — the browser WebGPU API handles barriers internally.
 func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
-	// No-op: browser WebGPU manages resource state transitions automatically.
+	e.impl.TransitionTextures(encoderTextureBarriers(barriers))
 }
 
 // DiscardEncoding discards the encoder without producing a command buffer.
 func (e *CommandEncoder) DiscardEncoding() {
-	if e.released {
-		return
-	}
-	e.released = true
-	// Browser GC handles cleanup of the underlying GPUCommandEncoder.
+	e.impl.DiscardEncoding()
 }
 
 // Finish completes command recording and returns a CommandBuffer.
 func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
-	if e.released {
-		return nil, resource.ErrReleased
+	cb, err := e.impl.Finish()
+	if err != nil {
+		return nil, err
 	}
-	e.released = true
-	bcb := e.browser.Finish(js.Undefined())
-	return &CommandBuffer{
-		browser:  bcb,
-		released: false,
-	}, nil
+	return &CommandBuffer{impl: cb}, nil
 }
 
 // CommandBuffer holds recorded GPU commands ready for submission.
-// On browser, this wraps a GPUCommandBuffer via internal/browser.CommandBuffer.
+// On browser, this wraps a GPUCommandBuffer via internal/encoder.
 type CommandBuffer struct {
-	browser  *browser.CommandBuffer
-	released bool
+	impl *encoder.CommandBuffer
 }
 
 // Release releases a CommandBuffer that will NOT be submitted to the GPU.
 func (cb *CommandBuffer) Release() {
-	if cb.released {
-		return
-	}
-	cb.released = true
-	// Browser GC handles cleanup.
+	cb.impl.Release()
 }
 
-// --- Render pass descriptor conversion ---
-
-// buildRenderPassDescriptorJS converts a Go RenderPassDescriptor to a JS object
-// via the internal/browser conversion helpers.
-func buildRenderPassDescriptorJS(desc *RenderPassDescriptor) js.Value {
-	colorAttachments := make([]browser.RenderPassColorAttachmentJS, len(desc.ColorAttachments))
-	for i, ca := range desc.ColorAttachments {
-		att := browser.RenderPassColorAttachmentJS{
-			LoadOp:  browser.LoadOpToJS(ca.LoadOp),
-			StoreOp: browser.StoreOpToJS(ca.StoreOp),
-			ClearR:  ca.ClearValue.R,
-			ClearG:  ca.ClearValue.G,
-			ClearB:  ca.ClearValue.B,
-			ClearA:  ca.ClearValue.A,
-		}
-		if ca.View != nil && ca.View.impl.Browser() != nil {
-			att.View = ca.View.impl.Browser().Ref()
-		} else {
-			att.View = js.Undefined()
-		}
-		if ca.ResolveTarget != nil && ca.ResolveTarget.impl.Browser() != nil {
-			att.ResolveTarget = ca.ResolveTarget.impl.Browser().Ref()
-		} else {
-			att.ResolveTarget = js.Undefined()
-		}
-		if ca.DepthSlice != nil {
-			slice := *ca.DepthSlice
-			att.DepthSlice = &slice
-		}
-		colorAttachments[i] = att
+// encoderRenderPassDescriptor converts a public render pass descriptor to the
+// encoder's handle types.
+func encoderRenderPassDescriptor(desc *RenderPassDescriptor) *encoder.RenderPassDescriptor {
+	if desc == nil {
+		return nil
 	}
-
-	var depthStencil *browser.RenderPassDepthStencilAttachmentJS
-	if desc.DepthStencilAttachment != nil {
-		dsa := desc.DepthStencilAttachment
-		ds := &browser.RenderPassDepthStencilAttachmentJS{
-			DepthLoadOp:       browser.LoadOpToJS(dsa.DepthLoadOp),
-			DepthStoreOp:      browser.StoreOpToJS(dsa.DepthStoreOp),
-			DepthClearValue:   dsa.DepthClearValue,
-			DepthReadOnly:     dsa.DepthReadOnly,
-			StencilLoadOp:     browser.LoadOpToJS(dsa.StencilLoadOp),
-			StencilStoreOp:    browser.StoreOpToJS(dsa.StencilStoreOp),
-			StencilClearValue: dsa.StencilClearValue,
-			StencilReadOnly:   dsa.StencilReadOnly,
-		}
-		if dsa.View != nil && dsa.View.impl.Browser() != nil {
-			ds.View = dsa.View.impl.Browser().Ref()
-		} else {
-			ds.View = js.Undefined()
-		}
-		depthStencil = ds
+	out := &encoder.RenderPassDescriptor{Label: desc.Label}
+	for _, ca := range desc.ColorAttachments {
+		out.ColorAttachments = append(out.ColorAttachments, encoder.RenderPassColorAttachment{
+			View:          encoderTextureView(ca.View),
+			ResolveTarget: encoderTextureView(ca.ResolveTarget),
+			DepthSlice:    ca.DepthSlice,
+			LoadOp:        ca.LoadOp,
+			StoreOp:       ca.StoreOp,
+			ClearValue:    ca.ClearValue,
+		})
 	}
+	if ds := desc.DepthStencilAttachment; ds != nil {
+		out.DepthStencilAttachment = &encoder.RenderPassDepthStencilAttachment{
+			View:              encoderTextureView(ds.View),
+			DepthLoadOp:       ds.DepthLoadOp,
+			DepthStoreOp:      ds.DepthStoreOp,
+			DepthClearValue:   ds.DepthClearValue,
+			DepthReadOnly:     ds.DepthReadOnly,
+			StencilLoadOp:     ds.StencilLoadOp,
+			StencilStoreOp:    ds.StencilStoreOp,
+			StencilClearValue: ds.StencilClearValue,
+			StencilReadOnly:   ds.StencilReadOnly,
+		}
+	}
+	return out
+}
 
-	return browser.BuildRenderPassDescriptor(desc.Label, colorAttachments, depthStencil)
+// encoderComputePassDescriptor converts a public compute pass descriptor.
+func encoderComputePassDescriptor(desc *ComputePassDescriptor) *encoder.ComputePassDescriptor {
+	if desc == nil {
+		return nil
+	}
+	return &encoder.ComputePassDescriptor{Label: desc.Label}
 }

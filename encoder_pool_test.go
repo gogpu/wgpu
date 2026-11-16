@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -222,17 +223,18 @@ func createNoopDeviceForTest(t *testing.T) (hal.Device, hal.Queue, func()) {
 // Released without being submitted (the hal.Submit failure path) must not keep
 // pinning every resource the frame touched.
 func TestCommandBufferReleaseDropsUsedSets(t *testing.T) {
-	cb := &CommandBuffer{
-		usedBuffers:    map[*Buffer]struct{}{{}: {}},
-		usedTextures:   map[*resource.Texture]struct{}{{}: {}},
-		usedBindGroups: map[*resource.BindGroup]struct{}{{}: {}},
-	}
+	cb := &CommandBuffer{impl: &encoder.CommandBuffer{}}
+	cb.impl.SetUsedSetsForTest(
+		map[*resource.Buffer]struct{}{{}: {}},
+		map[*resource.Texture]struct{}{{}: {}},
+		map[*resource.BindGroup]struct{}{{}: {}},
+	)
 
 	cb.Release()
 
-	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
+	if cb.impl.UsedBuffers() != nil || cb.impl.UsedTextures() != nil || cb.impl.UsedBindGroups() != nil {
 		t.Errorf("Release left validation sets populated: buffers=%v textures=%v bindGroups=%v",
-			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
+			cb.impl.UsedBuffers(), cb.impl.UsedTextures(), cb.impl.UsedBindGroups())
 	}
 }
 
@@ -246,19 +248,20 @@ func TestPostSubmitDropsSetsWithoutDestroyQueue(t *testing.T) {
 		t.Fatal("test precondition: expected nil destroy queue")
 	}
 
-	cb := &CommandBuffer{
-		usedBuffers:    map[*Buffer]struct{}{{}: {}},
-		usedTextures:   map[*resource.Texture]struct{}{{}: {}},
-		usedBindGroups: map[*resource.BindGroup]struct{}{{}: {}},
-	}
+	cb := &CommandBuffer{impl: &encoder.CommandBuffer{}}
+	cb.impl.SetUsedSetsForTest(
+		map[*resource.Buffer]struct{}{{}: {}},
+		map[*resource.Texture]struct{}{{}: {}},
+		map[*resource.BindGroup]struct{}{{}: {}},
+	)
 
-	q.postSubmit(1, []*CommandBuffer{cb})
+	q.postSubmit(1, []*encoder.CommandBuffer{cb.impl})
 
-	if !cb.submitted {
+	if !cb.impl.IsSubmitted() {
 		t.Error("postSubmit left cb.submitted false — a double submit would not be caught")
 	}
-	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
+	if cb.impl.UsedBuffers() != nil || cb.impl.UsedTextures() != nil || cb.impl.UsedBindGroups() != nil {
 		t.Errorf("postSubmit left validation sets populated: buffers=%v textures=%v bindGroups=%v",
-			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
+			cb.impl.UsedBuffers(), cb.impl.UsedTextures(), cb.impl.UsedBindGroups())
 	}
 }

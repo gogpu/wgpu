@@ -1,18 +1,10 @@
 //go:build rust
 
-package wgpu
+package encoder
 
-// Staying-side shuttle (Prepare 2026-11-16). These declarations used to live
-// in encoder_rust.go, one of the three encoder context files that S4's Move
-// relocates into internal/encoder. The staying white-box test
-// encoder_depth_slice_rust_test.go names them, which is the planner's
-// `unexported-boundary` refusal class: a staying file naming an unexported
-// declaration that moves.
-//
-// With the declarations on the staying side the remaining direction is the
-// tolerated one: the moving encoder files reference them, and the Move defers
-// that through handRewrite. The Move relocates this file, its declarations and
-// encoder_depth_slice_rust_test.go into internal/encoder.
+// The rust render-pass descriptor conversion, relocated from the root package
+// by S4's Move (the "staying-side shuttle" file encoder_seams_rust.go of
+// commit ae8631e).
 
 import (
 	"errors"
@@ -20,8 +12,6 @@ import (
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 )
-
-// --- Render pass descriptor conversion ---
 
 // errRustDepthSliceUnmapped is returned for a color attachment with a
 // DepthSlice under -tags rust: go-webgpu's RenderPassColorAttachment has no
@@ -54,10 +44,10 @@ func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) (*rwgpu.RenderP
 			},
 		}
 		if ca.View != nil {
-			att.View = ca.View.impl.Rust()
+			att.View = ca.View.Rust()
 		}
 		if ca.ResolveTarget != nil {
-			att.ResolveTarget = ca.ResolveTarget.impl.Rust()
+			att.ResolveTarget = ca.ResolveTarget.Rust()
 		}
 		rDesc.ColorAttachments[i] = att
 	}
@@ -75,7 +65,7 @@ func convertRenderPassDescriptorRust(desc *RenderPassDescriptor) (*rwgpu.RenderP
 			StencilReadOnly:   dsa.StencilReadOnly,
 		}
 		if dsa.View != nil {
-			rDSA.View = dsa.View.impl.Rust()
+			rDSA.View = dsa.View.Rust()
 		}
 		rDesc.DepthStencilAttachment = rDSA
 	}

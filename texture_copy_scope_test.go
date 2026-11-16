@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/encoder"
 )
 
 func TestCopyCommandsPopulateTextureScope(t *testing.T) {
@@ -86,7 +87,7 @@ func TestCopyCommandsPopulateTextureScope(t *testing.T) {
 			}
 			defer cb.Release()
 
-			scope := cb.core.TextureScope()
+			scope := cb.impl.Core().TextureScope()
 			for tex, want := range tt.want {
 				idx := tex.impl.CoreTexture().TrackingData().Index()
 				if got := scope.EndUsage(idx); got != want {
@@ -162,7 +163,7 @@ func TestCopyCommandTextureScopeDrivesBarriers(t *testing.T) {
 
 			probeTracker := core.NewDeviceTracker()
 			probeTracker.InsertTexture(idx, tt.before)
-			transitions := mergeTextureScopes(probeTracker, []*CommandBuffer{cb})
+			transitions := mergeTextureScopes(probeTracker, []*encoder.CommandBuffer{cb.impl})
 			if len(transitions) != 1 {
 				t.Fatalf("copy scope produced %d transitions, want 1", len(transitions))
 			}
@@ -171,7 +172,7 @@ func TestCopyCommandTextureScopeDrivesBarriers(t *testing.T) {
 				t.Fatalf("transition = %+v, want index %d %v -> %v", transition, idx, tt.before, tt.copyUsage)
 			}
 
-			barrierCB, err := device.Queue().injectBarriers([]*CommandBuffer{cb})
+			barrierCB, err := device.Queue().injectBarriers([]*encoder.CommandBuffer{cb.impl})
 			if err != nil {
 				t.Fatalf("injectBarriers: %v", err)
 			}
@@ -206,7 +207,7 @@ func TestFailedCopyDoesNotPopulateTextureScope(t *testing.T) {
 		enc.CopyTextureToBuffer(tex, buffer, nil)
 
 		idx := tex.impl.CoreTexture().TrackingData().Index()
-		if scope := enc.core.Mutable().TextureScope(); scope.IsUsed(idx) {
+		if scope := enc.impl.Core().Mutable().TextureScope(); scope.IsUsed(idx) {
 			t.Fatalf("failed copy recorded texture usage %v", scope.EndUsage(idx))
 		}
 		if _, err := enc.Finish(); err == nil {
@@ -232,7 +233,7 @@ func TestFailedCopyDoesNotPopulateTextureScope(t *testing.T) {
 		enc.CopyBufferToTexture(buffer, tex, nil)
 
 		idx := tex.impl.CoreTexture().TrackingData().Index()
-		if scope := enc.core.Mutable().TextureScope(); scope.IsUsed(idx) {
+		if scope := enc.impl.Core().Mutable().TextureScope(); scope.IsUsed(idx) {
 			t.Fatalf("failed copy recorded texture usage %v", scope.EndUsage(idx))
 		}
 		if _, err := enc.Finish(); err == nil {
@@ -353,7 +354,7 @@ func TestCopyAfterEarlierCommandUsageIsNotAConflict(t *testing.T) {
 			tt.seed(enc, src, dst, buffer)
 			tt.record(enc, src, dst, buffer)
 
-			textures := enc.core.Mutable().TextureScope()
+			textures := enc.impl.Core().Mutable().TextureScope()
 			if want := tt.wantSrc; want != 0 {
 				if got := textures.EndUsage(src.impl.CoreTexture().TrackingData().Index()); got != want {
 					t.Errorf("source texture usage = %v, want %v", got, want)
@@ -364,7 +365,7 @@ func TestCopyAfterEarlierCommandUsageIsNotAConflict(t *testing.T) {
 					t.Errorf("destination texture usage = %v, want %v", got, want)
 				}
 			}
-			if got := enc.core.Mutable().BufferScope().EndUsage(buffer.impl.CoreBuffer().TrackingData().Index()); got != tt.wantBuffer {
+			if got := enc.impl.Core().Mutable().BufferScope().EndUsage(buffer.impl.CoreBuffer().TrackingData().Index()); got != tt.wantBuffer {
 				t.Errorf("buffer usage = %v, want %v", got, tt.wantBuffer)
 			}
 			cb, err := enc.Finish()
@@ -414,18 +415,18 @@ func TestCopyOntoItselfIsRejectedAtomically(t *testing.T) {
 			}
 			tt.record(enc, tex, buf)
 
-			if enc.core.Mutable().TextureScope().IsUsed(tex.impl.CoreTexture().TrackingData().Index()) {
+			if enc.impl.Core().Mutable().TextureScope().IsUsed(tex.impl.CoreTexture().TrackingData().Index()) {
 				t.Error("rejected copy recorded the texture in the command buffer tracker")
 			}
-			if enc.core.Mutable().BufferScope().IsUsed(buf.impl.CoreBuffer().TrackingData().Index()) {
+			if enc.impl.Core().Mutable().BufferScope().IsUsed(buf.impl.CoreBuffer().TrackingData().Index()) {
 				t.Error("rejected copy recorded the buffer in the command buffer tracker")
 			}
-			if got := len(enc.trackedRefs); got != 0 {
+			if got := len(enc.impl.TrackedRefs()); got != 0 {
 				t.Errorf("rejected copy retained %d refs, want 0", got)
 			}
-			if len(enc.usedTextures) != 0 || len(enc.usedBuffers) != 0 {
+			if len(enc.impl.UsedTextures()) != 0 || len(enc.impl.UsedBuffers()) != 0 {
 				t.Errorf("rejected copy changed submit validation sets: textures=%d buffers=%d",
-					len(enc.usedTextures), len(enc.usedBuffers))
+					len(enc.impl.UsedTextures()), len(enc.impl.UsedBuffers()))
 			}
 			if _, err := enc.Finish(); err == nil {
 				t.Fatal("Finish succeeded after a copy onto itself")
@@ -455,10 +456,10 @@ func TestCopyBufferToBufferRecordsBothUsages(t *testing.T) {
 	}
 	defer cb.Release()
 
-	if got := cb.core.BufferScope().EndUsage(src.impl.CoreBuffer().TrackingData().Index()); got != track.BufferUsesCopySrc {
+	if got := cb.impl.Core().BufferScope().EndUsage(src.impl.CoreBuffer().TrackingData().Index()); got != track.BufferUsesCopySrc {
 		t.Errorf("source usage = %v, want %v", got, track.BufferUsesCopySrc)
 	}
-	if got := cb.core.BufferScope().EndUsage(dst.impl.CoreBuffer().TrackingData().Index()); got != track.BufferUsesCopyDst {
+	if got := cb.impl.Core().BufferScope().EndUsage(dst.impl.CoreBuffer().TrackingData().Index()); got != track.BufferUsesCopyDst {
 		t.Errorf("destination usage = %v, want %v", got, track.BufferUsesCopyDst)
 	}
 }
@@ -479,11 +480,11 @@ func createCopyScopeBuffer(t *testing.T, device *Device, label string) *Buffer {
 // seedTextureUsage simulates an earlier command of the encoder that left the
 // texture in usage.
 func seedTextureUsage(enc *CommandEncoder, texture *Texture, usage track.TextureUses) {
-	enc.core.Mutable().TextureScope().SetSingle(texture.impl.CoreTexture().TrackingData().Index(), usage)
+	enc.impl.Core().Mutable().TextureScope().SetSingle(texture.impl.CoreTexture().TrackingData().Index(), usage)
 }
 
 // seedBufferUsage simulates an earlier command of the encoder that left the
 // buffer in usage.
 func seedBufferUsage(enc *CommandEncoder, buffer *Buffer, usage track.BufferUses) {
-	enc.core.Mutable().BufferScope().SetSingle(buffer.impl.CoreBuffer().TrackingData().Index(), usage)
+	enc.impl.Core().Mutable().BufferScope().SetSingle(buffer.impl.CoreBuffer().TrackingData().Index(), usage)
 }

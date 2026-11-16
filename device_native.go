@@ -14,6 +14,7 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -1440,12 +1441,15 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 		}
 
 		enc := &CommandEncoder{
-			core:        coreEncoder,
-			device:      d,
-			halEncoder:  halEnc,
-			trackedRefs: make([]*core.ResourceRef, 0, 64),
+			impl: encoder.NewCommandEncoder(encoder.CommandEncoderInit{
+				Core:       coreEncoder,
+				Device:     encoderDeviceHost{d: d},
+				HALEncoder: halEnc,
+				Pooled:     true,
+			}),
+			device: d,
 		}
-		d.recordings.AddEncoder(enc)
+		d.recordings.AddEncoder(enc.impl)
 		d.attachTestHooks(enc, label)
 		return enc, nil
 	}
@@ -1457,8 +1461,14 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 		return nil, err
 	}
 
-	enc := &CommandEncoder{core: coreEncoder, device: d}
-	d.recordings.AddEncoder(enc)
+	enc := &CommandEncoder{
+		impl: encoder.NewCommandEncoder(encoder.CommandEncoderInit{
+			Core:   coreEncoder,
+			Device: encoderDeviceHost{d: d},
+		}),
+		device: d,
+	}
+	d.recordings.AddEncoder(enc.impl)
 	d.attachTestHooks(enc, label)
 	return enc, nil
 }
@@ -1469,8 +1479,7 @@ func (d *Device) attachTestHooks(enc *CommandEncoder, label string) {
 	if d.test == nil {
 		return
 	}
-	enc.test = d.test
-	enc.testEncoder = d.test.EncoderCreated(label)
+	enc.impl.SetTestHooks(d.test, d.test.EncoderCreated(label))
 }
 
 // CreateFence creates a GPU synchronization fence.
@@ -1608,7 +1617,7 @@ func (d *Device) FreeCommandBuffer(cb *CommandBuffer) {
 	if halDevice == nil {
 		return
 	}
-	for _, buf := range cb.halBufferList() {
+	for _, buf := range cb.impl.HALBufferList() {
 		if buf != nil {
 			halDevice.FreeCommandBuffer(buf)
 		}
@@ -1853,9 +1862,9 @@ func (d *Device) CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) 
 		return nil, ErrReleased
 	}
 
-	encoder, err := newRenderBundleEncoder(d, desc)
+	bundleEncoder, err := newRenderBundleEncoder(d, desc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: CreateRenderBundleEncoder: %w", err)
 	}
-	return encoder, nil
+	return bundleEncoder, nil
 }

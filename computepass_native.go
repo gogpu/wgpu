@@ -43,10 +43,7 @@ type ComputePassEncoder struct {
 // and the copy at End(). Matches Rust where trackers live in the command
 // encoder throughout recording — no per-pass intermediate storage.
 func (p *ComputePassEncoder) trackRef(ref *core.ResourceRef) {
-	if ref != nil {
-		ref.Clone()
-		p.encoder.trackedRefs = append(p.encoder.trackedRefs, ref)
-	}
+	p.encoder.trackRef(ref)
 }
 
 // SetPipeline sets the active compute pipeline.
@@ -231,7 +228,7 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 		return
 	}
 	p.trackRef(buffer.impl.CoreBuffer().Ref)
-	p.encoder.trackBuffer(buffer)
+	p.encoder.trackBuffer(buffer.impl)
 
 	// FEAT-COMPUTE-004: GPU-side indirect dispatch validation.
 	// If the device has an IndirectValidation pipeline, run a pre-dispatch
@@ -294,7 +291,7 @@ func (p *ComputePassEncoder) dispatchIndirectValidated(
 
 	// The HAL compute pass records no barriers, so the validation runs in
 	// passes of its own between the barriers on the parent encoder.
-	parentEncoder := p.encoder.core.RawEncoder()
+	parentEncoder := p.encoder.coreEncoder().RawEncoder()
 	if parentEncoder != nil {
 		// End the current compute pass temporarily to insert barriers.
 		raw.End()

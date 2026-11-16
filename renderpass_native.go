@@ -63,12 +63,10 @@ type RenderPassEncoder struct {
 }
 
 // trackRef Clone()'s a ResourceRef and appends directly to the parent
-// CommandEncoder's trackedRefs. No intermediate pass-level slice.
+// CommandEncoder's trackedRefs. No intermediate pass-level slice; the clone
+// happens once, in the encoder's own TrackRef.
 func (p *RenderPassEncoder) trackRef(ref *core.ResourceRef) {
-	if ref != nil {
-		ref.Clone()
-		p.encoder.trackedRefs = append(p.encoder.trackedRefs, ref)
-	}
+	p.encoder.trackRef(ref)
 }
 
 // SetPipeline sets the active render pipeline.
@@ -157,7 +155,7 @@ func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset 
 		p.vertexBufferCount = slot + 1
 	}
 	p.trackRef(buffer.impl.CoreBuffer().Ref)
-	p.encoder.trackBuffer(buffer)
+	p.encoder.trackBuffer(buffer.impl)
 	p.core.SetVertexBuffer(slot, buffer.impl.CoreBuffer(), offset)
 	if p.test != nil {
 		p.test.VertexBufferBound(p.testPass, slot, buffer.Label(), offset, buffer.Size())
@@ -173,7 +171,7 @@ func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.Index
 	p.indexBufferSet = true
 	p.indexBufferFormat = format
 	p.trackRef(buffer.impl.CoreBuffer().Ref)
-	p.encoder.trackBuffer(buffer)
+	p.encoder.trackBuffer(buffer.impl)
 	p.core.SetIndexBuffer(buffer.impl.CoreBuffer(), format, offset)
 	if p.test != nil {
 		p.test.IndexBufferBound(p.testPass, buffer.Label(), format, offset, buffer.Size())
@@ -346,7 +344,7 @@ func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, dra
 		return
 	}
 	p.trackRef(buffer.impl.CoreBuffer().Ref)
-	p.encoder.trackBuffer(buffer)
+	p.encoder.trackBuffer(buffer.impl)
 	p.flushBindGroups()
 	p.core.MultiDrawIndirect(buffer.impl.CoreBuffer(), offset, drawCount)
 }
@@ -419,7 +417,7 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 		return
 	}
 	p.trackRef(buffer.impl.CoreBuffer().Ref)
-	p.encoder.trackBuffer(buffer)
+	p.encoder.trackBuffer(buffer.impl)
 	p.flushBindGroups()
 	p.core.MultiDrawIndexedIndirect(buffer.impl.CoreBuffer(), offset, drawCount)
 }

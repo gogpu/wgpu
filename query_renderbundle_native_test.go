@@ -333,7 +333,7 @@ func TestResolveQuerySetGuards(t *testing.T) {
 		querySet    *QuerySet
 		destination *Buffer
 	}{
-		{name: "released encoder", encoder: &CommandEncoder{released: true}, querySet: querySet, destination: activeDestination},
+		{name: "released encoder", encoder: NewReleasedTestCommandEncoder(), querySet: querySet, destination: activeDestination},
 		{name: "nil query set", encoder: encoder, destination: activeDestination},
 		{name: "released query set", encoder: encoder, querySet: releasedQuerySet, destination: activeDestination},
 		{name: "nil destination", encoder: encoder, querySet: querySet},
@@ -360,8 +360,8 @@ func TestResolveQuerySetGuards(t *testing.T) {
 	if _, err := nilRawEncoder.Finish(); err != nil {
 		t.Fatalf("Finish() error = %v", err)
 	}
-	nilRawEncoder.core.TakeHALEncoder()
-	nilRawEncoder.released = false
+	nilRawEncoder.impl.Core().TakeHALEncoder()
+	nilRawEncoder.impl.SetReleasedForTest(false)
 	nilRawEncoder.ResolveQuerySet(querySet, 0, 1, activeDestination, 0)
 }
 

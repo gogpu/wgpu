@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
 )
@@ -62,7 +63,7 @@ type transitRecording struct {
 func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	index, err := q.submitLocked(commandBuffers)
+	index, err := q.submitLocked(submitCommandBuffers(commandBuffers))
 	if err != nil {
 		return index, err
 	}
@@ -72,9 +73,29 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 	return index, nil
 }
 
+// submitCommandBuffers unwraps the public command buffer handles for the
+// submit path. A nil *CommandBuffer is a nil element (Submit reports it); a
+// zero-value one stays a zero implementation, which the submit path accepts
+// and spends exactly as the pre-move zero value was: it records no commands
+// and holds nothing to validate or recycle.
+func submitCommandBuffers(commandBuffers []*CommandBuffer) []*encoder.CommandBuffer {
+	impls := make([]*encoder.CommandBuffer, len(commandBuffers))
+	for i, cb := range commandBuffers {
+		switch {
+		case cb == nil:
+			impls[i] = nil
+		case cb.impl == nil:
+			impls[i] = &encoder.CommandBuffer{}
+		default:
+			impls[i] = cb.impl
+		}
+	}
+	return impls
+}
+
 // submitLocked is Submit with q.mu held. Queue.WriteTexture calls it for the
 // command buffer of a stencil upload blit.
-func (q *Queue) submitLocked(commandBuffers []*CommandBuffer) (uint64, error) {
+func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, error) {
 	if q.hal == nil {
 		return 0, fmt.Errorf("wgpu: queue not available")
 	}
@@ -183,18 +204,14 @@ func (q *Queue) submitLocked(commandBuffers []*CommandBuffer) (uint64, error) {
 // 1. Tracks Clone'd ResourceRefs for Drop on GPU completion (Phase 2)
 // 2. Schedules HAL encoder recycling via DestroyQueue (BUG-DX12-004)
 // 3. Triages deferred resource destructions
-func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
+func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*encoder.CommandBuffer) {
 	// Mark all command buffers as submitted to prevent double-submit (VAL-A6),
 	// and drop the encode-time reference sets. This runs before the DestroyQueue
 	// lookup below: the HAL submit has already succeeded, so these buffers are
 	// spent whether or not there is a queue to triage.
 	for _, cb := range commandBuffers {
 		if cb != nil {
-			cb.submitted = true
-			cb.dropUsedSets()
-			if cb.device != nil {
-				cb.device.recordings.RemoveBuffer(cb)
-			}
+			cb.MarkSubmitted()
 		}
 	}
 
@@ -207,9 +224,8 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 	// Phase 2: per-command-buffer resource tracking — refs are Drop'd when GPU completes.
 	var allRefs []*core.ResourceRef
 	for _, cb := range commandBuffers {
-		if cb != nil && len(cb.trackedRefs) > 0 {
-			allRefs = append(allRefs, cb.trackedRefs...)
-			cb.trackedRefs = nil
+		if cb != nil {
+			allRefs = append(allRefs, cb.TakeTrackedRefs()...)
 		}
 	}
 	if len(allRefs) > 0 {
@@ -228,12 +244,14 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 	// Matches Rust wgpu-core's CommandAllocator::release_encoder pattern where
 	// encoders travel: CommandEncoder -> CommandBuffer -> EncoderInFlight -> pool.
 	for _, cb := range commandBuffers {
-		if cb == nil || cb.halEncoder == nil {
+		if cb == nil {
 			continue
 		}
-		halEnc := cb.halEncoder
-		halCmdBufs := cb.halBufferList() // all CBs from this encoder
-		cb.halEncoder = nil              // ownership moves to deferred callback
+		halEnc := cb.TakeHALEncoder() // ownership moves to deferred callback
+		if halEnc == nil {
+			continue
+		}
+		halCmdBufs := cb.HALBufferList() // all CBs from this encoder
 
 		pool := q.device.cmdEncoderPool
 		dq.Defer(subIdx, "CmdEncoder", func() {
@@ -430,28 +448,28 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 	if err != nil {
 		return err
 	}
-	encoder, err := d.CreateCommandEncoder(&CommandEncoderDescriptor{Label: stencilUploadLabel})
+	enc, err := d.CreateCommandEncoder(&CommandEncoderDescriptor{Label: stencilUploadLabel})
 	if err != nil {
 		u.temp.Release()
 		return err
 	}
 	// The encoder owns the staging texture from here on: every exit below
 	// discards, releases or submits it.
-	encoder.own(u.temp)
+	enc.impl.Own(u.Staging())
 	temp := u.tempCopy()
 	if err := q.writeTextureLocked(&temp, data, layout, size); err != nil {
-		encoder.DiscardEncoding()
+		enc.DiscardEncoding()
 		return fmt.Errorf("staging upload: %w", err)
 	}
-	if err := u.Record(stencilRecorder{encoder}); err != nil {
-		encoder.DiscardEncoding()
+	if err := u.Record(stencilRecorder{enc}); err != nil {
+		enc.DiscardEncoding()
 		return err
 	}
-	cb, err := encoder.Finish()
+	cb, err := enc.Finish()
 	if err != nil {
 		return err
 	}
-	if _, err := q.submitLocked([]*CommandBuffer{cb}); err != nil {
+	if _, err := q.submitLocked([]*encoder.CommandBuffer{cb.impl}); err != nil {
 		cb.Release()
 		return err
 	}
@@ -549,22 +567,22 @@ func (q *Queue) destroyQueue() *core.DestroyQueue {
 //
 // The index parameter identifies which command buffer in the Submit() call
 // failed validation, for clearer error messages.
-func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
+func validateCommandBufferForSubmit(cb *encoder.CommandBuffer, index int) error {
 	// 1. Check double-submit.
-	if cb.submitted {
+	if cb.IsSubmitted() {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d: %w",
 			index, ErrSubmitCommandBufferInvalid)
 	}
 
 	// 2. Check referenced buffers (matches Rust queue.rs:1780-1787).
-	for buf := range cb.usedBuffers {
+	for buf := range cb.UsedBuffers() {
 		if err := validateSubmitBuffer(buf, index); err != nil {
 			return err
 		}
 	}
 
 	// 3. Check referenced textures (matches Rust queue.rs:1791-1808).
-	for tex := range cb.usedTextures {
+	for tex := range cb.UsedTextures() {
 		if err := validateSubmitTexture(tex, index); err != nil {
 			return err
 		}
@@ -580,7 +598,7 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 	// The bind group's own Release is not checked: it is a drop, and the
 	// command buffer holds the group's reference until its submission
 	// completes (P1-CORE-020).
-	for bg := range cb.usedBindGroups {
+	for bg := range cb.UsedBindGroups() {
 		for _, buf := range bg.BoundBuffers() {
 			if err := validateSubmitBufferCore(buf, index); err != nil {
 				return err
@@ -597,7 +615,7 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 	// query_set.try_raw does (queue.rs:2167-2168). Release() is a drop: the
 	// command buffer holds the set's reference until its submission completes
 	// (P1-CORE-021). Only a query set whose HAL query set is gone fails.
-	for qs := range cb.usedQuerySets {
+	for qs := range cb.UsedQuerySets() {
 		if qs.Core() == nil || qs.Core().IsDestroyed() {
 			return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed query set: %w",
 				index, ErrSubmitQuerySetDestroyed)
@@ -614,11 +632,11 @@ func validateCommandBufferForSubmit(cb *CommandBuffer, index int) error {
 // destroyed only when its HAL buffer is gone: one without a reference count is
 // destroyed by Release itself. Callers never pass nil: trackBuffer skips nil
 // and collectBindGroupResources only records non-nil entries.
-func validateSubmitBuffer(buf *Buffer, index int) error {
-	if buf == nil || buf.impl == nil {
+func validateSubmitBuffer(buf *resource.Buffer, index int) error {
+	if buf == nil {
 		return nil
 	}
-	return validateSubmitBufferCore(buf.impl, index)
+	return validateSubmitBufferCore(buf, index)
 }
 
 func validateSubmitBufferCore(buf *resource.Buffer, index int) error {
@@ -671,7 +689,7 @@ func validateSubmitTexture(tex *resource.Texture, index int) error {
 // "(wgpu internal) Transit" pass with insert_barriers_from_device_tracker,
 // close_and_push_front (queue.rs:1637-1674); pending writes inserted at
 // index 0 (queue.rs:1909-1912).
-func (q *Queue) assembleSubmission(pendingCmdBuf hal.CommandBuffer, commandBuffers []*CommandBuffer) ([]hal.CommandBuffer, error) {
+func (q *Queue) assembleSubmission(pendingCmdBuf hal.CommandBuffer, commandBuffers []*encoder.CommandBuffer) ([]hal.CommandBuffer, error) {
 	allBuffers := make([]hal.CommandBuffer, 0, 1+2*len(commandBuffers))
 	if pendingCmdBuf != nil {
 		allBuffers = append(allBuffers, pendingCmdBuf)
@@ -685,7 +703,7 @@ func (q *Queue) assembleSubmission(pendingCmdBuf hal.CommandBuffer, commandBuffe
 		if transit != nil {
 			allBuffers = append(allBuffers, transit)
 		}
-		allBuffers = append(allBuffers, cb.halBufferList()...)
+		allBuffers = append(allBuffers, cb.HALBufferList()...)
 	}
 	return allBuffers, nil
 }
@@ -711,7 +729,7 @@ func (q *Queue) releaseTransits() {
 // encoder lifecycle of user command encoders.
 //
 // Reference: wgpu-core command/mod.rs insert_barriers_from_device_tracker
-func (q *Queue) injectBarriers(commandBuffers []*CommandBuffer) (hal.CommandBuffer, error) {
+func (q *Queue) injectBarriers(commandBuffers []*encoder.CommandBuffer) (hal.CommandBuffer, error) {
 	if q.device == nil || q.device.core == nil {
 		return nil, nil //nolint:nilnil // no device = no barriers needed
 	}
@@ -747,14 +765,14 @@ func (q *Queue) injectBarriers(commandBuffers []*CommandBuffer) (hal.CommandBuff
 // buildTrackerIndexResolver walks all textures referenced by the submitted
 // command buffers and builds a mapping from TrackerIndex to hal.Texture.
 // Includes both directly used textures and those bound via bind groups.
-func buildTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.TrackerIndex]hal.Texture {
+func buildTrackerIndexResolver(commandBuffers []*encoder.CommandBuffer) map[track.TrackerIndex]hal.Texture {
 	resolver := make(map[track.TrackerIndex]hal.Texture)
 	for _, cb := range commandBuffers {
 		if cb == nil {
 			continue
 		}
-		collectTextureIndices(resolver, cb.usedTextures)
-		for bg := range cb.usedBindGroups {
+		collectTextureIndices(resolver, cb.UsedTextures())
+		for bg := range cb.UsedBindGroups() {
 			if bg == nil {
 				continue
 			}
@@ -802,13 +820,13 @@ func addTrackedTexture(resolver map[track.TrackerIndex]hal.Texture, tex *resourc
 
 // mergeTextureScopes merges each command buffer's textureScope into the
 // device tracker, returning all pending transitions.
-func mergeTextureScopes(tracker *core.DeviceTracker, commandBuffers []*CommandBuffer) []track.TexturePendingTransition {
+func mergeTextureScopes(tracker *core.DeviceTracker, commandBuffers []*encoder.CommandBuffer) []track.TexturePendingTransition {
 	var allTransitions []track.TexturePendingTransition
 	for _, cb := range commandBuffers {
-		if cb == nil || cb.core == nil {
+		if cb == nil || cb.Core() == nil {
 			continue
 		}
-		scope := cb.core.TextureScope()
+		scope := cb.Core().TextureScope()
 		if scope == nil || scope.IsEmpty() {
 			continue
 		}
@@ -820,13 +838,13 @@ func mergeTextureScopes(tracker *core.DeviceTracker, commandBuffers []*CommandBu
 
 // mergeBufferScopes merges each command buffer's bufferScope into the
 // device tracker, returning all pending buffer transitions.
-func mergeBufferScopes(tracker *core.DeviceTracker, commandBuffers []*CommandBuffer) []track.PendingTransition {
+func mergeBufferScopes(tracker *core.DeviceTracker, commandBuffers []*encoder.CommandBuffer) []track.PendingTransition {
 	var allTransitions []track.PendingTransition
 	for _, cb := range commandBuffers {
-		if cb == nil || cb.core == nil {
+		if cb == nil || cb.Core() == nil {
 			continue
 		}
-		scope := cb.core.BufferScope()
+		scope := cb.Core().BufferScope()
 		if scope == nil {
 			continue
 		}
@@ -839,16 +857,16 @@ func mergeBufferScopes(tracker *core.DeviceTracker, commandBuffers []*CommandBuf
 // buildBufferTrackerIndexResolver walks all buffers referenced by the
 // submitted command buffers and builds a mapping from TrackerIndex to
 // hal.Buffer.
-func buildBufferTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.TrackerIndex]hal.Buffer {
+func buildBufferTrackerIndexResolver(commandBuffers []*encoder.CommandBuffer) map[track.TrackerIndex]hal.Buffer {
 	resolver := make(map[track.TrackerIndex]hal.Buffer)
 	for _, cb := range commandBuffers {
 		if cb == nil {
 			continue
 		}
-		for buf := range cb.usedBuffers {
+		for buf := range cb.UsedBuffers() {
 			addTrackedBuffer(resolver, buf)
 		}
-		for bg := range cb.usedBindGroups {
+		for bg := range cb.UsedBindGroups() {
 			if bg == nil {
 				continue
 			}
@@ -862,11 +880,11 @@ func buildBufferTrackerIndexResolver(commandBuffers []*CommandBuffer) map[track.
 
 // addTrackedBuffer adds a single buffer to the resolver if it has a
 // valid core buffer and TrackerIndex.
-func addTrackedBuffer(resolver map[track.TrackerIndex]hal.Buffer, buf *Buffer) {
-	if buf == nil || buf.impl == nil {
+func addTrackedBuffer(resolver map[track.TrackerIndex]hal.Buffer, buf *resource.Buffer) {
+	if buf == nil {
 		return
 	}
-	addTrackedBufferCore(resolver, buf.impl)
+	addTrackedBufferCore(resolver, buf)
 }
 
 func addTrackedBufferCore(resolver map[track.TrackerIndex]hal.Buffer, buf *resource.Buffer) {
@@ -940,10 +958,10 @@ func (q *Queue) release() {
 // implementation: the buffers move to internal/encoder (ADR-070 S4) while the
 // queue stays in the root package until S9, and a free function over the public
 // wrapper cannot be called from, or live in, the destination.
-func releaseSubmittedInternal(commandBuffers []*CommandBuffer) {
+func releaseSubmittedInternal(commandBuffers []*encoder.CommandBuffer) {
 	for _, cb := range commandBuffers {
 		if cb != nil {
-			cb.releaseInternal()
+			cb.ReleaseInternal()
 		}
 	}
 }

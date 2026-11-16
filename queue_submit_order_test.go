@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -54,8 +55,8 @@ func finishWithTextureUse(t *testing.T, device *Device, label string, tex *Textu
 	if err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
-	cmd.core.TextureScope().SetSingle(tex.impl.CoreTexture().TrackingData().Index(), use)
-	cmd.usedTextures = map[*resource.Texture]struct{}{tex.impl: {}}
+	cmd.impl.Core().TextureScope().SetSingle(tex.impl.CoreTexture().TrackingData().Index(), use)
+	cmd.impl.SetUsedSetsForTest(nil, map[*resource.Texture]struct{}{tex.impl: {}}, nil)
 	return cmd
 }
 
@@ -92,7 +93,7 @@ func TestAssembleSubmission_TransitBeforeEachCommandBuffer(t *testing.T) {
 	cb2 := finishWithTextureUse(t, device, "cb2", tex, track.TextureUsesResource)
 
 	pending := &labeledCB{label: "pending"}
-	list, err := q.assembleSubmission(pending, []*CommandBuffer{cb1, cb2})
+	list, err := q.assembleSubmission(pending, []*encoder.CommandBuffer{cb1.impl, cb2.impl})
 	if err != nil {
 		t.Fatalf("assembleSubmission: %v", err)
 	}

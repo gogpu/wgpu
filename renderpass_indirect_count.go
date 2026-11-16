@@ -58,8 +58,8 @@ func (p *RenderPassEncoder) executeIndirectCountDraw(cfg indirectCountDrawConfig
 func (p *RenderPassEncoder) trackIndirectCountBuffers(indirectBuffer, countBuffer *Buffer) {
 	p.trackRef(indirectBuffer.impl.CoreBuffer().Ref)
 	p.trackRef(countBuffer.impl.CoreBuffer().Ref)
-	p.encoder.trackBuffer(indirectBuffer)
-	p.encoder.trackBuffer(countBuffer)
+	p.encoder.trackBuffer(indirectBuffer.impl)
+	p.encoder.trackBuffer(countBuffer.impl)
 }
 
 func (p *RenderPassEncoder) validateIndexedIndirectCountPreconditions() error {

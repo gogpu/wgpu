@@ -12,6 +12,7 @@ import (
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
 
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/pipeconst"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -402,7 +403,7 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 		return nil, fmt.Errorf("wgpu: failed to create command encoder: %w", err)
 	}
 
-	return &CommandEncoder{r: re}, nil
+	return &CommandEncoder{impl: encoder.NewCommandEncoder(re)}, nil
 }
 
 // CreateFence creates a GPU synchronization fence.

@@ -43,7 +43,7 @@ func TestCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 	if got := ref.RefCount(); got != 1 {
 		t.Fatalf("failed copy changed buffer refcount to %d, want 1", got)
 	}
-	if got := len(enc.trackedRefs); got != 0 {
+	if got := len(enc.impl.TrackedRefs()); got != 0 {
 		t.Fatalf("failed copy retained %d resource refs, want 0", got)
 	}
 	if _, err := enc.Finish(); err == nil {
@@ -185,13 +185,13 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 			}
 			tt.record(enc, buffer, texture)
 			checkRefCounts("after encoding", 2)
-			checkTracked("encoder", enc.trackedRefs)
+			checkTracked("encoder", enc.impl.TrackedRefs())
 
 			cb, err := enc.Finish()
 			if err != nil {
 				t.Fatalf("Finish: %v", err)
 			}
-			checkTracked("command buffer", cb.trackedRefs)
+			checkTracked("command buffer", cb.impl.TrackedRefs())
 			submission, err := queue.Submit(cb)
 			if err != nil {
 				t.Fatalf("Submit: %v", err)

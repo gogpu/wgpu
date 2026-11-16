@@ -132,11 +132,11 @@ func textureRegion(src, dst *Texture, w, h, d uint32) TextureCopy {
 // before the tracker is touched) and records no error.
 func requireNoSideEffects(t *testing.T, enc *CommandEncoder) {
 	t.Helper()
-	if len(enc.trackedRefs) != 0 {
-		t.Errorf("tracked refs = %d, want 0", len(enc.trackedRefs))
+	if len(enc.impl.TrackedRefs()) != 0 {
+		t.Errorf("tracked refs = %d, want 0", len(enc.impl.TrackedRefs()))
 	}
-	if len(enc.usedBuffers) != 0 {
-		t.Errorf("used buffers = %d, want 0", len(enc.usedBuffers))
+	if len(enc.impl.UsedBuffers()) != 0 {
+		t.Errorf("used buffers = %d, want 0", len(enc.impl.UsedBuffers()))
 	}
 	if _, err := enc.Finish(); err != nil {
 		t.Errorf("Finish: %v", err)

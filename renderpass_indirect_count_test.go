@@ -212,10 +212,10 @@ func TestExecuteIndirectCountDraw_RecordsAndTracks(t *testing.T) {
 	if !recorded {
 		t.Fatal("record callback not invoked")
 	}
-	if len(enc.trackedRefs) == 0 {
+	if len(enc.impl.TrackedRefs()) == 0 {
 		t.Fatal("expected tracked buffer refs")
 	}
-	if len(enc.usedBuffers) == 0 {
+	if len(enc.impl.UsedBuffers()) == 0 {
 		t.Fatal("expected usedBuffers tracking")
 	}
 }

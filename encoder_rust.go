@@ -3,198 +3,132 @@
 package wgpu
 
 import (
-	"fmt"
-
-	rwgpu "github.com/go-webgpu/webgpu/wgpu"
-
-	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/encoder"
 )
 
 // CommandEncoder records GPU commands for later submission.
 // On Rust backend, this wraps go-webgpu/webgpu CommandEncoder.
 //
-// The former device field is gone: it was write-only (ADR-070 §13.14, B13;
-// every rust error path reads the wrapped encoder, not the device), and the
-// destination of the encoder move may not hold a root device pointer.
+// The implementation lives in internal/encoder (ADR-070); this declaration is
+// the public surface.
 type CommandEncoder struct {
-	r        *rwgpu.CommandEncoder
-	released bool
+	impl *encoder.CommandEncoder
 }
 
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
-	if e.released {
-		return nil, core.ErrReleased
-	}
-
-	rDesc, err := convertRenderPassDescriptorRust(desc)
+	rp, err := e.impl.BeginRenderPass(encoderRenderPassDescriptor(desc))
 	if err != nil {
 		return nil, err
 	}
-	rp, err := e.r.BeginRenderPass(rDesc)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to begin render pass: %w", err)
-	}
-
 	return &RenderPassEncoder{r: rp}, nil
 }
 
 // BeginComputePass begins a compute pass.
 func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*ComputePassEncoder, error) {
-	if e.released {
-		return nil, core.ErrReleased
-	}
-
-	var rDesc *rwgpu.ComputePassDescriptor
-	if desc != nil {
-		rDesc = &rwgpu.ComputePassDescriptor{
-			Label: desc.Label,
-		}
-	}
-
-	rp, err := e.r.BeginComputePass(rDesc)
+	rp, err := e.impl.BeginComputePass(encoderComputePassDescriptor(desc))
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to begin compute pass: %w", err)
+		return nil, err
 	}
-
 	return &ComputePassEncoder{r: rp}, nil
 }
 
 // CopyBufferToBuffer copies data between buffers.
 func (e *CommandEncoder) CopyBufferToBuffer(src *Buffer, srcOffset uint64, dst *Buffer, dstOffset uint64, size uint64) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	e.r.CopyBufferToBuffer(src.impl.R(), srcOffset, dst.impl.R(), dstOffset, size)
+	e.impl.CopyBufferToBuffer(encoderBuffer(src), srcOffset, encoderBuffer(dst), dstOffset, size)
 }
 
 // CopyBufferToTexture copies data from a buffer to a texture.
 func (e *CommandEncoder) CopyBufferToTexture(src *Buffer, dst *Texture, regions []BufferTextureCopy) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	for _, r := range regions {
-		rSrc := &rwgpu.TexelCopyBufferInfo{
-			Buffer: src.impl.R().Handle(),
-			Layout: rwgpu.TexelCopyBufferLayout{
-				Offset:       r.BufferLayout.Offset,
-				BytesPerRow:  r.BufferLayout.BytesPerRow,
-				RowsPerImage: r.BufferLayout.RowsPerImage,
-			},
-		}
-		rDst := &rwgpu.TexelCopyTextureInfo{
-			Texture:  dst.impl.Rust().Handle(),
-			MipLevel: r.TextureBase.MipLevel,
-			Origin:   rwgpu.Origin3D{X: r.TextureBase.Origin.X, Y: r.TextureBase.Origin.Y, Z: r.TextureBase.Origin.Z},
-		}
-		rSize := &rwgpu.Extent3D{
-			Width:              r.Size.Width,
-			Height:             r.Size.Height,
-			DepthOrArrayLayers: r.Size.DepthOrArrayLayers,
-		}
-		e.r.CopyBufferToTexture(rSrc, rDst, rSize)
-	}
+	e.impl.CopyBufferToTexture(encoderBuffer(src), encoderTexture(dst), encoderBufferTextureCopies(regions))
 }
 
 // ClearBuffer clears a buffer region to zero.
 func (e *CommandEncoder) ClearBuffer(buffer *Buffer, offset, size uint64) {
-	if e.released || buffer == nil {
-		return
-	}
-	e.r.ClearBuffer(buffer.impl.R(), offset, size)
+	e.impl.ClearBuffer(encoderBuffer(buffer), offset, size)
 }
 
 // CopyTextureToBuffer copies data from a texture to a buffer.
 func (e *CommandEncoder) CopyTextureToBuffer(src *Texture, dst *Buffer, regions []BufferTextureCopy) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	rRegions := make([]rwgpu.BufferTextureCopy, len(regions))
-	for i, r := range regions {
-		rRegions[i] = rwgpu.BufferTextureCopy{
-			BufferLayout: rwgpu.ImageDataLayout(r.BufferLayout),
-			TextureBase: rwgpu.ImageCopyTexture{
-				Texture:  r.TextureBase.Texture.impl.Rust(),
-				MipLevel: r.TextureBase.MipLevel,
-				Origin:   rwgpu.Origin3D(r.TextureBase.Origin),
-				Aspect:   rwgpu.TextureAspect(r.TextureBase.Aspect),
-			},
-			Size: rwgpu.Extent3D{Width: r.Size.Width, Height: r.Size.Height, DepthOrArrayLayers: r.Size.DepthOrArrayLayers},
-		}
-	}
-	e.r.CopyTextureToBuffer(src.impl.Rust(), dst.impl.R(), rRegions)
+	e.impl.CopyTextureToBuffer(encoderTexture(src), encoderBuffer(dst), encoderBufferTextureCopies(regions))
 }
 
 // CopyTextureToTexture copies data between textures.
 func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []TextureCopy) {
-	if e.released || src == nil || dst == nil {
-		return
-	}
-	rRegions := make([]rwgpu.TextureCopy, len(regions))
-	for i, r := range regions {
-		rRegions[i] = rwgpu.TextureCopy{
-			Source: rwgpu.ImageCopyTexture{
-				Texture:  r.Source.Texture.impl.Rust(),
-				MipLevel: r.Source.MipLevel,
-				Origin:   rwgpu.Origin3D(r.Source.Origin),
-				Aspect:   rwgpu.TextureAspect(r.Source.Aspect),
-			},
-			Destination: rwgpu.ImageCopyTexture{
-				Texture:  r.Destination.Texture.impl.Rust(),
-				MipLevel: r.Destination.MipLevel,
-				Origin:   rwgpu.Origin3D(r.Destination.Origin),
-				Aspect:   rwgpu.TextureAspect(r.Destination.Aspect),
-			},
-			Size: rwgpu.Extent3D{Width: r.Size.Width, Height: r.Size.Height, DepthOrArrayLayers: r.Size.DepthOrArrayLayers},
-		}
-	}
-	e.r.CopyTextureToTexture(src.impl.Rust(), dst.impl.Rust(), rRegions)
+	e.impl.CopyTextureToTexture(encoderTexture(src), encoderTexture(dst), encoderTextureCopies(regions))
 }
 
 // TransitionTextures transitions texture states for synchronization.
 // On Rust backend, this is a no-op. wgpu-native handles barriers internally.
 func (e *CommandEncoder) TransitionTextures(_ []TextureBarrier) {
-	// No-op: wgpu-native manages resource state transitions automatically.
+	e.impl.TransitionTextures(nil)
 }
 
 // DiscardEncoding discards the encoder without producing a command buffer.
 func (e *CommandEncoder) DiscardEncoding() {
-	if e.released {
-		return
-	}
-	e.released = true
-	if e.r != nil {
-		e.r.Release()
-	}
+	e.impl.DiscardEncoding()
 }
 
 // Finish completes command recording and returns a CommandBuffer.
 func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
-	if e.released {
-		return nil, core.ErrReleased
-	}
-	e.released = true
-
-	rcb, err := e.r.Finish()
+	cb, err := e.impl.Finish()
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to finish command encoder: %w", err)
+		return nil, err
 	}
-
-	return &CommandBuffer{r: rcb}, nil
+	return &CommandBuffer{impl: cb}, nil
 }
 
 // CommandBuffer holds recorded GPU commands ready for submission.
 // On Rust backend, this wraps go-webgpu/webgpu CommandBuffer.
 type CommandBuffer struct {
-	r         *rwgpu.CommandBuffer
-	submitted bool
+	impl *encoder.CommandBuffer
 }
 
 // Release releases a CommandBuffer that will NOT be submitted to the GPU.
 func (cb *CommandBuffer) Release() {
-	if cb == nil || cb.r == nil {
+	if cb == nil {
 		return
 	}
-	cb.r.Release()
-	cb.r = nil
+	cb.impl.Release()
+}
+
+// encoderRenderPassDescriptor converts a public render pass descriptor to the
+// encoder's handle types.
+func encoderRenderPassDescriptor(desc *RenderPassDescriptor) *encoder.RenderPassDescriptor {
+	if desc == nil {
+		return nil
+	}
+	out := &encoder.RenderPassDescriptor{Label: desc.Label}
+	for _, ca := range desc.ColorAttachments {
+		out.ColorAttachments = append(out.ColorAttachments, encoder.RenderPassColorAttachment{
+			View:          encoderTextureView(ca.View),
+			ResolveTarget: encoderTextureView(ca.ResolveTarget),
+			DepthSlice:    ca.DepthSlice,
+			LoadOp:        ca.LoadOp,
+			StoreOp:       ca.StoreOp,
+			ClearValue:    ca.ClearValue,
+		})
+	}
+	if ds := desc.DepthStencilAttachment; ds != nil {
+		out.DepthStencilAttachment = &encoder.RenderPassDepthStencilAttachment{
+			View:              encoderTextureView(ds.View),
+			DepthLoadOp:       ds.DepthLoadOp,
+			DepthStoreOp:      ds.DepthStoreOp,
+			DepthClearValue:   ds.DepthClearValue,
+			DepthReadOnly:     ds.DepthReadOnly,
+			StencilLoadOp:     ds.StencilLoadOp,
+			StencilStoreOp:    ds.StencilStoreOp,
+			StencilClearValue: ds.StencilClearValue,
+			StencilReadOnly:   ds.StencilReadOnly,
+		}
+	}
+	return out
+}
+
+// encoderComputePassDescriptor converts a public compute pass descriptor.
+func encoderComputePassDescriptor(desc *ComputePassDescriptor) *encoder.ComputePassDescriptor {
+	if desc == nil {
+		return nil
+	}
+	return &encoder.ComputePassDescriptor{Label: desc.Label}
 }

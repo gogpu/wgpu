@@ -720,14 +720,6 @@ type TextureCopy struct {
 	Size        Extent3D
 }
 
-func (t *TextureCopy) toHAL() hal.TextureCopy {
-	return hal.TextureCopy{
-		SrcBase: *t.Source.toHAL(),
-		DstBase: *t.Destination.toHAL(),
-		Size:    t.Size.toHAL(),
-	}
-}
-
 // TextureUsageTransition defines a texture usage state transition.
 type TextureUsageTransition struct {
 	OldUsage gputypes.TextureUsage
@@ -752,42 +744,9 @@ type TextureBarrier struct {
 	Usage   TextureUsageTransition
 }
 
-func (b TextureBarrier) toHAL() hal.TextureBarrier {
-	var t hal.Texture
-	if b.Texture != nil && b.Texture.impl != nil {
-		t = b.Texture.impl.ResolveHAL()
-	}
-	return hal.TextureBarrier{
-		Texture: t,
-		Range: hal.TextureRange{
-			Aspect:          b.Range.Aspect,
-			BaseMipLevel:    b.Range.BaseMipLevel,
-			MipLevelCount:   b.Range.MipLevelCount,
-			BaseArrayLayer:  b.Range.BaseArrayLayer,
-			ArrayLayerCount: b.Range.ArrayLayerCount,
-		},
-		Usage: hal.TextureUsageTransition{
-			OldUsage: b.Usage.OldUsage,
-			NewUsage: b.Usage.NewUsage,
-		},
-	}
-}
-
 // BufferTextureCopy defines a buffer-texture copy region.
 type BufferTextureCopy struct {
 	BufferLayout ImageDataLayout
 	TextureBase  ImageCopyTexture
 	Size         Extent3D
-}
-
-func (c BufferTextureCopy) toHAL() hal.BufferTextureCopy {
-	btc := hal.BufferTextureCopy{
-		BufferLayout: c.BufferLayout.toHAL(),
-		Size:         c.Size.toHAL(),
-	}
-	halTex := c.TextureBase.toHAL()
-	if halTex != nil {
-		btc.TextureBase = *halTex
-	}
-	return btc
 }

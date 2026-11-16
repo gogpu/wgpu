@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/encoder"
 )
 
 // recordingRegistry holds the device's command encoders that are neither
@@ -29,8 +30,8 @@ type recordingRegistry struct {
 
 // recordingSets holds the registry's contents; created on first use.
 type recordingSets struct {
-	encoders map[*CommandEncoder]struct{}
-	buffers  map[*CommandBuffer]struct{}
+	encoders map[*encoder.CommandEncoder]struct{}
+	buffers  map[*encoder.CommandBuffer]struct{}
 }
 
 // setsLocked returns the registry's sets, creating them on first use.
@@ -38,51 +39,51 @@ type recordingSets struct {
 func (r *recordingRegistry) setsLocked() *recordingSets {
 	if r.sets == nil {
 		r.sets = &recordingSets{
-			encoders: make(map[*CommandEncoder]struct{}),
-			buffers:  make(map[*CommandBuffer]struct{}),
+			encoders: make(map[*encoder.CommandEncoder]struct{}),
+			buffers:  make(map[*encoder.CommandBuffer]struct{}),
 		}
 	}
 	return r.sets
 }
 
 // AddEncoder records an encoder that has started recording.
-func (r *recordingRegistry) AddEncoder(e *CommandEncoder) {
+func (r *recordingRegistry) AddEncoder(e *encoder.CommandEncoder) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.setsLocked().encoders[e] = struct{}{}
 }
 
 // RemoveEncoder forgets an encoder that finished or was discarded.
-func (r *recordingRegistry) RemoveEncoder(e *CommandEncoder) {
+func (r *recordingRegistry) RemoveEncoder(e *encoder.CommandEncoder) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.setsLocked().encoders, e)
 }
 
 // AddBuffer records a command buffer awaiting submit or release.
-func (r *recordingRegistry) AddBuffer(cb *CommandBuffer) {
+func (r *recordingRegistry) AddBuffer(cb *encoder.CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.setsLocked().buffers[cb] = struct{}{}
 }
 
 // RemoveBuffer forgets a command buffer that was submitted or released.
-func (r *recordingRegistry) RemoveBuffer(cb *CommandBuffer) {
+func (r *recordingRegistry) RemoveBuffer(cb *encoder.CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.setsLocked().buffers, cb)
 }
 
 // take empties the registry and returns what it held.
-func (r *recordingRegistry) take() ([]*CommandEncoder, []*CommandBuffer) {
+func (r *recordingRegistry) take() ([]*encoder.CommandEncoder, []*encoder.CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	sets := r.setsLocked()
-	encoders := make([]*CommandEncoder, 0, len(sets.encoders))
+	encoders := make([]*encoder.CommandEncoder, 0, len(sets.encoders))
 	for e := range sets.encoders {
 		encoders = append(encoders, e)
 	}
-	buffers := make([]*CommandBuffer, 0, len(sets.buffers))
+	buffers := make([]*encoder.CommandBuffer, 0, len(sets.buffers))
 	for cb := range sets.buffers {
 		buffers = append(buffers, cb)
 	}
@@ -97,4 +98,4 @@ func (r *recordingRegistry) take() ([]*CommandEncoder, []*CommandBuffer) {
 // types (the registry keeps naming them: a legal root -> internal/encoder
 // edge) and the assertion follows that instantiation into the destination; the
 // concrete registry itself moves to internal/device at S11.
-var _ core.EncoderRecordings[*CommandEncoder, *CommandBuffer] = (*recordingRegistry)(nil)
+var _ core.EncoderRecordings[*encoder.CommandEncoder, *encoder.CommandBuffer] = (*recordingRegistry)(nil)

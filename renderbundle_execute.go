@@ -36,7 +36,7 @@ func (p *RenderPassEncoder) executeBundle(bundle *RenderBundle) error {
 		p.encoder.trackBindGroup(group)
 	}
 	for _, buffer := range bundle.buffers {
-		p.encoder.trackBuffer(buffer)
+		p.encoder.trackBuffer(buffer.impl)
 	}
 	if err := bundle.replay(p.core.RawPass()); err != nil {
 		return fmt.Errorf("bundle %q: %w", bundle.label, err)

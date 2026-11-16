@@ -1,6 +1,6 @@
 //go:build rust
 
-package wgpu
+package encoder
 
 import (
 	"errors"
@@ -11,6 +11,9 @@ import (
 // is refused under -tags rust instead of being dropped: go-webgpu does not
 // map depthSlice yet, so the pass would otherwise render into slice 0. A
 // non-nil 0xFFFFFFFF is refused the same way, never read as "undefined".
+//
+// Moved with convertRenderPassDescriptorRust (S4's Move); the descriptors are
+// the encoder domain's handle types.
 func TestConvertRenderPassDescriptorRustDepthSlice(t *testing.T) {
 	for _, v := range []uint32{0, 3, 0xFFFFFFFF} {
 		slice := v
