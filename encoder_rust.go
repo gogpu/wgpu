@@ -17,11 +17,11 @@ type CommandEncoder struct {
 
 // BeginRenderPass begins a render pass.
 func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
-	rp, err := e.impl.BeginRenderPass(encoderRenderPassDescriptor(desc))
+	pass, err := e.impl.BeginRenderPass(encoderRenderPassDescriptor(desc))
 	if err != nil {
 		return nil, err
 	}
-	return &RenderPassEncoder{r: rp}, nil
+	return &RenderPassEncoder{impl: pass}, nil
 }
 
 // BeginComputePass begins a compute pass.

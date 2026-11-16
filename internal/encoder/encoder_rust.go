@@ -28,9 +28,9 @@ func NewCommandEncoder(r *rwgpu.CommandEncoder) *CommandEncoder {
 	return &CommandEncoder{r: r}
 }
 
-// BeginRenderPass begins a render pass and returns the go-webgpu pass object
-// the public RenderPassEncoder records through.
-func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*rwgpu.RenderPassEncoder, error) {
+// BeginRenderPass begins a render pass and returns the pass encoder the public
+// declaration layer wraps.
+func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
 	if e.released {
 		return nil, core.ErrReleased
 	}
@@ -44,7 +44,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*rwgpu.Ren
 		return nil, fmt.Errorf("wgpu: failed to begin render pass: %w", err)
 	}
 
-	return rp, nil
+	return &RenderPassEncoder{r: rp}, nil
 }
 
 // BeginComputePass begins a compute pass and returns the go-webgpu pass object

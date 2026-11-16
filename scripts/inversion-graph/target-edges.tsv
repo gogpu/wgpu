@@ -58,8 +58,7 @@ internal/encoder	internal/core/track	native	N	computepass_native.go:11, encoder_
 internal/pendingwrites	internal/core/track	native	N	pending_writes.go:10
 internal/queue	internal/core/track	native	N	queue_native.go:12
 # --- the indirect draw helpers the encoder's pass encoder declares state for.
-internal/encoder	internal/indirect	rust	N	renderpass_rust.go:10
-internal/encoder	internal/indirect	wasm	N	renderpass_browser.go:8
+internal/encoder	internal/indirect	all	N	renderpass_native.go RangeFits + record sizes 16/20; renderpass_rust.go:121 RecordOffset; renderpass_browser.go:116 RecordOffset
 # --- the pipeline constants the device's rust and browser variants derive state from.
 internal/device	internal/pipeconst	rust	N	device_rust.go:15
 internal/device	internal/pipeconst	wasm	N	device_browser.go:12

@@ -1,12 +1,13 @@
-//go:build rust || (js && wasm)
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
 
-package wgpu
+package indirect
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/gogpu/wgpu/internal/indirect"
-)
+// The delegated-validation-offset test moved here from the root package (S5's
+// Move): the record sizes it exercises live in this package now, and the test
+// runs in every context instead of only where the adapters that use it build.
 
 func TestIndexedIndirectDelegatedValidationOffset(t *testing.T) {
 	tests := []struct {
@@ -41,8 +42,8 @@ func TestIndexedIndirectDelegatedValidationOffset(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := indirect.DelegatedValidationOffset(test.bufferSize, test.offset, drawIndexedIndirectRecordSize, test.drawCount); got != test.want {
-				t.Fatalf("indexedIndirectDelegatedValidationOffset(%d, %d, %d) = %d, want %d", test.bufferSize, test.offset, test.drawCount, got, test.want)
+			if got := DelegatedValidationOffset(test.bufferSize, test.offset, DrawIndexedIndirectRecordSize, test.drawCount); got != test.want {
+				t.Fatalf("DelegatedValidationOffset(%d, %d, %d) = %d, want %d", test.bufferSize, test.offset, test.drawCount, got, test.want)
 			}
 		})
 	}

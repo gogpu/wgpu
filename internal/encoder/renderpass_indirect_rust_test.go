@@ -1,11 +1,13 @@
 //go:build rust
 
-package wgpu
+package encoder
 
 import (
 	"slices"
 	"testing"
 )
+
+// The rust lowering's white-box test moved here with the function (S5's Move).
 
 func TestLowerRustIndexedIndirectInvalidSpanDelegatesOneFailingCall(t *testing.T) {
 	tests := []struct {

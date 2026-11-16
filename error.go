@@ -70,35 +70,40 @@ var (
 //
 // Matches Rust wgpu-core DrawError / DispatchError variants
 // (command/render.rs:542-593, command/compute.rs:278-284).
+//
+// The draw sentinels are internal/core's values: the render pass that returns
+// them now lives in internal/encoder, and binding the same values here keeps
+// errors.Is working through the public API (§15.1). The dispatch sentinels
+// stay local to this package until the compute pass moves (S6).
 var (
 	// ErrDrawMissingPipeline is returned when Draw/DrawIndexed/DrawIndirect is
 	// called before SetPipeline on a render pass encoder.
-	ErrDrawMissingPipeline = errors.New("wgpu: draw called without SetPipeline")
+	ErrDrawMissingPipeline = core.ErrDrawMissingPipeline
 
 	// ErrDrawMissingBindGroup is returned when a draw command is issued but not
 	// all bind groups required by the current pipeline have been set.
-	ErrDrawMissingBindGroup = errors.New("wgpu: draw called with missing bind group")
+	ErrDrawMissingBindGroup = core.ErrDrawMissingBindGroup
 
 	// ErrDrawIncompatibleBindGroup is returned when a draw command is issued but
 	// the bind group set at a slot has an incompatible layout with the pipeline.
-	ErrDrawIncompatibleBindGroup = errors.New("wgpu: draw called with incompatible bind group layout")
+	ErrDrawIncompatibleBindGroup = core.ErrDrawIncompatibleBindGroup
 
 	// ErrDrawMissingVertexBuffer is returned when a draw command is issued but
 	// fewer vertex buffers have been set than the pipeline requires.
-	ErrDrawMissingVertexBuffer = errors.New("wgpu: draw called with insufficient vertex buffers")
+	ErrDrawMissingVertexBuffer = core.ErrDrawMissingVertexBuffer
 
 	// ErrDrawMissingIndexBuffer is returned when DrawIndexed or
 	// DrawIndexedIndirect is called before SetIndexBuffer.
-	ErrDrawMissingIndexBuffer = errors.New("wgpu: DrawIndexed called without SetIndexBuffer")
+	ErrDrawMissingIndexBuffer = core.ErrDrawMissingIndexBuffer
 
 	// ErrDrawMissingBlendConstant is returned when a draw command is issued
 	// but the pipeline uses BlendFactorConstant and SetBlendConstant was not called.
-	ErrDrawMissingBlendConstant = errors.New("wgpu: draw called without SetBlendConstant (pipeline uses constant blend factor)")
+	ErrDrawMissingBlendConstant = core.ErrDrawMissingBlendConstant
 
 	// ErrDrawLateBufferTooSmall is returned when a buffer bound via SetBindGroup
 	// is smaller than the shader-required minimum for a binding whose layout
 	// has MinBindingSize == 0.
-	ErrDrawLateBufferTooSmall = errors.New("wgpu: bound buffer smaller than shader-required minimum")
+	ErrDrawLateBufferTooSmall = core.ErrDrawLateBufferTooSmall
 
 	// ErrDispatchMissingPipeline is returned when Dispatch/DispatchIndirect is
 	// called before SetPipeline on a compute pass encoder.
@@ -123,17 +128,17 @@ var (
 	// ErrDrawIndexFormatMismatch is returned when the index buffer format
 	// does not match the pipeline's StripIndexFormat for strip topologies.
 	// Matches Rust wgpu-core DrawError::UnmatchedIndexFormats (render.rs:576-580).
-	ErrDrawIndexFormatMismatch = errors.New("wgpu: index buffer format does not match pipeline strip index format")
+	ErrDrawIndexFormatMismatch = core.ErrDrawIndexFormatMismatch
 
 	// ErrDrawIndirectBufferUsage is returned when DrawIndirect or
 	// DrawIndexedIndirect is called with a buffer that lacks BufferUsageIndirect.
 	// Matches Rust wgpu-core check_usage(BufferUsages::INDIRECT) (render.rs:2763).
-	ErrDrawIndirectBufferUsage = errors.New("wgpu: indirect draw buffer missing INDIRECT usage")
+	ErrDrawIndirectBufferUsage = core.ErrDrawIndirectBufferUsage
 
 	// ErrDrawIndirectOffsetAlignment is returned when DrawIndirect or
 	// DrawIndexedIndirect is called with an offset that is not 4-byte aligned.
 	// Matches Rust wgpu-core UnalignedIndirectBufferOffset (render.rs:2766).
-	ErrDrawIndirectOffsetAlignment = errors.New("wgpu: indirect draw buffer offset not 4-byte aligned")
+	ErrDrawIndirectOffsetAlignment = core.ErrDrawIndirectOffsetAlignment
 
 	// ErrDispatchIndirectBufferUsage is returned when DispatchIndirect is called
 	// with a buffer that lacks BufferUsageIndirect.
@@ -148,7 +153,7 @@ var (
 	// ErrDrawIndirectBufferOverrun is returned when DrawIndirect or
 	// DrawIndexedIndirect args extend past the end of the buffer.
 	// Matches Rust wgpu-core IndirectBufferOverrun (render.rs:2772-2779).
-	ErrDrawIndirectBufferOverrun = errors.New("wgpu: indirect draw args exceed buffer size")
+	ErrDrawIndirectBufferOverrun = core.ErrDrawIndirectBufferOverrun
 
 	// ErrDispatchIndirectBufferOverrun is returned when DispatchIndirect
 	// args extend past the end of the buffer.

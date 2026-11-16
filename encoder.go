@@ -35,15 +35,7 @@ func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPas
 	if err != nil {
 		return nil, err
 	}
-	pass := &RenderPassEncoder{
-		core:            start.Core,
-		encoder:         e,
-		test:            start.Test,
-		testPass:        start.TestPass,
-		depthReadOnly:   start.DepthReadOnly,
-		stencilReadOnly: start.StencilReadOnly,
-	}
-	return pass, nil
+	return newRenderPassEncoder(start, e), nil
 }
 
 // BeginComputePass begins a compute pass.

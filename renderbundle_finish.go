@@ -9,6 +9,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -24,7 +25,7 @@ const vertexBufferAlignment = 4
 type bundleState struct {
 	device *Device
 	target *renderBundleTarget
-	binder binder
+	binder encoder.Binder
 
 	pipeline          *RenderPipeline
 	vertexBufferCount uint32
@@ -94,8 +95,8 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 	}
 	s.commands = append(s.commands, bundleCommand{kind: bundleSetPipeline, pipeline: pipeline})
 	s.pipeline = pipeline
-	s.binder.updateExpectations(pipeline.impl.BindGroupLayouts())
-	s.binder.updateLateBufferBindingsFromPipeline(pipeline.impl.LateSizedBufferGroups())
+	s.binder.UpdateExpectations(pipeline.impl.BindGroupLayouts())
+	s.binder.UpdateLateBufferBindingsFromPipeline(pipeline.impl.LateSizedBufferGroups())
 	s.keep(pipeline.impl.Ref())
 	return nil
 }
@@ -104,7 +105,7 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 // the binder; nothing is emitted until a draw uses it.
 // Matches Rust bundle.rs set_bind_group.
 func (s *bundleState) setBindGroup(index uint32, group *resource.BindGroup, offsets []uint32) error {
-	if err := validateSetBindGroup("RenderBundleEncoder", index, group, offsets, &s.device.core.Limits); err != nil {
+	if err := encoder.ValidateSetBindGroup("RenderBundleEncoder", index, group, offsets, &s.device.core.Limits); err != nil {
 		return err
 	}
 	if group.IsReleased() {
@@ -116,7 +117,7 @@ func (s *bundleState) setBindGroup(index uint32, group *resource.BindGroup, offs
 	if err := s.scope.MergeBindGroup(group.Usages()); err != nil {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, err)
 	}
-	s.binder.setGroup(index, group, offsets)
+	s.binder.SetGroup(index, group, offsets)
 	s.keepBindGroup(group)
 	return nil
 }
@@ -193,14 +194,14 @@ func (s *bundleState) isReady(method string, indexed bool) error {
 	if s.pipeline == nil {
 		return fmt.Errorf("%s: no pipeline set (call SetPipeline first): %w", method, ErrDrawMissingPipeline)
 	}
-	if err := s.binder.checkCompatibility(); err != nil {
+	if err := s.binder.CheckCompatibility(); err != nil {
 		sentinel := ErrDrawMissingBindGroup
-		if errors.Is(err, errBindGroupIncompatible) {
+		if errors.Is(err, encoder.ErrBindGroupIncompatible) {
 			sentinel = ErrDrawIncompatibleBindGroup
 		}
 		return fmt.Errorf("%s: %w: %w", method, sentinel, err)
 	}
-	if err := s.binder.checkLateBufferBindings(); err != nil {
+	if err := s.binder.CheckLateBufferBindings(); err != nil {
 		return fmt.Errorf("%s: %w: %w", method, ErrDrawLateBufferTooSmall, err)
 	}
 	if s.vertexBufferCount < s.pipeline.impl.RequiredVertexBuffers() {
@@ -249,7 +250,7 @@ func (s *bundleState) drawIndexed(args gputypes.DrawIndexedArgs) error {
 // stale and that the current pipeline uses.
 // Matches Rust bundle.rs State::flush_bindings.
 func (s *bundleState) flushBindings() {
-	s.binder.listValid(s.binder.takeRebindStart(), func(i uint32, group *resource.BindGroup, offsets []uint32) {
+	s.binder.ListValid(s.binder.TakeRebindStart(), func(i uint32, group *resource.BindGroup, offsets []uint32) {
 		s.commands = append(s.commands, bundleCommand{kind: bundleSetBindGroup, slot: i, group: group, offsets: offsets})
 	})
 }

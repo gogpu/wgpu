@@ -11,6 +11,7 @@ package wgpu
 import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/encoder"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -26,6 +27,28 @@ func encoderBuffer(b *Buffer) *resource.Buffer {
 		return &resource.Buffer{}
 	}
 	return b.impl
+}
+
+// encoderBindGroup maps a public bind group wrapper to its resource handle. An
+// absent wrapper and a wrapper without an implementation both stay nil: the
+// pass reports "bind group is nil" for both, exactly as the pre-move check on
+// the wrapper's own impl field did.
+func encoderBindGroup(g *BindGroup) *resource.BindGroup {
+	if g == nil {
+		return nil
+	}
+	return g.impl
+}
+
+// encoderPipeline maps a public pipeline wrapper to its implementation. A
+// zero-value wrapper stays a nil implementation: the pass then reads the zero
+// values it read before the move (those reads are nil-safe), and a nil
+// wrapper never reaches this function — the declaration layer reports it.
+func encoderPipeline(p *RenderPipeline) *pipeline.RenderPipeline {
+	if p == nil {
+		return nil
+	}
+	return p.impl
 }
 
 // encoderTexture maps a public texture wrapper to its resource handle, with

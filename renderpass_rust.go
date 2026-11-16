@@ -3,63 +3,62 @@
 package wgpu
 
 import (
-	"math"
-
-	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/indirect"
+	"github.com/gogpu/wgpu/internal/encoder"
 )
 
 // RenderPassEncoder records draw commands within a render pass.
 // On Rust backend, this wraps go-webgpu/webgpu RenderPassEncoder.
+//
+// The implementation lives in internal/encoder (ADR-070 S5); this declaration
+// is the public surface. The nil-argument guards keep the pre-move contract of
+// a zero-value pass: a nil pipeline, bind group, buffer or blend constant
+// returns before the nil implementation is touched.
 type RenderPassEncoder struct {
-	r        *rwgpu.RenderPassEncoder
-	released bool
+	impl *encoder.RenderPassEncoder
 }
 
 // SetPipeline sets the active render pipeline.
 func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
-	if pipeline == nil || pipeline.impl.R() == nil {
+	if pipeline == nil {
 		return
 	}
-	p.r.SetPipeline(pipeline.impl.R())
+	p.impl.SetPipeline(encoderPipeline(pipeline))
 }
 
 // SetBindGroup sets a bind group for the given index.
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if group == nil || group.impl.Rust() == nil {
+	if group == nil {
 		return
 	}
-	p.r.SetBindGroup(index, group.impl.Rust(), offsets)
+	p.impl.SetBindGroup(index, encoderBindGroup(group), offsets)
 }
 
 // SetVertexBuffer sets a vertex buffer for the given slot.
 // Offset is in bytes.
 func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset uint64) {
-	if buffer == nil || buffer.impl.R() == nil {
+	if buffer == nil {
 		return
 	}
-	// go-webgpu takes (slot, buffer, offset, size). Pass MaxUint64 for "rest of buffer".
-	p.r.SetVertexBuffer(slot, buffer.impl.R(), offset, math.MaxUint64)
+	p.impl.SetVertexBuffer(slot, encoderBuffer(buffer), offset)
 }
 
 // SetIndexBuffer sets the index buffer.
 func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
-	if buffer == nil || buffer.impl.R() == nil {
+	if buffer == nil {
 		return
 	}
-	// go-webgpu takes (buffer, format, offset, size). Pass MaxUint64 for "rest of buffer".
-	p.r.SetIndexBuffer(buffer.impl.R(), format, offset, math.MaxUint64)
+	p.impl.SetIndexBuffer(encoderBuffer(buffer), format, offset)
 }
 
 // SetViewport sets the viewport transformation.
 func (p *RenderPassEncoder) SetViewport(vp gputypes.Viewport) {
-	p.r.SetViewport(vp.X, vp.Y, vp.Width, vp.Height, vp.MinDepth, vp.MaxDepth)
+	p.impl.SetViewport(vp)
 }
 
 // SetScissorRect sets the scissor rectangle for clipping.
 func (p *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
-	p.r.SetScissorRect(rect.X, rect.Y, rect.Width, rect.Height)
+	p.impl.SetScissorRect(rect)
 }
 
 // SetBlendConstant sets the blend constant color.
@@ -67,77 +66,46 @@ func (p *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
 	if color == nil {
 		return
 	}
-	p.r.SetBlendConstant(&rwgpu.Color{
-		R: color.R,
-		G: color.G,
-		B: color.B,
-		A: color.A,
-	})
+	p.impl.SetBlendConstant(color)
 }
 
 // SetStencilReference sets the stencil reference value.
 func (p *RenderPassEncoder) SetStencilReference(reference uint32) {
-	p.r.SetStencilReference(reference)
+	p.impl.SetStencilReference(reference)
 }
 
 // Draw draws primitives.
 func (p *RenderPassEncoder) Draw(args gputypes.DrawArgs) {
-	p.r.Draw(args.VertexCount, args.InstanceCount, args.FirstVertex, args.FirstInstance)
+	p.impl.Draw(args)
 }
 
 // DrawIndexed draws indexed primitives.
 func (p *RenderPassEncoder) DrawIndexed(args gputypes.DrawIndexedArgs) {
-	p.r.DrawIndexed(args.IndexCount, args.InstanceCount, args.FirstIndex, args.BaseVertex, args.FirstInstance)
+	p.impl.DrawIndexed(args)
 }
 
 // DrawIndirect draws primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndirect(buffer *Buffer, offset uint64) {
-	p.MultiDrawIndirect(buffer, offset, 1)
+	p.impl.DrawIndirect(encoderBuffer(buffer), offset)
 }
 
 // MultiDrawIndirect draws consecutive primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) MultiDrawIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
-	if drawCount == 0 {
-		return
-	}
-	if buffer == nil || buffer.impl.R() == nil {
-		return
-	}
-	if !drawIndirectRangeFits(buffer.Size(), offset, drawCount) {
-		p.r.DrawIndirect(buffer.impl.R(), indirect.DelegatedValidationOffset(buffer.Size(), offset, drawIndirectRecordSize, drawCount))
-		return
-	}
-	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := indirect.RecordOffset(offset, drawIndirectRecordSize, i)
-		p.r.DrawIndirect(buffer.impl.R(), recordOffset)
-	}
+	p.impl.MultiDrawIndirect(encoderBuffer(buffer), offset, drawCount)
 }
 
 // DrawIndexedIndirect draws indexed primitives with GPU-generated parameters.
 func (p *RenderPassEncoder) DrawIndexedIndirect(buffer *Buffer, offset uint64) {
-	p.MultiDrawIndexedIndirect(buffer, offset, 1)
+	p.impl.DrawIndexedIndirect(encoderBuffer(buffer), offset)
 }
 
 // MultiDrawIndexedIndirect draws consecutive indexed primitives with
 // GPU-generated parameters.
 func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint64, drawCount uint32) {
-	if drawCount == 0 {
-		return
-	}
-	if buffer == nil || buffer.impl.R() == nil {
-		return
-	}
-	lowerRustIndexedIndirect(buffer.Size(), offset, drawCount, func(recordOffset uint64) {
-		p.r.DrawIndexedIndirect(buffer.impl.R(), recordOffset)
-	})
+	p.impl.MultiDrawIndexedIndirect(encoderBuffer(buffer), offset, drawCount)
 }
 
 // End ends the render pass.
 func (p *RenderPassEncoder) End() error {
-	if p.released {
-		return ErrReleased
-	}
-	p.released = true
-	p.r.End()
-	return nil
+	return p.impl.End()
 }

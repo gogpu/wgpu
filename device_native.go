@@ -891,52 +891,6 @@ func buildDynamicBindings(layoutEntries []gputypes.BindGroupLayoutEntry, entries
 	return bindings
 }
 
-// Unexported sentinel errors for dynamic offset validation, matching Rust
-// wgpu-core's BindError variants. They live with the validation below, which
-// the binder calls and the bind group type does not (ADR-070 §11, S2).
-var (
-	errDynamicOffsetCount       = errors.New("dynamic offset count does not match the bind group's dynamic bindings")
-	errDynamicOffsetUnaligned   = errors.New("dynamic offset is not aligned")
-	errDynamicOffsetOutOfBounds = errors.New("dynamic offset puts the binding past the end of its buffer")
-)
-
-// dynamicOffsetAlignment returns the alignment a dynamic offset of a binding
-// type needs and the name of its limit (Rust buffer_binding_type_alignment).
-// An unset binding type is a uniform buffer, WebGPU's default.
-func dynamicOffsetAlignment(bindingType gputypes.BufferBindingType, limits *gputypes.Limits) (uint32, string) {
-	switch bindingType {
-	case gputypes.BufferBindingTypeStorage, gputypes.BufferBindingTypeReadOnlyStorage:
-		return limits.MinStorageBufferOffsetAlignment, "minStorageBufferOffsetAlignment"
-	default:
-		return limits.MinUniformBufferOffsetAlignment, "minUniformBufferOffsetAlignment"
-	}
-}
-
-// validateDynamicOffsets checks the dynamic offsets given to SetBindGroup:
-// one per dynamic binding, each aligned to the limit of its binding type and
-// keeping the binding inside its buffer. Matches Rust wgpu-core's
-// BindGroup::validate_dynamic_bindings (W3C WebGPU setBindGroup validation).
-func validateDynamicOffsets(index uint32, group *resource.BindGroup, offsets []uint32, limits *gputypes.Limits) error {
-	dynamic := group.DynamicBindings()
-	if len(offsets) != len(dynamic) {
-		return fmt.Errorf("bind group at index %d has %d dynamic binding(s), got %d offset(s): %w",
-			index, len(dynamic), len(offsets), errDynamicOffsetCount)
-	}
-	for i, offset := range offsets {
-		info := &dynamic[i]
-		alignment, limitName := dynamicOffsetAlignment(info.BindingType, limits)
-		if alignment != 0 && offset%alignment != 0 {
-			return fmt.Errorf("bind group at index %d, binding %d: dynamic offset[%d]=%d is not a multiple of %s (%d): %w",
-				index, info.Binding, i, offset, limitName, alignment, errDynamicOffsetUnaligned)
-		}
-		if uint64(offset) > info.MaxDynamicOffset {
-			return fmt.Errorf("bind group at index %d, binding %d: dynamic offset[%d]=%d puts the binding end (%d) past the buffer size %d: %w",
-				index, info.Binding, i, offset, info.BindingEnd+uint64(offset), info.BufferSize, errDynamicOffsetOutOfBounds)
-		}
-	}
-	return nil
-}
-
 // The reference-count constructors and the GC cleanup below live with the
 // device: it installs them on the resources it creates, and the resource types
 // do not call them (ADR-070 §11, S2).

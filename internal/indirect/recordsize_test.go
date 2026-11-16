@@ -1,8 +1,14 @@
-//go:build !rust && !(js && wasm)
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
 
-package wgpu
+package indirect
 
 import "testing"
+
+// The record-size span tests moved here from the root package with the
+// constants they exercise (S5's Move): the render pass's indirect helpers now
+// live in this package, and these tests pin the per-record arithmetic through
+// RangeFits.
 
 func TestIndexedIndirectRangeFits(t *testing.T) {
 	tests := []struct {
@@ -23,8 +29,8 @@ func TestIndexedIndirectRangeFits(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := indexedIndirectRangeFits(test.bufferSize, test.offset, test.drawCount); got != test.want {
-				t.Fatalf("indexedIndirectRangeFits(%d, %d, %d) = %t, want %t", test.bufferSize, test.offset, test.drawCount, got, test.want)
+			if got := RangeFits(test.bufferSize, test.offset, DrawIndexedIndirectRecordSize, test.drawCount); got != test.want {
+				t.Fatalf("RangeFits(%d, %d, DrawIndexedIndirectRecordSize, %d) = %t, want %t", test.bufferSize, test.offset, test.drawCount, got, test.want)
 			}
 		})
 	}
@@ -41,13 +47,13 @@ func BenchmarkIndexedIndirectRangeFitsCountN(b *testing.B) {
 func benchmarkIndexedIndirectRangeFits(b *testing.B, drawCount uint32) {
 	b.ReportAllocs()
 	var fits bool
-	bufferSize := uint64(drawCount)*indexedIndirectRecordSize + 4
+	bufferSize := uint64(drawCount)*DrawIndexedIndirectRecordSize + 4
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fits = indexedIndirectRangeFits(bufferSize, 4, drawCount)
+		fits = RangeFits(bufferSize, 4, DrawIndexedIndirectRecordSize, drawCount)
 	}
 	b.StopTimer()
 	if !fits {
-		b.Fatal("indexedIndirectRangeFits rejected a valid range")
+		b.Fatal("RangeFits rejected a valid range")
 	}
 }

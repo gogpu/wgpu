@@ -22,14 +22,14 @@ func NewCommandEncoder(b *browser.CommandEncoder) *CommandEncoder {
 	return &CommandEncoder{browser: b}
 }
 
-// BeginRenderPass begins a render pass and returns the browser pass object the
-// public RenderPassEncoder records through.
-func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*browser.RenderPassEncoder, error) {
+// BeginRenderPass begins a render pass and returns the pass encoder the public
+// declaration layer wraps.
+func (e *CommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*RenderPassEncoder, error) {
 	if e.released {
 		return nil, resource.ErrReleased
 	}
 	jsDesc := buildRenderPassDescriptorJS(desc)
-	return e.browser.BeginRenderPass(jsDesc), nil
+	return &RenderPassEncoder{browser: e.browser.BeginRenderPass(jsDesc)}, nil
 }
 
 // BeginComputePass begins a compute pass and returns the browser pass object

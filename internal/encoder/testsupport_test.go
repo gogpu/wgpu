@@ -3,6 +3,7 @@
 package encoder
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -143,4 +144,41 @@ func newTestTextureView(t *testing.T, device *core.Device, view testDeviceView, 
 		Format: gputypes.TextureFormatRGBA8Unorm,
 		Aspect: gputypes.TextureAspectAll,
 	})
+}
+
+// testDeviceHost is the DeviceHost seam the pass tests call. Only Features is
+// read by the render pass; the other seam methods are never called by it.
+type testDeviceHost struct{ features gputypes.Features }
+
+var _ DeviceHost = testDeviceHost{}
+
+func (testDeviceHost) Recordings() core.EncoderRecordings[*CommandEncoder, *CommandBuffer] {
+	return nil
+}
+func (testDeviceHost) EncoderPool() core.HalEncoderPool { return nil }
+func (testDeviceHost) NewStencilUpload(*resource.Texture, uint32, gputypes.Origin3D, gputypes.Extent3D) (Upload, error) {
+	return nil, errTestNoStencilUpload
+}
+func (h testDeviceHost) Features() gputypes.Features { return h.features }
+
+// errTestNoStencilUpload is what the fixture host answers for a stencil
+// upload: the pass tests never create one.
+var errTestNoStencilUpload = errors.New("test device host: no stencil upload")
+
+// newTestResourceBuffer builds a buffer with a valid core buffer and a
+// reference count, for the pass validation fixtures.
+func newTestResourceBuffer(t *testing.T, device *core.Device, view testDeviceView, size uint64, usage gputypes.BufferUsage, label string) *resource.Buffer {
+	t.Helper()
+	coreBuf := core.NewBuffer(testHALBuffer{}, device, usage, size, label)
+	coreBuf.Ref = core.NewResourceRef("Buffer:"+label, coreBuf.Destroy)
+	t.Cleanup(coreBuf.Destroy)
+	return resource.NewBuffer(coreBuf, view)
+}
+
+// newTestIndirectPass returns a pass encoder over a device host with features
+// and no core pass: the indirect draw validation paths read the features and
+// the deferred-error sink only.
+func newTestIndirectPass(features gputypes.Features) (*RenderPassEncoder, *CommandEncoder) {
+	enc := &CommandEncoder{device: testDeviceHost{features: features}}
+	return &RenderPassEncoder{encoder: enc, pipelineSet: true}, enc
 }

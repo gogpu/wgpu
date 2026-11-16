@@ -1,6 +1,6 @@
 //go:build js && wasm
 
-package wgpu
+package encoder
 
 import (
 	"slices"
@@ -10,6 +10,10 @@ import (
 	"github.com/gogpu/wgpu/internal/browser"
 	"github.com/gogpu/wgpu/internal/resource"
 )
+
+// The browser indirect-draw white-box test moved here with the pass (S5's
+// Move): it constructs the destination's pass over a JS object directly, with
+// no root wrapper in the way.
 
 func TestBrowserDrawIndexedIndirectInvalidSpanDelegatesOneFailingCall(t *testing.T) {
 	tests := []struct {
@@ -40,12 +44,12 @@ func TestBrowserDrawIndexedIndirectInvalidSpanDelegatesOneFailingCall(t *testing
 			rawBuffer := js.Global().Get("Object").New()
 			rawBuffer.Set("size", float64(test.bufferSize))
 			rawBuffer.Set("usage", 0)
-			buffer := &Buffer{impl: resource.NewBufferBrowser(
+			buffer := resource.NewBufferBrowser(
 				browser.NewBuffer(rawBuffer),
 				uint64(test.bufferSize),
 				0,
 				resource.MapStateUnmapped,
-			)}
+			)
 
 			pass.MultiDrawIndexedIndirect(buffer, test.offset, test.drawCount)
 

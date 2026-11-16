@@ -300,3 +300,17 @@ func NewSamplerFromHALForTest(halSampler hal.Sampler, device *Device) *Sampler {
 
 // DeviceHalDeviceForTest returns the HAL device behind d.
 func DeviceHalDeviceForTest(d *Device) hal.Device { return d.halDevice() }
+
+// SetPassStateForTest seeds the render pass state the ExecuteBundles test
+// asserts on: a pipeline is considered set and the binder holds one group at
+// slot 0 with its expected layout. The state lives in internal/encoder after
+// the S5 Move; the hook is one delegation.
+func (p *RenderPassEncoder) SetPassStateForTest(layout *resource.BindGroupLayout, group *resource.BindGroup) {
+	p.impl.SetPassStateForTest(layout, group)
+}
+
+// PassStateForTest reports the three fields ExecuteBundles resets: the
+// pipeline flag, the active group at slot 0 and the layout assigned at slot 0.
+func (p *RenderPassEncoder) PassStateForTest() (pipelineSet bool, activeGroup *resource.BindGroup, assignedLayout *resource.BindGroupLayout) {
+	return p.impl.PassStateForTest()
+}
