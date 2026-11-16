@@ -75,7 +75,7 @@ func (r *bundleTestRig) beginPass(t *testing.T, color bool) (*CommandEncoder, *R
 func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*resource.BindGroupLayout) *RenderPipeline {
 	return &RenderPipeline{
 		hal:              &testHALResource{},
-		device:           r.device,
+		device:           r.device.seamView(),
 		bindGroupLayouts: layouts,
 		passContext:      core.RenderPassContext{ColorFormats: formats, SampleCount: 1},
 		ref:              core.NewResourceRef("RenderPipeline:test", nil),

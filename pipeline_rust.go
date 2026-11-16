@@ -14,7 +14,6 @@ type LateSizedBufferGroup struct {
 // On Rust backend, this wraps go-webgpu/webgpu RenderPipeline.
 type RenderPipeline struct {
 	r        *rwgpu.RenderPipeline
-	device   *Device
 	released bool
 }
 
@@ -33,7 +32,6 @@ func (p *RenderPipeline) Release() {
 // On Rust backend, this wraps go-webgpu/webgpu ComputePipeline.
 type ComputePipeline struct {
 	r        *rwgpu.ComputePipeline
-	device   *Device
 	released bool
 }
 

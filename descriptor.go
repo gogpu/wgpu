@@ -329,6 +329,16 @@ func (s StencilFaceState) toHAL() hal.StencilFaceState {
 	return hal.StencilFaceState{Compare: s.Compare, FailOp: s.FailOp, DepthFailOp: s.DepthFailOp, PassOp: s.PassOp}
 }
 
+// keepsStencil reports whether the face keeps the stencil value whether the
+// stencil or the depth test passes or fails. The zero operation is WebGPU's
+// default, keep. Matches Rust wgpu-types StencilFaceState::is_read_only.
+func (s StencilFaceState) keepsStencil() bool {
+	keep := func(op gputypes.StencilOperation) bool {
+		return op == gputypes.StencilOperationKeep || op == gputypes.StencilOperationUndefined
+	}
+	return keep(s.FailOp) && keep(s.DepthFailOp) && keep(s.PassOp)
+}
+
 // DepthStencilState describes depth and stencil testing configuration.
 type DepthStencilState struct {
 	Format            gputypes.TextureFormat

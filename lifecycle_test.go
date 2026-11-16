@@ -175,7 +175,7 @@ func TestRenderPipeline_ReleaseUsesRefDrop(t *testing.T) {
 		t.Fatalf("CreateRenderPipeline: %v", err)
 	}
 
-	ref := pipeline.TestRef()
+	ref := wgpu.RenderPipelineTestRef(pipeline)
 	if ref == nil {
 		t.Fatal("RenderPipeline should have a non-nil ResourceRef")
 	}
@@ -234,7 +234,7 @@ func TestComputePipeline_ReleaseUsesRefDrop(t *testing.T) {
 		t.Skipf("CreateComputePipeline not supported: %v", err)
 	}
 
-	ref := pipeline.TestRef()
+	ref := wgpu.ComputePipelineTestRef(pipeline)
 	if ref == nil {
 		t.Fatal("ComputePipeline should have a non-nil ResourceRef")
 	}
@@ -402,7 +402,7 @@ func TestMixedResourceLifecycle_TrackedSubmission(t *testing.T) {
 	}
 
 	bgRef := wgpu.BindGroupTestRef(bg)
-	rpRef := pipeline.TestRef()
+	rpRef := wgpu.RenderPipelineTestRef(pipeline)
 
 	// Simulate encoding: Clone refs for the submission.
 	bgRef.Clone()

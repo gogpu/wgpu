@@ -79,7 +79,7 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 	if pipeline.released {
 		return fmt.Errorf("SetPipeline: pipeline: %w", ErrReleased)
 	}
-	if pipeline.device != s.device {
+	if pipeline.device != s.device.seamView() {
 		return fmt.Errorf("SetPipeline: pipeline: %w", errBundleDevice)
 	}
 	if err := s.target.context.CheckCompatible(&pipeline.passContext, refLabel(pipeline.ref)); err != nil {

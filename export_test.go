@@ -11,17 +11,20 @@ import (
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
-// SetTestRequiredVertexBuffers sets the requiredVertexBuffers field for testing.
-// This method is only available in test builds.
-func (p *RenderPipeline) SetTestRequiredVertexBuffers(count uint32) {
+// SetTestRenderPipelineRequiredVertexBuffers sets the requiredVertexBuffers
+// field of a RenderPipeline for testing. A free function rather than a method
+// for the reason BindGroupTestRef is one (ADR-070 §11 grain note): a test-only
+// method of a type that moves to an extraction package cannot stay behind,
+// while a function over the type can.
+func SetTestRenderPipelineRequiredVertexBuffers(p *RenderPipeline, count uint32) {
 	p.requiredVertexBuffers = count
 }
 
-// TestRef returns the ResourceRef for a RenderPipeline (testing only).
-func (p *RenderPipeline) TestRef() *core.ResourceRef { return p.ref }
+// RenderPipelineTestRef returns the ResourceRef for a RenderPipeline (testing only).
+func RenderPipelineTestRef(p *RenderPipeline) *core.ResourceRef { return p.ref }
 
-// TestRef returns the ResourceRef for a ComputePipeline (testing only).
-func (p *ComputePipeline) TestRef() *core.ResourceRef { return p.ref }
+// ComputePipelineTestRef returns the ResourceRef for a ComputePipeline (testing only).
+func ComputePipelineTestRef(p *ComputePipeline) *core.ResourceRef { return p.ref }
 
 // BindGroupTestRef returns the ResourceRef for a BindGroup (testing only).
 // It is a free function rather than a method: a test-only method of a type that
@@ -107,8 +110,9 @@ func testBindGroupLayoutImpl(l *BindGroupLayout) *resource.BindGroupLayout {
 	return l.impl
 }
 
-// SetTestBindGroupLayouts sets the bindGroupLayouts field on a RenderPipeline for testing.
-func (p *RenderPipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
+// SetTestRenderPipelineBindGroupLayouts sets the bindGroupLayouts field on a
+// RenderPipeline for testing. A free function for the reason BindGroupTestRef is one.
+func SetTestRenderPipelineBindGroupLayouts(p *RenderPipeline, layouts []*BindGroupLayout) {
 	impls := make([]*resource.BindGroupLayout, len(layouts))
 	for i, l := range layouts {
 		impls[i] = testBindGroupLayoutImpl(l)
@@ -117,8 +121,9 @@ func (p *RenderPipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
 	p.bindGroupCount = uint32(len(impls))
 }
 
-// SetTestBindGroupLayouts sets the bindGroupLayouts field on a ComputePipeline for testing.
-func (p *ComputePipeline) SetTestBindGroupLayouts(layouts []*BindGroupLayout) {
+// SetTestComputePipelineBindGroupLayouts sets the bindGroupLayouts field on a
+// ComputePipeline for testing. A free function for the reason BindGroupTestRef is one.
+func SetTestComputePipelineBindGroupLayouts(p *ComputePipeline, layouts []*BindGroupLayout) {
 	impls := make([]*resource.BindGroupLayout, len(layouts))
 	for i, l := range layouts {
 		impls[i] = testBindGroupLayoutImpl(l)
@@ -145,9 +150,11 @@ func SetTestBindGroupLayout(g *BindGroup, layout *BindGroupLayout) {
 	g.impl = resource.NewBindGroup(init)
 }
 
-// SetTestStripIndexFormat sets the stripIndexFormat field on a RenderPipeline for testing.
-// Pass nil for non-strip topologies, or a pointer to the expected IndexFormat for strip topologies.
-func (p *RenderPipeline) SetTestStripIndexFormat(format *gputypes.IndexFormat) {
+// SetTestRenderPipelineStripIndexFormat sets the stripIndexFormat field on a
+// RenderPipeline for testing. Pass nil for non-strip topologies, or a pointer to
+// the expected IndexFormat for strip topologies. A free function for the reason
+// BindGroupTestRef is one.
+func SetTestRenderPipelineStripIndexFormat(p *RenderPipeline, format *gputypes.IndexFormat) {
 	p.stripIndexFormat = format
 }
 

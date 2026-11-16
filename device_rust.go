@@ -314,7 +314,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 		return nil, fmt.Errorf("wgpu: failed to create render pipeline: %w", err)
 	}
 
-	return &RenderPipeline{r: rp, device: d}, nil
+	return &RenderPipeline{r: rp}, nil
 }
 
 // errRustConstantsUnmapped is returned for a programmable stage with pipeline
@@ -380,7 +380,7 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 		return nil, fmt.Errorf("wgpu: failed to create compute pipeline: %w", err)
 	}
 
-	return &ComputePipeline{r: rp, device: d}, nil
+	return &ComputePipeline{r: rp}, nil
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.

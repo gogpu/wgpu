@@ -1073,7 +1073,7 @@ func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPi
 	passContext, writesDepth, writesStencil := renderPipelineTargets(desc)
 	return &RenderPipeline{
 		hal:                   halPipeline,
-		device:                d,
+		device:                d.seamView(),
 		bindGroupCount:        bgCount,
 		bindGroupLayouts:      bgLayouts,
 		requiredVertexBuffers: uint32(len(desc.Vertex.Buffers)), //nolint:gosec // buffer count fits uint32
@@ -1142,6 +1142,75 @@ func mergeShaderBindingSizes(vertex, fragment map[ir.ResourceBinding]uint64) map
 		}
 	}
 	return result
+}
+
+// makeLateSizedBufferGroups generates late-sized buffer group info for a pipeline
+// from the shader binding sizes and the pipeline layout. For each bind group layout,
+// filters entries to those with MinBindingSize == 0 (buffer type), and records the
+// shader-required size for each.
+//
+// Equivalent to Rust wgpu-core's Device::make_late_sized_buffer_groups (resource.rs:2413-2448).
+func makeLateSizedBufferGroups(
+	shaderBindingSizes map[ir.ResourceBinding]uint64,
+	layouts []*resource.BindGroupLayout,
+) [MaxBindGroups]LateSizedBufferGroup {
+	var groups [MaxBindGroups]LateSizedBufferGroup
+
+	for groupIdx, bgl := range layouts {
+		if bgl == nil {
+			continue
+		}
+		var sizes []uint64
+		for _, entry := range bgl.Entries() {
+			if entry.Buffer == nil || entry.Buffer.MinBindingSize != 0 {
+				continue
+			}
+			// This is a buffer entry with MinBindingSize == 0 —
+			// validation is deferred to draw/dispatch time.
+			rb := ir.ResourceBinding{
+				Group:   uint32(groupIdx),
+				Binding: entry.Binding,
+			}
+			shaderSize := shaderBindingSizes[rb] // 0 if not found
+			sizes = append(sizes, shaderSize)
+		}
+		groups[groupIdx] = LateSizedBufferGroup{ShaderSizes: sizes}
+	}
+
+	return groups
+}
+
+// renderPipelineTargets returns the attachment configuration a render
+// pipeline renders to and whether it writes depth or stencil.
+// Matches Rust wgpu-core Device::create_render_pipeline (pass_context and
+// the WRITES_DEPTH / WRITES_STENCIL flags).
+func renderPipelineTargets(desc *RenderPipelineDescriptor) (ctx core.RenderPassContext, writesDepth, writesStencil bool) {
+	ctx.SampleCount = max(desc.Multisample.Count, 1)
+	if desc.Fragment != nil {
+		ctx.ColorFormats = make([]gputypes.TextureFormat, len(desc.Fragment.Targets))
+		for i := range desc.Fragment.Targets {
+			ctx.ColorFormats[i] = desc.Fragment.Targets[i].Format
+		}
+	}
+	ds := desc.DepthStencil
+	if ds == nil {
+		return ctx, false, false
+	}
+	ctx.DepthStencilFormat = ds.Format
+	return ctx, ds.DepthWriteEnabled, !stencilReadOnly(ds, desc.Primitive.CullMode)
+}
+
+// stencilReadOnly reports whether a depth/stencil state never writes the
+// stencil aspect: no write mask, or every face that is not culled keeps the
+// stencil value on every outcome.
+// Matches Rust wgpu-types StencilState::is_read_only.
+func stencilReadOnly(ds *DepthStencilState, cull gputypes.CullMode) bool {
+	if ds.StencilWriteMask == 0 {
+		return true
+	}
+	front := cull == gputypes.CullModeFront || ds.StencilFront.keepsStencil()
+	back := cull == gputypes.CullModeBack || ds.StencilBack.keepsStencil()
+	return front && back
 }
 
 // CreateComputePipeline creates a compute pipeline.
@@ -1228,7 +1297,6 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 
 	return &ComputePipeline{
 		hal:                   halPipeline,
-		device:                d,
 		bindGroupCount:        bgCount,
 		bindGroupLayouts:      bgLayouts,
 		lateSizedBufferGroups: lateGroups,

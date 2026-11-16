@@ -4,7 +4,6 @@ package wgpu
 
 import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -21,46 +20,14 @@ type LateSizedBufferGroup struct {
 	ShaderSizes []uint64
 }
 
-// makeLateSizedBufferGroups generates late-sized buffer group info for a pipeline
-// from the shader binding sizes and the pipeline layout. For each bind group layout,
-// filters entries to those with MinBindingSize == 0 (buffer type), and records the
-// shader-required size for each.
-//
-// Equivalent to Rust wgpu-core's Device::make_late_sized_buffer_groups (resource.rs:2413-2448).
-func makeLateSizedBufferGroups(
-	shaderBindingSizes map[ir.ResourceBinding]uint64,
-	layouts []*resource.BindGroupLayout,
-) [MaxBindGroups]LateSizedBufferGroup {
-	var groups [MaxBindGroups]LateSizedBufferGroup
-
-	for groupIdx, bgl := range layouts {
-		if bgl == nil {
-			continue
-		}
-		var sizes []uint64
-		for _, entry := range bgl.Entries() {
-			if entry.Buffer == nil || entry.Buffer.MinBindingSize != 0 {
-				continue
-			}
-			// This is a buffer entry with MinBindingSize == 0 —
-			// validation is deferred to draw/dispatch time.
-			rb := ir.ResourceBinding{
-				Group:   uint32(groupIdx),
-				Binding: entry.Binding,
-			}
-			shaderSize := shaderBindingSizes[rb] // 0 if not found
-			sizes = append(sizes, shaderSize)
-		}
-		groups[groupIdx] = LateSizedBufferGroup{ShaderSizes: sizes}
-	}
-
-	return groups
-}
-
 // RenderPipeline represents a configured render pipeline.
 type RenderPipeline struct {
-	hal      hal.RenderPipeline
-	device   *Device
+	hal hal.RenderPipeline
+	// device is the device view the pipeline was created on. The render bundle
+	// checks it against its own device before recording the pipeline, so a
+	// pipeline of another device is rejected (ADR-070 §15.3: view identity is
+	// device identity, one cached view per Device).
+	device   core.DeviceView
 	released bool
 	// bindGroupCount is the number of bind group layouts in this pipeline's
 	// layout. Used by RenderPassEncoder.SetBindGroup to validate that
@@ -86,7 +53,7 @@ type RenderPipeline struct {
 	// lateSizedBufferGroups holds shader-required minimum sizes for buffer bindings
 	// whose layout has MinBindingSize == 0. Validated at draw time.
 	// Matches Rust wgpu-core RenderPipeline.late_sized_buffer_groups.
-	lateSizedBufferGroups [MaxBindGroups]LateSizedBufferGroup
+	lateSizedBufferGroups [core.MaxBindGroups]LateSizedBufferGroup
 	// passContext holds the color target formats, the depth/stencil format
 	// and the sample count the pipeline renders to. A render bundle checks
 	// it against its own formats at SetPipeline.
@@ -100,49 +67,6 @@ type RenderPipeline struct {
 	// ref is the GPU-aware reference counter for this pipeline (Phase 2).
 	// Clone'd when used in a render pass, Drop'd when GPU completes submission.
 	ref *core.ResourceRef
-}
-
-// renderPipelineTargets returns the attachment configuration a render
-// pipeline renders to and whether it writes depth or stencil.
-// Matches Rust wgpu-core Device::create_render_pipeline (pass_context and
-// the WRITES_DEPTH / WRITES_STENCIL flags).
-func renderPipelineTargets(desc *RenderPipelineDescriptor) (ctx core.RenderPassContext, writesDepth, writesStencil bool) {
-	ctx.SampleCount = max(desc.Multisample.Count, 1)
-	if desc.Fragment != nil {
-		ctx.ColorFormats = make([]gputypes.TextureFormat, len(desc.Fragment.Targets))
-		for i := range desc.Fragment.Targets {
-			ctx.ColorFormats[i] = desc.Fragment.Targets[i].Format
-		}
-	}
-	ds := desc.DepthStencil
-	if ds == nil {
-		return ctx, false, false
-	}
-	ctx.DepthStencilFormat = ds.Format
-	return ctx, ds.DepthWriteEnabled, !stencilReadOnly(ds, desc.Primitive.CullMode)
-}
-
-// stencilReadOnly reports whether a depth/stencil state never writes the
-// stencil aspect: no write mask, or every face that is not culled keeps the
-// stencil value on every outcome.
-// Matches Rust wgpu-types StencilState::is_read_only.
-func stencilReadOnly(ds *DepthStencilState, cull gputypes.CullMode) bool {
-	if ds.StencilWriteMask == 0 {
-		return true
-	}
-	front := cull == gputypes.CullModeFront || ds.StencilFront.keepsStencil()
-	back := cull == gputypes.CullModeBack || ds.StencilBack.keepsStencil()
-	return front && back
-}
-
-// keepsStencil reports whether the face keeps the stencil value whether the
-// stencil or the depth test passes or fails. The zero operation is WebGPU's
-// default, keep. Matches Rust wgpu-types StencilFaceState::is_read_only.
-func (s StencilFaceState) keepsStencil() bool {
-	keep := func(op gputypes.StencilOperation) bool {
-		return op == gputypes.StencilOperationKeep || op == gputypes.StencilOperationUndefined
-	}
-	return keep(s.FailOp) && keep(s.DepthFailOp) && keep(s.PassOp)
 }
 
 // Release drops the application's ownership reference to the render pipeline.
@@ -165,7 +89,6 @@ func (p *RenderPipeline) Release() {
 // ComputePipeline represents a configured compute pipeline.
 type ComputePipeline struct {
 	hal      hal.ComputePipeline
-	device   *Device
 	released bool
 	// bindGroupCount is the number of bind group layouts in this pipeline's
 	// layout. Used by ComputePassEncoder.SetBindGroup to validate that
@@ -177,7 +100,7 @@ type ComputePipeline struct {
 	// lateSizedBufferGroups holds shader-required minimum sizes for buffer bindings
 	// whose layout has MinBindingSize == 0. Validated at dispatch time.
 	// Matches Rust wgpu-core ComputePipeline.late_sized_buffer_groups.
-	lateSizedBufferGroups [MaxBindGroups]LateSizedBufferGroup
+	lateSizedBufferGroups [core.MaxBindGroups]LateSizedBufferGroup
 	// ref is the GPU-aware reference counter for this pipeline (Phase 2).
 	// Clone'd when used in a compute pass, Drop'd when GPU completes submission.
 	ref *core.ResourceRef
