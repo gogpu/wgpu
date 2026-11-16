@@ -3,6 +3,8 @@
 package wgpu
 
 import (
+	"fmt"
+
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
@@ -95,6 +97,18 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 // Resource barriers are computed from the texture's tracked CurrentUsage().
 // For GLES/Software backends, the write is performed immediately via HAL.
 func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
+	// A public Texture with no implementation handle (a Go zero value) keeps
+	// its pre-move answer: the released check ran through the wrapper's handle
+	// and reported ErrReleased, and the mirror conversion must not route it to
+	// the destination's nil-texture error. The queue's own guard comes first,
+	// exactly as before the move: without a HAL queue the queue/destination
+	// error wins whatever the destination is.
+	if dst != nil && dst.Texture != nil && dst.Texture.impl == nil {
+		if q.impl == nil || q.impl.HALQueue() == nil {
+			return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
+		}
+		return ErrReleased
+	}
 	return q.impl.WriteTexture(queueImageCopyTexture(dst), data, queueImageDataLayout(layout), queueExtent3D(size))
 }
 
