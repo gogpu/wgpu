@@ -3,6 +3,8 @@ package wgpu
 import (
 	"errors"
 	"testing"
+
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // The descriptor field exists on every build (native, -tags rust, js/wasm):
@@ -122,5 +124,46 @@ func TestDisplayHandleLegacySurfaceTarget(t *testing.T) {
 	got, ok = DisplayHandleFromXlib(dpy).legacySurfaceTarget(dpy, win)
 	if !ok || got != SurfaceTargetFromXlibWindow(dpy, win) {
 		t.Fatalf("Xlib display routed to %+v (ok=%v), want an Xlib window target", got, ok)
+	}
+}
+
+// TestDisplaySurfaceMirrorKinds pins the numeric contract between the root
+// kind constants and internal/surface's mirrors: the public declaration layer
+// casts between them field by field, so a renumbering on either side must fail
+// here rather than silently reinterpreting a target.
+func TestDisplaySurfaceMirrorKinds(t *testing.T) {
+	displayKinds := []struct {
+		name   string
+		root   displayKind
+		mirror surface.DisplayKind
+	}{
+		{"none", displayKindNone, surface.DisplayKindNone},
+		{"xlib", displayKindXlib, surface.DisplayKindXlib},
+		{"wayland", displayKindWayland, surface.DisplayKindWayland},
+	}
+	for _, kind := range displayKinds {
+		if uint8(kind.root) != uint8(kind.mirror) {
+			t.Errorf("display kind %s: root %d != mirror %d", kind.name, kind.root, kind.mirror)
+		}
+	}
+
+	targetKinds := []struct {
+		name   string
+		root   surfaceTargetKind
+		mirror surface.TargetKind
+	}{
+		{"invalid", surfaceTargetInvalid, surface.TargetInvalid},
+		{"headless", surfaceTargetHeadless, surface.TargetHeadless},
+		{"windows hwnd", surfaceTargetWindowsHWND, surface.TargetWindowsHWND},
+		{"xlib window", surfaceTargetXlibWindow, surface.TargetXlibWindow},
+		{"wayland surface", surfaceTargetWaylandSurface, surface.TargetWaylandSurface},
+		{"android window", surfaceTargetAndroidNativeWindow, surface.TargetAndroidNativeWindow},
+		{"metal layer", surfaceTargetMetalLayer, surface.TargetMetalLayer},
+		{"web canvas", surfaceTargetWebCanvasID, surface.TargetWebCanvasID},
+	}
+	for _, kind := range targetKinds {
+		if uint8(kind.root) != uint8(kind.mirror) {
+			t.Errorf("target kind %s: root %d != mirror %d", kind.name, kind.root, kind.mirror)
+		}
 	}
 }

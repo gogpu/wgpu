@@ -125,16 +125,10 @@ const (
 	ErrorFilterInternal ErrorFilter = 2
 )
 
-// String returns a human-readable name for the error filter.
+// String returns a human-readable name for the error filter. The text table
+// lives in internal/core, keyed by the ErrorFilter constants, and serves both
+// builds that declare this type (native and rust); the texts are identical, so
+// one table serves both.
 func (f ErrorFilter) String() string {
-	switch f {
-	case ErrorFilterValidation:
-		return "Validation"
-	case ErrorFilterOutOfMemory:
-		return "OutOfMemory"
-	case ErrorFilterInternal:
-		return "Internal"
-	default:
-		return fmt.Sprintf("ErrorFilter(%d)", int(f))
-	}
+	return core.ErrorFilter(f).String()
 }

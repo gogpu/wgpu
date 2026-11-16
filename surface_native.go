@@ -205,29 +205,14 @@ func surfaceTargetFromLegacyHandles(display DisplayHandle, displayHandle, window
 
 // surfaceTargetFromLegacyHandlesForPlatform maps legacy handles to a typed
 // target. On Linux an instance Display decides between Xlib and Wayland;
-// without one, the WAYLAND_DISPLAY environment does.
+// without one, the WAYLAND_DISPLAY environment does. The mapping lives in
+// internal/surface; this is the public declaration layer.
 func surfaceTargetFromLegacyHandlesForPlatform(goos, waylandDisplay string, display DisplayHandle, displayHandle, windowHandle uintptr) SurfaceTargetUnsafe {
-	switch goos {
-	case platformWindows:
-		return SurfaceTargetFromWindowsHWND(displayHandle, windowHandle)
-	case platformDarwin:
-		return SurfaceTargetFromMetalLayer(windowHandle)
-	case platformLinux:
-		if target, ok := display.legacySurfaceTarget(displayHandle, windowHandle); ok {
-			return target
-		}
-		if waylandDisplay != "" {
-			return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle)
-		}
-		return SurfaceTargetFromXlibWindow(displayHandle, windowHandle)
-	case platformAndroid:
-		return SurfaceTargetFromAndroidNativeWindow(windowHandle)
-	default:
-		return SurfaceTargetUnsafe{
-			kind:          surfaceTargetInvalid,
-			displayHandle: displayHandle,
-			windowHandle:  windowHandle,
-		}
+	mirror := surface.TargetFromLegacyHandles(goos, waylandDisplay, displayMirror(display), displayHandle, windowHandle)
+	return SurfaceTargetUnsafe{
+		kind:          surfaceTargetKind(mirror.Kind),
+		displayHandle: mirror.Display,
+		windowHandle:  mirror.Window,
 	}
 }
 

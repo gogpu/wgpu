@@ -28,18 +28,23 @@ const (
 	ErrorFilterInternal
 )
 
+// errorFilterNames lists the text of each ErrorFilter constant, keyed by the
+// constant it names: the enum's text comes from the enum, never a switch
+// returning literals. The public ErrorFilter in the root package delegates
+// here on both builds that declare it (native and rust), so the two contexts
+// cannot drift apart.
+var errorFilterNames = [...]string{
+	ErrorFilterValidation:  "Validation",
+	ErrorFilterOutOfMemory: "OutOfMemory",
+	ErrorFilterInternal:    "Internal",
+}
+
 // String returns a human-readable name for the error filter.
 func (f ErrorFilter) String() string {
-	switch f {
-	case ErrorFilterValidation:
-		return "Validation"
-	case ErrorFilterOutOfMemory:
-		return "OutOfMemory"
-	case ErrorFilterInternal:
-		return "Internal"
-	default:
-		return fmt.Sprintf("ErrorFilter(%d)", int(f))
+	if f >= 0 && f < ErrorFilter(len(errorFilterNames)) {
+		return errorFilterNames[f]
 	}
+	return fmt.Sprintf("ErrorFilter(%d)", int(f))
 }
 
 // GPUError represents a captured GPU error from an error scope.

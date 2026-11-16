@@ -23,7 +23,7 @@ const benchmarkFinishBatch = 1024
 var benchFinishCommandBuffer *wgpu.CommandBuffer
 
 // BenchmarkEncoderFinish measures one public CommandEncoder.Finish call: the
-// encoder's state transition, the recorded command stream's finalisation and
+// encoder's state transition, the recorded command stream's finalization and
 // the command buffer's construction. It completes the committed coverage of
 // ADR-070 §15.7's three hot paths — Submit (BenchmarkQueueSubmit) and Present
 // (BenchmarkSurfacePresent) already existed; Finish did not, and the S4

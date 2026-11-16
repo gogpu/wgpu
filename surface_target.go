@@ -3,12 +3,17 @@ package wgpu
 import (
 	"errors"
 	"fmt"
-	"reflect"
+
+	// Aliased because SurfaceTargetFromWaylandSurface names its wl_surface
+	// parameter "surface", as its public signature always has; the alias keeps
+	// the imported package visible without shadowing.
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
 // ErrInvalidSurfaceTarget is returned when a surface target is empty or has
-// missing platform handles.
-var ErrInvalidSurfaceTarget = errors.New("wgpu: invalid surface target")
+// missing platform handles. The value is internal/surface's, the package that
+// runs the validation, so errors.Is keeps working through the public API.
+var ErrInvalidSurfaceTarget = surfacepkg.ErrInvalidSurfaceTarget
 
 // ErrUnsupportedSurfaceTarget is returned when the selected implementation
 // cannot create a surface for the supplied platform target kind.
@@ -136,38 +141,18 @@ func SurfaceTargetFromWebCanvasID(id uintptr) SurfaceTargetUnsafe {
 	}
 }
 
+// targetMirror builds the surface domain's view of the public raw target: the
+// destination cannot name this type, so the root declaration layer converts at
+// the call boundary, field by field (ADR-070 §15.6, R9).
+func targetMirror(t SurfaceTargetUnsafe) surfacepkg.Target {
+	return surfacepkg.Target{Kind: surfacepkg.TargetKind(t.kind), Display: t.displayHandle, Window: t.windowHandle}
+}
+
+// validate rejects a target that is empty or misses the platform handles its
+// kind needs. The rules live in internal/surface; this is the public
+// declaration layer.
 func (t SurfaceTargetUnsafe) validate() error {
-	switch t.kind {
-	case surfaceTargetHeadless:
-		// A headless target carries no platform handles.
-	case surfaceTargetWindowsHWND:
-		if t.windowHandle == 0 {
-			return invalidSurfaceTarget("Win32 HWND is zero")
-		}
-	case surfaceTargetXlibWindow:
-		if t.displayHandle == 0 || t.windowHandle == 0 {
-			return invalidSurfaceTarget("Xlib Display or Window is zero")
-		}
-	case surfaceTargetWaylandSurface:
-		if t.displayHandle == 0 || t.windowHandle == 0 {
-			return invalidSurfaceTarget("Wayland display or surface is zero")
-		}
-	case surfaceTargetAndroidNativeWindow:
-		if t.windowHandle == 0 {
-			return invalidSurfaceTarget("Android ANativeWindow is zero")
-		}
-	case surfaceTargetMetalLayer:
-		if t.windowHandle == 0 {
-			return invalidSurfaceTarget("Metal layer is zero")
-		}
-	case surfaceTargetWebCanvasID:
-		// Zero intentionally selects the first canvas for compatibility.
-	case surfaceTargetInvalid:
-		return invalidSurfaceTarget("target is empty")
-	default:
-		return invalidSurfaceTarget("target kind is unknown")
-	}
-	return nil
+	return targetMirror(t).Validate()
 }
 
 func invalidSurfaceTarget(message string) error {
@@ -189,15 +174,10 @@ func resolveSurfaceTarget(target SurfaceTarget) (SurfaceTargetUnsafe, error) {
 	return rawTarget, nil
 }
 
+// isNilSurfaceTarget reports whether target names no object: a nil interface,
+// or a typed nil of a nilable kind. The reflect semantics live in
+// internal/surface (which field kinds count as nil); this is the public
+// declaration layer.
 func isNilSurfaceTarget(target SurfaceTarget) bool {
-	if target == nil {
-		return true
-	}
-	value := reflect.ValueOf(target)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
+	return surfacepkg.IsNilTarget(target)
 }

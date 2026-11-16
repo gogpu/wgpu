@@ -250,16 +250,10 @@ const (
 )
 
 // String returns a human-readable name for the error filter. It keeps the
-// method set the core alias exposed publicly before v0.35.0.
+// method set the core alias exposed publicly before v0.35.0. The text table
+// lives in internal/core, keyed by the ErrorFilter constants, and serves both
+// builds that declare this type (native and rust), so their texts cannot
+// drift apart.
 func (f ErrorFilter) String() string {
-	switch f {
-	case ErrorFilterValidation:
-		return "Validation"
-	case ErrorFilterOutOfMemory:
-		return "OutOfMemory"
-	case ErrorFilterInternal:
-		return "Internal"
-	default:
-		return fmt.Sprintf("ErrorFilter(%d)", int(f))
-	}
+	return core.ErrorFilter(f).String()
 }
