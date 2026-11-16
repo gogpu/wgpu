@@ -1058,3 +1058,29 @@ func TestBuffer_NoConflict_ReadOnly(t *testing.T) {
 		t.Error("Expected Index flag in merged usage")
 	}
 }
+
+// TestDeviceTracker_AppendSingleTexture checks a queue write of some
+// subresources through the device tracker, and the deprecated whole-texture
+// form, which answers only the first of several barriers.
+func TestDeviceTracker_AppendSingleTexture(t *testing.T) {
+	t.Parallel()
+	dt := NewDeviceTracker()
+	dt.InsertTexture(1, track.TextureUsesUninitialized)
+	level := track.TextureSelector{TextureMipLevelCount: 2, TextureArrayLayerCount: 1, BaseMipLevel: 1, MipLevelCount: 1}
+
+	got := dt.AppendSingleTexture(nil, 1, level, track.TextureUsesCopyDst)
+	if len(got) != 1 || got[0].Selector != level || got[0].Usage.From != track.TextureUsesUninitialized {
+		t.Fatalf("write of level 1 = %+v, want one barrier over it from Uninitialized", got)
+	}
+	if usage := dt.TextureUsage(1); usage != track.TextureUsesNone {
+		t.Errorf("TextureUsage = %v, want None while the levels differ", usage)
+	}
+
+	transition, needed := dt.SetSingleTexture(1, track.TextureUsesCopySrc)
+	if !needed || transition.Usage.From != track.TextureUsesUninitialized || transition.Selector.BaseMipLevel != 0 {
+		t.Errorf("SetSingleTexture = %+v, %v; want the first barrier, level 0 from Uninitialized", transition, needed)
+	}
+	if _, needed := dt.SetSingleTexture(1, track.TextureUsesCopySrc); needed {
+		t.Error("CopySrc -> CopySrc is ordered, no barrier expected")
+	}
+}
