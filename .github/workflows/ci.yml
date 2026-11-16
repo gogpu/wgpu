@@ -187,9 +187,15 @@ jobs:
         go vet $pkgs
 
     # The build users ship: CGO_ENABLED=0, so goffi runs its fakecgo path.
+    # -coverpkg=./... is required since the implementation moved into internal
+    # packages (ADR-070): the root tests exercise them through the public API,
+    # and Go credits cross-package execution only when the package is
+    # instrumented. Without it the moved code reads as barely covered
+    # (internal/encoder showed 17.9% on the window's first reports while the
+    # root tests drive it; its own tests alone reach 47.1%).
     - name: Run tests
       shell: bash
-      run: go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic ./...
+      run: go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic -coverpkg=./... ./...
 
     # Race detection uses the toolchain's -race (ThreadSanitizer, needs cgo).
     # With CGO_ENABLED=1 goffi links the real runtime/cgo instead of its
@@ -205,12 +211,13 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       shell: bash
       run: |
-        if [ -f coverage.txt ]; then
-          echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
-        else
-          echo "coverage.txt not found, generating separately..."
-          go test -coverprofile=coverage.txt -covermode=atomic ./... || true
+        # A missing profile is a failure, not a reason to re-run the suite with
+        # errors swallowed: the Run tests step above must have produced it.
+        if [ ! -f coverage.txt ]; then
+          echo "coverage.txt missing: the Run tests step did not produce a profile" >&2
+          exit 1
         fi
+        echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
