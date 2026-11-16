@@ -17,13 +17,14 @@ func TestEncoderTextureTracker_NeverConflicts(t *testing.T) {
 	tr := NewEncoderTextureTracker()
 	const idx TrackerIndex = 3
 
-	if _, needed := tr.SetSingle(idx, TextureUsesColorTarget); needed {
+	if len(tr.AppendSingle(nil, idx, TextureSelector{}, TextureUsesColorTarget)) != 0 {
 		t.Fatal("first use must not produce a transition (covered at submit)")
 	}
-	transition, needed := tr.SetSingle(idx, TextureUsesCopySrc)
-	if !needed {
-		t.Fatal("ColorTarget -> CopySrc must produce a transition")
+	transitions := tr.AppendSingle(nil, idx, TextureSelector{}, TextureUsesCopySrc)
+	if len(transitions) != 1 {
+		t.Fatalf("ColorTarget -> CopySrc must produce one transition, got %+v", transitions)
 	}
+	transition := transitions[0]
 	if transition.Index != idx || transition.Usage.From != TextureUsesColorTarget || transition.Usage.To != TextureUsesCopySrc {
 		t.Fatalf("transition = %+v, want %d ColorTarget -> CopySrc", transition, idx)
 	}
@@ -39,12 +40,12 @@ func TestEncoderTextureTracker_SkipsOrderedSameState(t *testing.T) {
 	t.Parallel()
 
 	tr := NewEncoderTextureTracker()
-	tr.SetSingle(0, TextureUsesColorTarget)
-	if _, needed := tr.SetSingle(0, TextureUsesColorTarget); needed {
+	tr.AppendSingle(nil, 0, TextureSelector{}, TextureUsesColorTarget)
+	if len(tr.AppendSingle(nil, 0, TextureSelector{}, TextureUsesColorTarget)) != 0 {
 		t.Error("ColorTarget -> ColorTarget is ordered, no transition expected")
 	}
-	tr.SetSingle(1, TextureUsesStorageWrite)
-	if _, needed := tr.SetSingle(1, TextureUsesStorageWrite); !needed {
+	tr.AppendSingle(nil, 1, TextureSelector{}, TextureUsesStorageWrite)
+	if len(tr.AppendSingle(nil, 1, TextureSelector{}, TextureUsesStorageWrite)) == 0 {
 		t.Error("StorageWrite -> StorageWrite is unordered, a transition is required")
 	}
 }
@@ -53,7 +54,7 @@ func TestEncoderTextureTracker_SetFromScope(t *testing.T) {
 	t.Parallel()
 
 	tr := NewEncoderTextureTracker()
-	tr.SetSingle(2, TextureUsesCopyDst) // earlier upload
+	tr.AppendSingle(nil, 2, TextureSelector{}, TextureUsesCopyDst) // earlier upload
 
 	pass := NewTextureUsageScope()
 	if err := pass.SetUsage(2, TextureUsesColorTarget); err != nil {
@@ -102,9 +103,9 @@ func TestEncoderTextureTracker_Queries(t *testing.T) {
 	if !tr.IsEmpty() || tr.IsUsed(0) || tr.StartUsage(7) != TextureUsesNone || tr.EndUsage(7) != TextureUsesNone {
 		t.Fatal("empty tracker reports usage")
 	}
-	tr.SetSingle(4, TextureUsesResource)
+	tr.AppendSingle(nil, 4, TextureSelector{}, TextureUsesResource)
 	if tr.IsEmpty() || !tr.IsUsed(4) || tr.IsUsed(3) {
-		t.Fatal("tracker usage queries are wrong after SetSingle")
+		t.Fatal("tracker usage queries are wrong after AppendSingle")
 	}
 }
 
@@ -119,10 +120,10 @@ func TestTextureTracker_MergeEncoder(t *testing.T) {
 	device.InsertSingle(1, TextureUsesColorTarget) // already in start state
 
 	cmd := NewEncoderTextureTracker()
-	cmd.SetSingle(0, TextureUsesColorTarget) // render ...
-	cmd.SetSingle(0, TextureUsesCopySrc)     // ... then read back
-	cmd.SetSingle(1, TextureUsesColorTarget)
-	cmd.SetSingle(2, TextureUsesCopyDst) // unknown to the device
+	cmd.AppendSingle(nil, 0, TextureSelector{}, TextureUsesColorTarget) // render ...
+	cmd.AppendSingle(nil, 0, TextureSelector{}, TextureUsesCopySrc)     // ... then read back
+	cmd.AppendSingle(nil, 1, TextureSelector{}, TextureUsesColorTarget)
+	cmd.AppendSingle(nil, 2, TextureSelector{}, TextureUsesCopyDst) // unknown to the device
 
 	transitions := device.MergeEncoder(cmd)
 	if len(transitions) != 1 {

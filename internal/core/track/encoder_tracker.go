@@ -51,21 +51,6 @@ func NewEncoderTextureTracker() *EncoderTextureTracker {
 	}
 }
 
-// SetSingle records that the next command uses every subresource of a
-// texture with usage, and returns the transition it needs; see AppendSingle.
-//
-// Deprecated: a texture whose subresources are in different states needs a
-// transition for each, and SetSingle returns only the first; use
-// AppendSingle.
-func (t *EncoderTextureTracker) SetSingle(index TrackerIndex, usage TextureUses) (TexturePendingTransition, bool) {
-	var storage [1]TexturePendingTransition
-	transitions := t.AppendSingle(storage[:0], index, TextureSelector{}, usage)
-	if len(transitions) == 0 {
-		return TexturePendingTransition{}, false
-	}
-	return transitions[0], true
-}
-
 // AppendSingle records that the next command uses the subresources selector
 // selects with usage, appending the transitions it needs to transitions.
 //
@@ -228,7 +213,7 @@ func SkipBufferBarrier(old, next BufferUses) bool {
 }
 
 // SetSingle records that the next command uses the buffer with usage. See
-// EncoderTextureTracker.SetSingle.
+// EncoderTextureTracker.AppendSingle.
 //
 // Reference: wgpu-core track/buffer.rs BufferTracker::set_single
 func (t *EncoderBufferTracker) SetSingle(index TrackerIndex, usage BufferUses) (PendingTransition, bool) {

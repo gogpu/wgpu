@@ -158,20 +158,6 @@ func (u TextureUses) ToTextureUsage() gputypes.TextureUsage {
 	return result
 }
 
-// TextureState holds the tracked state for a single texture.
-//
-// Deprecated: the trackers keep a texture's usage per mip level and array
-// layer and no longer use TextureState; TextureTracker.GetUsage answers a
-// texture's usage.
-type TextureState struct {
-	usage TextureUses
-}
-
-// Usage returns the current usage.
-func (s TextureState) Usage() TextureUses {
-	return s.usage
-}
-
 // TextureTracker tracks texture usage states for a device.
 // It is the device-level source of truth: each submitted command buffer's
 // usage scope is merged into this tracker, which produces the barrier list.
@@ -252,21 +238,6 @@ func (t *TextureTracker) Merge(scope *TextureUsageScope) []TexturePendingTransit
 		}
 	}
 	return transitions
-}
-
-// SetSingle moves every subresource of a texture to usage and returns the
-// barrier from its current state, unless SkipBarrier allows omitting it. An
-// untracked index is treated as TextureUsesUninitialized.
-//
-// Deprecated: a texture whose subresources are in different states needs a
-// barrier for each, and SetSingle returns only the first; use AppendSingle.
-func (t *TextureTracker) SetSingle(index TrackerIndex, usage TextureUses) (TexturePendingTransition, bool) {
-	var storage [1]TexturePendingTransition
-	transitions := t.AppendSingle(storage[:0], index, TextureSelector{}, usage)
-	if len(transitions) == 0 {
-		return TexturePendingTransition{}, false
-	}
-	return transitions[0], true
 }
 
 // AppendSingle moves the subresources selector selects to usage and appends
