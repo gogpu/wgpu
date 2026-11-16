@@ -188,6 +188,19 @@ func (e *stencilBlitEntry) impls() stencilblit.Pipelines[*pipeline.RenderPipelin
 	return impls
 }
 
+// pipelines returns the blit pipelines of key and the layout their bind groups
+// are built on, reusing the device's cache. It is unexported: the public
+// Device must not grow a method naming an internal pipeline type (the API
+// golden is frozen, ADR-070 §15.1), and the payload's host in this package is
+// its only caller.
+func (d *Device) pipelines(key stencilblit.Key) (stencilblit.Blit, error) {
+	entry, err := d.stencilBlitPipelines(key)
+	if err != nil {
+		return stencilblit.Blit{}, err
+	}
+	return stencilblit.Blit{Pipelines: entry.impls(), Layout: entry.bgl.impl}, nil
+}
+
 // stencilUpload is one upload into the stencil aspect of a combined
 // depth-stencil texture, lowered as stencilblit describes: the caller writes
 // the stencil bytes into temp (an R8Uint texture of the copy extent), then
