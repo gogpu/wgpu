@@ -35,6 +35,12 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
 
 ### Changed
 
+- **Adapter selection: the default backends mask is hardware-only** (ADR-083). The Pure Go software backend
+  registers by default, but it is not in the default mask, normal enumeration or Auto selection: a machine without
+  a hardware adapter reports `wgpu.ErrNoHardwareAdapter` from a plain `RequestAdapter`, and `gogpu` retries with the
+  software mask on that sentinel. Select it explicitly with `Backends: gputypes.BackendsSoftware` (normal
+  enumeration) or with `RequestAdapterOptions.ForceFallbackAdapter`, which reaches the software backend under the
+  default mask and prefers it over other CPU adapters (ADR-079).
 - **naga v0.22.1** (from v0.21.12). v0.22.0 and v0.22.1 are the SPIR-V input frontend's Phase 3 work — row-major
   matrix members on read and a spec-correct store, projected samples of arrayed images, the storage-expression
   budget, positioned post-parse errors, `nagac --from-spirv` — plus the IR's name-presence model and the

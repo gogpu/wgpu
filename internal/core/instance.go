@@ -76,6 +76,19 @@ type Instance struct {
 	// while an admitted backend that produced no adapter means this machine has
 	// none (ErrNoHardwareAdapter).
 	maskSelectedBackend bool
+
+	// instanceDesc is the descriptor the instance was built from, kept for the
+	// lazy software fallback enumeration below.
+	instanceDesc hal.InstanceDescriptor
+
+	// fallbackMu guards fallbackReady and fallbackAdapters. The software
+	// backend's adapters are created lazily on the first ForceFallbackAdapter
+	// request under the default mask (ADR-083 §2.3, implemented 2026-11-16):
+	// enumeration (adapters) and Auto selection never see them, and only a
+	// force request admits them as candidates (ADR-079).
+	fallbackMu       sync.Mutex
+	fallbackReady    bool
+	fallbackAdapters []AdapterID
 }
 
 // HALInstanceEntry associates an enabled backend with its HAL instance.
@@ -122,8 +135,10 @@ func NewInstanceWithDisplay(desc *gputypes.InstanceDescriptor, display hal.Displ
 		useMock:        false,
 	}
 
-	// Try to enumerate real adapters via HAL backends
-	i.enumerateRealAdapters(halInstanceDescriptor(desc, display))
+	// Try to enumerate real adapters via HAL backends. The descriptor is kept
+	// for the lazy software fallback enumeration (ensureFallbackAdapters).
+	i.instanceDesc = *halInstanceDescriptor(desc, display)
+	i.enumerateRealAdapters(&i.instanceDesc)
 
 	trackResource(uintptr(unsafe.Pointer(i)), "Instance") //nolint:gosec // debug tracking uses pointer as unique ID
 	return i
@@ -180,8 +195,6 @@ func (i *Instance) enumerateRealAdapters(halDesc *hal.InstanceDescriptor) {
 	i.maskSelectedBackend = len(providers) > 0
 	i.mu.Unlock()
 
-	hub := GetGlobal().Hub()
-
 	// Try each backend provider
 	for _, provider := range providers {
 		// Noop is the only BackendEmpty provider — a test double, never
@@ -223,26 +236,85 @@ func (i *Instance) enumerateRealAdapters(halDesc *hal.InstanceDescriptor) {
 		i.halInstanceMap[provider.Variant()] = halInstance
 
 		// Enumerate adapters from this backend
-		exposedAdapters := halInstance.EnumerateAdapters(nil)
-		for idx := range exposedAdapters {
-			exposed := &exposedAdapters[idx] // Use pointer to avoid copy
-			// Create core.Adapter wrapping the HAL adapter
-			adapter := &Adapter{
-				Info:                  exposed.Info,
-				Features:              exposed.Features,
-				Limits:                exposed.Capabilities.Limits,
-				DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
-				StencilCopyNeedsBlit:  exposed.Capabilities.StencilCopyNeedsBlit,
-				Backend:               exposed.Info.Backend,
-				halAdapter:            exposed.Adapter,
-				halCapabilities:       &exposed.Capabilities,
-			}
-
-			// Register in the hub
-			adapterID := hub.RegisterAdapter(adapter)
-			i.adapters = append(i.adapters, adapterID)
-		}
+		i.adapters = append(i.adapters, i.registerExposedAdapters(halInstance)...)
 	}
+}
+
+// registerExposedAdapters wraps a HAL instance's adapters in core adapters and
+// registers them in the hub, returning their IDs. It leaves the instance's
+// adapter lists alone: the caller decides whether they join the normal
+// enumeration (adapters) or the software fallback list (fallbackAdapters,
+// ADR-083 §2.3).
+func (i *Instance) registerExposedAdapters(halInstance hal.Instance) []AdapterID {
+	exposedAdapters := halInstance.EnumerateAdapters(nil)
+	ids := make([]AdapterID, 0, len(exposedAdapters))
+	hub := GetGlobal().Hub()
+	for idx := range exposedAdapters {
+		exposed := &exposedAdapters[idx] // Use pointer to avoid copy
+		// Create core.Adapter wrapping the HAL adapter
+		adapter := &Adapter{
+			Info:                  exposed.Info,
+			Features:              exposed.Features,
+			Limits:                exposed.Capabilities.Limits,
+			DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
+			StencilCopyNeedsBlit:  exposed.Capabilities.StencilCopyNeedsBlit,
+			Backend:               exposed.Info.Backend,
+			halAdapter:            exposed.Adapter,
+			halCapabilities:       &exposed.Capabilities,
+		}
+		ids = append(ids, hub.RegisterAdapter(adapter))
+	}
+	return ids
+}
+
+// admitsSoftwareFallback reports whether a ForceFallbackAdapter request may
+// reach the software backend on this instance. ADR-083 §2.3: software leaves
+// the default mask, normal enumeration and Auto; it stays reachable through
+// the explicit bit, which enumerates it normally, or through
+// ForceFallbackAdapter under the default set. A reduced explicit mask keeps its
+// meaning (ADR-079: Backends=DX12 does not silently gain software).
+func (i *Instance) admitsSoftwareFallback() bool {
+	if i.backends&gputypes.BackendsSoftware != 0 {
+		return false // enumerated normally; Auto and force requests both see it
+	}
+	return i.backends == 0 || i.backends == gputypes.DefaultInstanceDescriptor().Backends
+}
+
+// ensureFallbackAdapters creates the software backend's adapters on the first
+// ForceFallbackAdapter request. The boundary is "enumeration unchanged,
+// candidacy extended": i.adapters stays hardware-only, and only the request
+// that asked for a fallback sees these candidates.
+func (i *Instance) ensureFallbackAdapters() []AdapterID {
+	i.fallbackMu.Lock()
+	defer i.fallbackMu.Unlock()
+	if i.fallbackReady {
+		return append([]AdapterID(nil), i.fallbackAdapters...)
+	}
+	i.fallbackReady = true
+	if !i.admitsSoftwareFallback() {
+		return nil
+	}
+	for _, provider := range GetOrderedBackendProviders() {
+		if provider.Variant() != gputypes.BackendSoftware || !provider.IsAvailable() {
+			continue
+		}
+		swInstance, err := provider.CreateInstance(&i.instanceDesc)
+		if err != nil {
+			return nil
+		}
+		ids := i.registerExposedAdapters(swInstance)
+		i.mu.Lock()
+		i.halInstances = append(i.halInstances, swInstance)
+		i.halInstanceEntries = append(i.halInstanceEntries, HALInstanceEntry{
+			Backend:  gputypes.BackendSoftware,
+			Instance: swInstance,
+		})
+		i.halInstanceMap[gputypes.BackendSoftware] = swInstance
+		i.fallbackAdapters = append(i.fallbackAdapters, ids...)
+		i.mu.Unlock()
+		return append([]AdapterID(nil), i.fallbackAdapters...)
+	}
+	return nil
 }
 
 // createMockAdapter creates a mock adapter for testing purposes.
@@ -311,6 +383,12 @@ func (i *Instance) RequestAdapter(options *gputypes.RequestAdapterOptions) (Adap
 	i.mu.RLock()
 	adapterIDs := append([]AdapterID(nil), i.adapters...)
 	i.mu.RUnlock()
+
+	if options != nil && options.ForceFallbackAdapter {
+		// ADR-083 §2.3: under the default mask the software backend is a
+		// fallback candidate only; the force request is what admits it.
+		adapterIDs = append(adapterIDs, i.ensureFallbackAdapters()...)
+	}
 
 	if len(adapterIDs) == 0 {
 		return AdapterID{}, i.noAdapterError("")
@@ -466,6 +544,12 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 	i.mu.RLock()
 	allAdapterIDs := append([]AdapterID(nil), i.adapters...)
 	i.mu.RUnlock()
+
+	if options != nil && options.ForceFallbackAdapter {
+		// ADR-083 §2.3: the software backend is a fallback candidate only;
+		// a surface request that asked for a fallback admits it here too.
+		allAdapterIDs = append(allAdapterIDs, i.ensureFallbackAdapters()...)
+	}
 
 	hub := GetGlobal().Hub()
 	i.mu.RLock()
@@ -748,6 +832,20 @@ func (i *Instance) Destroy() {
 		_, _ = hub.UnregisterAdapter(adapterID)
 	}
 	i.surfaceAdapters = nil
+
+	// The lazily created software fallback adapters (ADR-083 §2.3) belong to
+	// this instance the same way.
+	for _, adapterID := range i.fallbackAdapters {
+		adapter, err := hub.GetAdapter(adapterID)
+		if err != nil {
+			continue
+		}
+		if adapter.halAdapter != nil {
+			adapter.halAdapter.Destroy()
+		}
+		_, _ = hub.UnregisterAdapter(adapterID)
+	}
+	i.fallbackAdapters = nil
 
 	// Destroy all HAL instances (includes deferred GLES instances).
 	for _, halInstance := range i.halInstances {

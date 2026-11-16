@@ -14,8 +14,10 @@ import (
 
 // TestSoftwareIsSelectedByItsMaskAlone pins ADR-083 §2.3 on the public path:
 // the software backend is registered by default but is never part of the
-// default set (neither mask 0 nor nil admits it, ForceFallbackAdapter included),
-// and a BackendsSoftware mask selects it.
+// default set's enumeration or Auto selection (neither mask 0 nor nil admits
+// it), a BackendsSoftware mask selects it, and RequestAdapterOptions'
+// ForceFallbackAdapter reaches it under the default set (ADR-079's rows; the
+// dated implementation note in ADR-083 §2.4).
 func TestSoftwareIsSelectedByItsMaskAlone(t *testing.T) {
 	for _, desc := range []*wgpu.InstanceDescriptor{
 		nil,
@@ -31,9 +33,11 @@ func TestSoftwareIsSelectedByItsMaskAlone(t *testing.T) {
 			}
 			adapter.Release()
 		}
-		if adapter, err := inst.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true}); err == nil {
-			if got := adapter.Info().Backend; got == gputypes.BackendSoftware {
-				t.Errorf("ForceFallbackAdapter selected software %q although its mask bit is absent; a candidate must be in the mask", adapter.Info().Name)
+		if adapter, err := inst.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true}); err != nil {
+			t.Errorf("ForceFallbackAdapter on the default set: %v (ADR-083 §2.3: the force path reaches software)", err)
+		} else {
+			if got := adapter.Info().Backend; got != gputypes.BackendSoftware {
+				t.Errorf("ForceFallbackAdapter selected %v, want the software backend (ADR-079: preferred among CPU adapters)", got)
 			}
 			adapter.Release()
 		}
