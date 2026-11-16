@@ -507,7 +507,13 @@ jobs:
       env:
         GOOS: js
         GOARCH: wasm
-      run: go test -count=1 -v . ./internal/encoder/
+      run: |
+        # `go test` executes the wasm test binary through go_$GOOS_$GOARCH_exec
+        # (go_js_wasm_exec, which runs it under node). Without that directory on
+        # PATH the runner tries to exec the wasm binary itself and fails with
+        # "exec format error" (the first real run of this job, 2026-11-16).
+        export PATH="$(go env GOROOT)/lib/wasm:$PATH"
+        go test -count=1 -v . ./internal/encoder/
 
   # The one check the main-protection ruleset requires, by this exact job name:
   # renaming the job silently drops the requirement. Jobs and the matrix can
