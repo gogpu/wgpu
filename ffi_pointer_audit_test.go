@@ -1,3 +1,12 @@
+//go:build !js && !wasm
+
+// These tests audit the module's own source files (go/parser over the tree).
+// A js/wasm (or wasip1) runner cannot perform the directory traversal they
+// need — verified: with this tag stripped they fail there — so their scope is
+// the build contexts that own a source tree; they run in every native and
+// rust job. Every other test in this package executes under the wasm-test CI
+// job (P2-INFRA-014).
+
 package wgpu_test
 
 import (

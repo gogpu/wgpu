@@ -483,6 +483,32 @@ jobs:
         [ $WARNINGS -gt 0 ] && echo "::warning::$WARNINGS ecosystem dep(s) outdated"
         exit 0
 
+  # The root package's js/wasm tests actually EXECUTE here (node runs the
+  # wasm binary): browser-context contract tests are otherwise compiled and
+  # vetted but never run (P2-INFRA-014).
+  wasm-test:
+    name: wasm test (root package, node)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run the root test suite on js/wasm
+      env:
+        GOOS: js
+        GOARCH: wasm
+      run: go test -count=1 -v .
+
   # The one check the main-protection ruleset requires, by this exact job name:
   # renaming the job silently drops the requirement. Jobs and the matrix can
   # change without touching the ruleset; a new required job goes into `needs`.
@@ -491,7 +517,7 @@ jobs:
   gate:
     name: Test
     if: always()
-    needs: [android-arm64-preview, build, cross-compile, test, integration-gles, lint, lint-targets, formatting, deps]
+    needs: [android-arm64-preview, build, cross-compile, test, integration-gles, wasm-test, lint, lint-targets, formatting, deps]
     runs-on: ubuntu-latest
     steps:
     - name: Every required job succeeded
