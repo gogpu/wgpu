@@ -43,6 +43,13 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   `VK_LAYER_KHRONOS_validation` 695 PASS / 0 FAIL / 5 SKIP with 0 validation messages, SPIR-V 69/69 and MSL 69/69
   byte-identical against v0.22.0 — and this branch's full suite; the release tag adds only the release-prep docs
   over the gated candidate.
+- **naga v0.22.2** (from v0.22.1). A PATCH carrying the GLSL subgroup work and two WGSL-visible validator changes:
+  store and initializer types plus entry-point varying types are now validated (stricter — a module it newly
+  refuses was ill-typed), and function and struct member names may repeat (relaxed, matching the Rust validator).
+  Gate: the v0.22.2 downstream gate on this machine — full suite through a private gate workspace (36 packages ok;
+  the one refusal, `internal/layoutcheck`, is an artifact of the git-less snapshot and runs green in a real
+  worktree at the gated commit), the readback corpus under `VK_LAYER_KHRONOS_validation` 685 PASS / 0 FAIL / 5 SKIP
+  (the `shader-f16` skips) with 0 validation messages, and the full `hal/allbackends` suite under VVL ok.
 
 ### Removed
 
