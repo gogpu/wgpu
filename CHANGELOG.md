@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 A seam patch before the internal-layout change (v0.35.0): the test seam gains constant-time counters and
-metadata-only textures — the last `NewTextureFromHAL` replacement — and naga moves to v0.22.1.
+metadata-only textures — the last `NewTextureFromHAL` replacement — and naga reaches v0.22.3.
 
 ### Added
 
@@ -50,6 +50,14 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   the one refusal, `internal/layoutcheck`, is an artifact of the git-less snapshot and runs green in a real
   worktree at the gated commit), the readback corpus under `VK_LAYER_KHRONOS_validation` 685 PASS / 0 FAIL / 5 SKIP
   (the `shader-f16` skips) with 0 validation messages, and the full `hal/allbackends` suite under VVL ok.
+- **naga v0.22.3** (from v0.22.2). A PATCH: the `textureQueryLod` wiring (`ir.ImageQueryLod` — GLSL-input-produced
+  only; wgpu holds no `ExpressionKind` switches to extend), the MSL subgroup-scan refusal (SPIR-V-authored IR only),
+  the GLSL declaration batch, two MSL writer fixes and a DXIL image-query operand-counting fix. Gate: the v0.22.3
+  downstream gate — full suite through a private gate workspace (36 packages ok; the `internal/layoutcheck`
+  git-less-snapshot artifact as before, green on the real tree), the readback corpus under
+  `VK_LAYER_KHRONOS_validation` 685 PASS / 0 FAIL / 5 SKIP with 0 validation messages, `internal/hal/allbackends`
+  under VVL ok, and the writer diff v0.22.2 → v0.22.3 of **0/69 shaders in SPIR-V and in MSL** — the zero-diff
+  expectation was stated before the run.
 
 ### Removed
 
