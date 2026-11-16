@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
@@ -53,9 +54,9 @@ type poolManagedSetter interface {
 	SetPoolManaged(managed bool)
 }
 
-// acquire returns a command encoder from the pool, or creates a new one.
+// Acquire returns a command encoder from the pool, or creates a new one.
 // The returned encoder is in "closed" state, ready for BeginEncoding.
-func (p *encoderPool) acquire() (hal.CommandEncoder, error) {
+func (p *encoderPool) Acquire() (hal.CommandEncoder, error) {
 	p.mu.Lock()
 	if n := len(p.free); n > 0 {
 		enc := p.free[n-1]
@@ -86,9 +87,9 @@ func (p *encoderPool) acquire() (hal.CommandEncoder, error) {
 	return enc, nil
 }
 
-// release returns an encoder to the pool after ResetAll has been called.
+// Release returns an encoder to the pool after ResetAll has been called.
 // The encoder must be in "closed" state (not recording).
-func (p *encoderPool) release(enc hal.CommandEncoder) {
+func (p *encoderPool) Release(enc hal.CommandEncoder) {
 	p.mu.Lock()
 	delete(p.outstanding, enc)
 	p.free = append(p.free, enc)
@@ -120,3 +121,10 @@ func (p *encoderPool) destroy() {
 	}
 	clear(p.outstanding)
 }
+
+// The pool implements the encoder seam's HAL pool interface declared in
+// internal/core (ADR-070 shape B). The concrete type stays in the root
+// package until S11 moves it into internal/device with the Device; from S4's
+// Move the encoder domain reaches it through the seam accessor's
+// core.HalEncoderPool result, never by naming encoderPool.
+var _ core.HalEncoderPool = (*encoderPool)(nil)

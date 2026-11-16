@@ -18,7 +18,7 @@ func TestEncoderPool_AcquireCreatesNew(t *testing.T) {
 	pool := newEncoderPool(dev)
 	defer pool.destroy()
 
-	enc, err := pool.acquire()
+	enc, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire failed: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestEncoderPool_ReleaseAndReacquire(t *testing.T) {
 	defer pool.destroy()
 
 	// Acquire, use, release.
-	enc1, err := pool.acquire()
+	enc1, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire failed: %v", err)
 	}
@@ -50,10 +50,10 @@ func TestEncoderPool_ReleaseAndReacquire(t *testing.T) {
 
 	// Simulate GPU completion: ResetAll + release.
 	enc1.ResetAll([]hal.CommandBuffer{cmdBuf})
-	pool.release(enc1)
+	pool.Release(enc1)
 
 	// Reacquire should return the same encoder (from pool, not creating new).
-	enc2, err := pool.acquire()
+	enc2, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("re-acquire failed: %v", err)
 	}
@@ -78,18 +78,18 @@ func TestEncoderPool_MultipleEncoders(t *testing.T) {
 	defer pool.destroy()
 
 	// Acquire multiple encoders (simulates maxFramesInFlight=2).
-	enc1, err := pool.acquire()
+	enc1, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire 1 failed: %v", err)
 	}
-	enc2, err := pool.acquire()
+	enc2, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire 2 failed: %v", err)
 	}
 
 	// Release both.
-	pool.release(enc1)
-	pool.release(enc2)
+	pool.Release(enc1)
+	pool.Release(enc2)
 
 	pool.mu.Lock()
 	freeCount := len(pool.free)
@@ -105,11 +105,11 @@ func TestEncoderPool_DestroyReleasesAll(t *testing.T) {
 
 	pool := newEncoderPool(dev)
 
-	enc1, err := pool.acquire()
+	enc1, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire failed: %v", err)
 	}
-	pool.release(enc1)
+	pool.Release(enc1)
 
 	// Destroy should not panic.
 	pool.destroy()
@@ -140,7 +140,7 @@ func TestEncoderPool_TracksOutstanding(t *testing.T) {
 	if n := outstanding(); n != 3 {
 		t.Fatalf("%d outstanding after 3 acquires, want 3", n)
 	}
-	pool.release(released)
+	pool.Release(released)
 	pool.retire(retired)
 	if n := outstanding(); n != 1 {
 		t.Fatalf("%d outstanding after release and retire, want 1", n)
@@ -189,7 +189,7 @@ func (e *countingEncoder) Destroy() { e.device.destroyed++ }
 
 func mustAcquire(t *testing.T, pool *encoderPool) hal.CommandEncoder {
 	t.Helper()
-	enc, err := pool.acquire()
+	enc, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}

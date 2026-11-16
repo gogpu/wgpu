@@ -2,7 +2,11 @@
 
 package wgpu
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/gogpu/wgpu/internal/core"
+)
 
 // recordingRegistry holds the device's command encoders that are neither
 // finished nor discarded, and its command buffers that are neither submitted
@@ -41,25 +45,29 @@ func (r *recordingRegistry) setsLocked() *recordingSets {
 	return r.sets
 }
 
-func (r *recordingRegistry) addEncoder(e *CommandEncoder) {
+// AddEncoder records an encoder that has started recording.
+func (r *recordingRegistry) AddEncoder(e *CommandEncoder) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.setsLocked().encoders[e] = struct{}{}
 }
 
-func (r *recordingRegistry) removeEncoder(e *CommandEncoder) {
+// RemoveEncoder forgets an encoder that finished or was discarded.
+func (r *recordingRegistry) RemoveEncoder(e *CommandEncoder) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.setsLocked().encoders, e)
 }
 
-func (r *recordingRegistry) addBuffer(cb *CommandBuffer) {
+// AddBuffer records a command buffer awaiting submit or release.
+func (r *recordingRegistry) AddBuffer(cb *CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.setsLocked().buffers[cb] = struct{}{}
 }
 
-func (r *recordingRegistry) removeBuffer(cb *CommandBuffer) {
+// RemoveBuffer forgets a command buffer that was submitted or released.
+func (r *recordingRegistry) RemoveBuffer(cb *CommandBuffer) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.setsLocked().buffers, cb)
@@ -82,3 +90,11 @@ func (r *recordingRegistry) take() ([]*CommandEncoder, []*CommandBuffer) {
 	clear(sets.buffers)
 	return encoders, buffers
 }
+
+// The registry implements the encoder seam's recordings interface declared in
+// internal/core (ADR-070 shape B), instantiated here with the root encoder and
+// command buffer types. S4's Move re-instantiates it over the internal/encoder
+// types (the registry keeps naming them: a legal root -> internal/encoder
+// edge) and the assertion follows that instantiation into the destination; the
+// concrete registry itself moves to internal/device at S11.
+var _ core.EncoderRecordings[*CommandEncoder, *CommandBuffer] = (*recordingRegistry)(nil)

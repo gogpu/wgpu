@@ -915,7 +915,7 @@ func (e *CommandEncoder) DiscardEncoding() {
 	}
 	e.released = true
 	if e.device != nil {
-		e.device.recordings.removeEncoder(e)
+		e.device.recordings.RemoveEncoder(e)
 	}
 	e.discard()
 }
@@ -953,7 +953,7 @@ func (e *CommandEncoder) returnEncoderToPool(closed []hal.CommandBuffer) {
 		return
 	}
 	e.halEncoder.ResetAll(closed)
-	e.device.cmdEncoderPool.release(e.halEncoder)
+	e.device.cmdEncoderPool.Release(e.halEncoder)
 	e.halEncoder = nil
 }
 
@@ -969,7 +969,7 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	}
 	e.released = true
 	if e.device != nil {
-		e.device.recordings.removeEncoder(e)
+		e.device.recordings.RemoveEncoder(e)
 	}
 
 	coreCmdBuffer, err := e.core.Finish()
@@ -1005,7 +1005,7 @@ func (e *CommandEncoder) Finish() (*CommandBuffer, error) {
 	e.usedBindGroups = nil // ownership transferred
 	e.usedQuerySets = nil  // ownership transferred
 	if e.device != nil {
-		e.device.recordings.addBuffer(cb)
+		e.device.recordings.AddBuffer(cb)
 	}
 	return cb, nil
 }
@@ -1173,14 +1173,14 @@ func (cb *CommandBuffer) Release() {
 		return
 	}
 	if cb.device != nil {
-		cb.device.recordings.removeBuffer(cb)
+		cb.device.recordings.RemoveBuffer(cb)
 	}
 	// Return encoder to pool (reset native allocator).
 	// For multi-CB encoders, pass all HAL command buffers to ResetAll
 	// so the underlying pool/allocator can reclaim them.
 	if cb.halEncoder != nil && cb.device != nil && cb.device.cmdEncoderPool != nil {
 		cb.halEncoder.ResetAll(cb.halBufferList())
-		cb.device.cmdEncoderPool.release(cb.halEncoder)
+		cb.device.cmdEncoderPool.Release(cb.halEncoder)
 		cb.halEncoder = nil
 	}
 	// Drop tracked resource refs.

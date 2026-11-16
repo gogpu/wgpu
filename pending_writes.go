@@ -483,7 +483,7 @@ func (pw *pendingWrites) activate() (hal.CommandEncoder, error) {
 	}
 
 	if pw.encoder == nil {
-		enc, err := pw.pool.acquire()
+		enc, err := pw.pool.Acquire()
 		if err != nil {
 			return nil, fmt.Errorf("acquire encoder from pool: %w", err)
 		}
@@ -576,7 +576,7 @@ func (pw *pendingWrites) discardRecording() {
 		}
 		pw.encoder.ResetAll(nil)
 		if pw.pool != nil {
-			pw.pool.release(pw.encoder)
+			pw.pool.Release(pw.encoder)
 		} else {
 			pw.encoder.Destroy()
 		}
@@ -610,7 +610,7 @@ func (pw *pendingWrites) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.Comma
 	if encoder != nil {
 		encoder.ResetAll([]hal.CommandBuffer{cmdBuf})
 		if pw.pool != nil {
-			pw.pool.release(encoder)
+			pw.pool.Release(encoder)
 		} else {
 			encoder.Destroy()
 		}
@@ -664,7 +664,7 @@ func (pw *pendingWrites) maintain(completedIndex uint64) {
 		// Reset the encoder and return it to the pool.
 		if sub.encoder != nil && sub.cmdBuf != nil {
 			sub.encoder.ResetAll([]hal.CommandBuffer{sub.cmdBuf})
-			pw.pool.release(sub.encoder)
+			pw.pool.Release(sub.encoder)
 		} else if sub.cmdBuf != nil {
 			pw.halDevice.FreeCommandBuffer(sub.cmdBuf)
 		}

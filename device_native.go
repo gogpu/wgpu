@@ -1421,21 +1421,21 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 	// HAL encoder, and instead uses CreateCommandEncoderWithHAL that accepts
 	// a pre-existing encoder already in recording state.
 	if d.cmdEncoderPool != nil {
-		halEnc, err := d.cmdEncoderPool.acquire()
+		halEnc, err := d.cmdEncoderPool.Acquire()
 		if err != nil {
 			return nil, fmt.Errorf("wgpu: encoder pool acquire: %w", err)
 		}
 
 		if err := halEnc.BeginEncoding(label); err != nil {
 			// Failed to begin encoding — return encoder to pool for future use.
-			d.cmdEncoderPool.release(halEnc)
+			d.cmdEncoderPool.Release(halEnc)
 			return nil, fmt.Errorf("wgpu: begin encoding: %w", err)
 		}
 
 		coreEncoder, err := d.core.CreateCommandEncoderWithHAL(halEnc, label)
 		if err != nil {
 			halEnc.DiscardEncoding()
-			d.cmdEncoderPool.release(halEnc)
+			d.cmdEncoderPool.Release(halEnc)
 			return nil, err
 		}
 
@@ -1445,7 +1445,7 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 			halEncoder:  halEnc,
 			trackedRefs: make([]*core.ResourceRef, 0, 64),
 		}
-		d.recordings.addEncoder(enc)
+		d.recordings.AddEncoder(enc)
 		d.attachTestHooks(enc, label)
 		return enc, nil
 	}
@@ -1458,7 +1458,7 @@ func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandE
 	}
 
 	enc := &CommandEncoder{core: coreEncoder, device: d}
-	d.recordings.addEncoder(enc)
+	d.recordings.AddEncoder(enc)
 	d.attachTestHooks(enc, label)
 	return enc, nil
 }

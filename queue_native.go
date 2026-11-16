@@ -193,7 +193,7 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 			cb.submitted = true
 			cb.dropUsedSets()
 			if cb.device != nil {
-				cb.device.recordings.removeBuffer(cb)
+				cb.device.recordings.RemoveBuffer(cb)
 			}
 		}
 	}
@@ -238,7 +238,7 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 		pool := q.device.cmdEncoderPool
 		dq.Defer(subIdx, "CmdEncoder", func() {
 			halEnc.ResetAll(halCmdBufs)
-			pool.release(halEnc)
+			pool.Release(halEnc)
 		})
 	}
 
@@ -250,7 +250,7 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*CommandBuffer) {
 		pool := q.device.cmdEncoderPool
 		dq.Defer(subIdx, "BarrierEncoder", func() {
 			halEnc.ResetAll([]hal.CommandBuffer{barrierBuf})
-			pool.release(halEnc)
+			pool.Release(halEnc)
 		})
 	}
 	q.transits = q.transits[:0]
@@ -695,7 +695,7 @@ func (q *Queue) assembleSubmission(pendingCmdBuf hal.CommandBuffer, commandBuffe
 func (q *Queue) releaseTransits() {
 	for _, t := range q.transits {
 		t.encoder.ResetAll([]hal.CommandBuffer{t.cmdBuf})
-		q.device.cmdEncoderPool.release(t.encoder)
+		q.device.cmdEncoderPool.Release(t.encoder)
 	}
 	q.transits = q.transits[:0]
 }
@@ -904,7 +904,7 @@ func (q *Queue) recordAndTrackAllBarriers(
 	bufResolveFunc := func(idx track.TrackerIndex) hal.Buffer {
 		return bufResolver[idx]
 	}
-	halEnc, err := q.device.cmdEncoderPool.acquire()
+	halEnc, err := q.device.cmdEncoderPool.Acquire()
 	if err != nil {
 		return nil, fmt.Errorf("acquire barrier encoder: %w", err)
 	}
@@ -913,7 +913,7 @@ func (q *Queue) recordAndTrackAllBarriers(
 	)
 	if err != nil {
 		halEnc.DiscardEncoding()
-		q.device.cmdEncoderPool.release(halEnc)
+		q.device.cmdEncoderPool.Release(halEnc)
 		return nil, fmt.Errorf("record barriers: %w", err)
 	}
 
