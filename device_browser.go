@@ -1,6 +1,14 @@
 //go:build js && wasm
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
+
+// This file is the public declaration layer over internal/device on the browser
+// build (ADR-070 S11). The implementation moved to internal/device; what stays
+// here is the frozen public Device type, its methods, and the descriptor
+// conversion to the JS values the implementation takes.
 
 import (
 	"fmt"
@@ -8,21 +16,17 @@ import (
 	"time"
 
 	"github.com/gogpu/gputypes"
+
 	"github.com/gogpu/wgpu/internal/browser"
-	"github.com/gogpu/wgpu/internal/encoder"
-	"github.com/gogpu/wgpu/internal/pipeconst"
-	"github.com/gogpu/wgpu/internal/pipeline"
+	"github.com/gogpu/wgpu/internal/device"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Device represents a logical GPU device.
 // On browser, this wraps a GPUDevice via internal/browser.Device.
 type Device struct {
-	browser  *browser.Device
-	queue    *Queue
-	features gputypes.Features
-	limits   gputypes.Limits
-	released bool
+	impl  *device.Device
+	queue *Queue
 }
 
 // Queue returns the device's command queue.
@@ -32,60 +36,48 @@ func (d *Device) Queue() *Queue {
 
 // Features returns the device's enabled features.
 func (d *Device) Features() gputypes.Features {
-	return d.features
+	if d == nil || d.impl == nil {
+		return 0
+	}
+	return d.impl.Features()
 }
 
 // Limits returns the device's resource limits.
 func (d *Device) Limits() gputypes.Limits {
-	return d.limits
+	if d == nil || d.impl == nil {
+		return gputypes.Limits{}
+	}
+	return d.impl.Limits()
 }
 
 // CreateBuffer creates a GPU buffer from the given descriptor.
 func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: buffer descriptor is nil")
 	}
-	jsDesc := browser.BuildBufferDescriptor(
-		desc.Label,
-		desc.Size,
-		uint64(desc.Usage),
-		desc.MappedAtCreation,
-	)
-	bb := d.browser.CreateBufferFromDesc(jsDesc)
-
-	state := MapStateUnmapped
-	if desc.MappedAtCreation {
-		// When mappedAtCreation is true the buffer starts in the Mapped state
-		// with the entire range [0, size) mapped. Record this so that
-		// MappedRange / Unmap work without calling MapAsync first.
-		bb.SetMappedAtCreation()
-		state = MapStateMapped
+	impl, err := d.impl.CreateBuffer(desc.Label, desc.Size, desc.Usage, desc.MappedAtCreation)
+	if err != nil {
+		return nil, err
 	}
-
-	return &Buffer{impl: resource.NewBufferBrowser(bb, desc.Size, desc.Usage, resource.MapState(state))}, nil
+	return &Buffer{impl: impl}, nil
 }
 
 // CreateTexture creates a GPU texture from the given descriptor.
 func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: texture descriptor is nil")
 	}
-	bt := d.browser.CreateTextureFromDesc(convertTextureDescriptor(desc))
-	impl := resource.NewTexture(bt, desc.Format)
+	impl, err := d.impl.CreateTexture(convertTextureDescriptor(desc), desc.Format)
+	if err != nil {
+		return nil, err
+	}
 	tex := &Texture{impl: impl}
 	impl.Pub = tex
 	return tex, nil
 }
 
 // newDetachedTexture returns a texture that carries the descriptor's format
-// and no backend object. It backs the public wgputest.NewDetachedTexture; see
-// newDetachedTextureFactory. desc may be nil.
+// and no backend object. It backs the public wgputest.NewDetachedTexture.
 func newDetachedTexture(desc *TextureDescriptor) *Texture {
 	var format gputypes.TextureFormat
 	if desc != nil {
@@ -113,11 +105,9 @@ func convertTextureDescriptor(desc *TextureDescriptor) js.Value {
 
 // CreateTextureView creates a view into a texture.
 func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor) (*TextureView, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	if texture == nil || texture.impl.Browser() == nil {
-		return nil, ErrReleased
+	var parent *resource.Texture
+	if texture != nil {
+		parent = texture.impl
 	}
 	if desc == nil {
 		desc = &TextureViewDescriptor{}
@@ -128,15 +118,15 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 		desc.BaseMipLevel, desc.MipLevelCount,
 		desc.BaseArrayLayer, desc.ArrayLayerCount,
 	)
-	bv := texture.impl.Browser().CreateView(jsDesc)
-	return &TextureView{impl: resource.NewTextureView(bv, texture.impl)}, nil
+	impl, err := d.impl.CreateTextureView(parent, jsDesc)
+	if err != nil {
+		return nil, err
+	}
+	return &TextureView{impl: impl}, nil
 }
 
 // CreateSampler creates a texture sampler from the given descriptor.
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		desc = &SamplerDescriptor{}
 	}
@@ -149,44 +139,42 @@ func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
 		desc.LodMinClamp, normalizeLodMaxClamp(desc.LodMaxClamp),
 		desc.Compare, normalizeAnisotropy(desc.Anisotropy),
 	)
-	bs := d.browser.CreateSamplerFromDesc(jsDesc)
-	return &Sampler{impl: resource.NewSampler(bs)}, nil
+	impl, err := d.impl.CreateSampler(jsDesc)
+	if err != nil {
+		return nil, err
+	}
+	return &Sampler{impl: impl}, nil
 }
 
 // CreateShaderModule creates a shader module from the given descriptor.
-// On browser, WGSL code goes directly to the browser's createShaderModule.
-// SPIR-V bytecode is not supported in the browser (browser only accepts WGSL).
 func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: shader module descriptor is nil")
 	}
 	jsDesc := browser.BuildShaderModuleDescriptor(desc.Label, desc.WGSL)
-	bm := d.browser.CreateShaderModuleFromDesc(jsDesc)
-	return &ShaderModule{impl: resource.NewShaderModule(bm)}, nil
+	impl, err := d.impl.CreateShaderModule(jsDesc)
+	if err != nil {
+		return nil, err
+	}
+	return &ShaderModule{impl: impl}, nil
 }
 
 // CreateBindGroupLayout creates a bind group layout from the given descriptor.
 func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGroupLayout, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: bind group layout descriptor is nil")
 	}
 	entries := convertBindGroupLayoutEntries(desc.Entries)
 	jsDesc := browser.BuildBindGroupLayoutDescriptor(desc.Label, entries)
-	bl := d.browser.CreateBindGroupLayoutFromDesc(jsDesc)
-	return &BindGroupLayout{impl: resource.NewBindGroupLayout(bl)}, nil
+	impl, err := d.impl.CreateBindGroupLayout(jsDesc)
+	if err != nil {
+		return nil, err
+	}
+	return &BindGroupLayout{impl: impl}, nil
 }
 
 // CreatePipelineLayout creates a pipeline layout from the given descriptor.
 func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*PipelineLayout, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: pipeline layout descriptor is nil")
 	}
@@ -199,15 +187,15 @@ func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*Pipeline
 		}
 	}
 	jsDesc := browser.BuildPipelineLayoutDescriptor(desc.Label, refs)
-	bp := d.browser.CreatePipelineLayoutFromDesc(jsDesc)
-	return &PipelineLayout{impl: resource.NewPipelineLayout(bp)}, nil
+	impl, err := d.impl.CreatePipelineLayout(jsDesc)
+	if err != nil {
+		return nil, err
+	}
+	return &PipelineLayout{impl: impl}, nil
 }
 
 // CreateBindGroup creates a bind group from the given descriptor.
 func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: bind group descriptor is nil")
 	}
@@ -219,36 +207,35 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	}
 	entries := convertBindGroupEntries(desc.Entries)
 	jsDesc := browser.BuildBindGroupDescriptor(desc.Label, layoutRef, entries)
-	bg := d.browser.CreateBindGroupFromDesc(jsDesc)
-	return &BindGroup{impl: resource.NewBindGroup(bg)}, nil
+	impl, err := d.impl.CreateBindGroup(jsDesc)
+	if err != nil {
+		return nil, err
+	}
+	return &BindGroup{impl: impl}, nil
 }
 
 // CreateRenderPipeline creates a render pipeline from the given descriptor.
 func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: render pipeline descriptor is nil")
 	}
-	if err := checkBrowserRenderConstants(desc); err != nil {
+	jsDesc := convertRenderPipelineDescriptor(desc)
+	hasFragment := desc.Fragment != nil
+	var fragmentConstants map[string]float64
+	if hasFragment {
+		fragmentConstants = desc.Fragment.Constants
+	}
+	impl, err := d.impl.CreateRenderPipeline(jsDesc, desc.Vertex.Constants, fragmentConstants, hasFragment)
+	if err != nil {
 		return nil, err
 	}
-	jsDesc := convertRenderPipelineDescriptor(desc)
-	bp := d.browser.CreateRenderPipelineFromDesc(jsDesc)
-	return &RenderPipeline{impl: pipeline.NewRenderPipeline(bp)}, nil
+	return &RenderPipeline{impl: impl}, nil
 }
 
 // CreateComputePipeline creates a compute pipeline from the given descriptor.
 func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
-	}
-	if err := checkBrowserStageConstants("compute", desc.Constants); err != nil {
-		return nil, err
 	}
 	var layoutRef js.Value
 	if desc.Layout != nil && desc.Layout.impl.Browser() != nil {
@@ -265,35 +252,33 @@ func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*Comput
 	jsDesc := browser.BuildComputePipelineDescriptor(
 		desc.Label, layoutRef, moduleRef, desc.EntryPoint, desc.Constants,
 	)
-	bp := d.browser.CreateComputePipelineFromDesc(jsDesc)
-	return &ComputePipeline{impl: pipeline.NewComputePipeline(bp)}, nil
+	impl, err := d.impl.CreateComputePipeline(jsDesc, desc.Constants)
+	if err != nil {
+		return nil, err
+	}
+	return &ComputePipeline{impl: impl}, nil
 }
 
 // CreateCommandEncoder creates a command encoder for recording GPU commands.
 func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandEncoder, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	label := ""
 	if desc != nil {
 		label = desc.Label
 	}
-	jsDesc := browser.BuildCommandEncoderDescriptor(label)
-	jsEncoder := d.browser.CreateCommandEncoder().Invoke(jsDesc)
-	be := browser.NewCommandEncoder(jsEncoder)
-	return &CommandEncoder{
-		impl: encoder.NewCommandEncoder(be),
-	}, nil
+	impl, err := d.impl.CreateCommandEncoder(label)
+	if err != nil {
+		return nil, err
+	}
+	return &CommandEncoder{impl: impl}, nil
 }
 
-// CreateFence creates a GPU synchronization fence.
-// On browser, fences are not needed (browser auto-polls).
-// Returns a no-op fence for API compatibility.
+// CreateFence creates a no-op fence for API compatibility.
 func (d *Device) CreateFence() (*Fence, error) {
-	if d.released {
-		return nil, ErrReleased
+	impl, err := d.impl.CreateFence()
+	if err != nil {
+		return nil, err
 	}
-	return &Fence{impl: &resource.Fence{}}, nil
+	return &Fence{impl: impl}, nil
 }
 
 // DestroyFence destroys a fence. No-op on browser — fences are JS-managed.
@@ -329,7 +314,7 @@ func (d *Device) PopErrorScope() *GPUError {
 // WaitIdle waits for all GPU work to complete.
 // On browser, the GPU is polled automatically. This is a no-op.
 func (d *Device) WaitIdle() error {
-	return nil
+	return d.impl.WaitIdle()
 }
 
 // Poll drives the per-device pending-map triage loop.
@@ -340,19 +325,14 @@ func (d *Device) Poll(pollType PollType) bool {
 }
 
 // FreeCommandBuffer is a no-op on browser — JS GC handles GPU resource cleanup.
-// This exists for API compatibility with the native backend where command buffers
-// must be explicitly freed after GPU submission completes.
 func (d *Device) FreeCommandBuffer(_ *CommandBuffer) {}
 
 // Release releases the device and all associated resources.
 func (d *Device) Release() {
-	if d.released {
+	if d == nil {
 		return
 	}
-	d.released = true
-	if d.browser != nil {
-		d.browser.Destroy()
-	}
+	d.impl.Release()
 }
 
 // --- Descriptor conversion helpers ---
@@ -424,28 +404,6 @@ func convertBindGroupEntries(entries []BindGroupEntry) []browser.BindGroupEntryJ
 	return result
 }
 
-// checkBrowserStageConstants checks a stage's constants as every build does
-// (pipeconst.Validate) before they reach JS, where a NaN or Infinity value
-// would throw a TypeError instead of returning an error.
-func checkBrowserStageConstants(stage string, constants map[string]float64) error {
-	if err := pipeconst.Validate(constants); err != nil {
-		return fmt.Errorf("wgpu: %s stage: %w", stage, err)
-	}
-	return nil
-}
-
-// checkBrowserRenderConstants applies checkBrowserStageConstants to the
-// vertex and the fragment stage.
-func checkBrowserRenderConstants(desc *RenderPipelineDescriptor) error {
-	if err := checkBrowserStageConstants("vertex", desc.Vertex.Constants); err != nil {
-		return err
-	}
-	if desc.Fragment != nil {
-		return checkBrowserStageConstants("fragment", desc.Fragment.Constants)
-	}
-	return nil
-}
-
 // convertRenderPipelineDescriptor converts a Go RenderPipelineDescriptor to
 // a JS descriptor object via browser.BuildRenderPipelineDescriptor.
 func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
@@ -493,8 +451,6 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 	}
 
 	// Multisample state; a zero mask means every sample (pipeline_defaults.go).
-	// GPUSampleMask is an [EnforceRange] unsigned long, so the high bits
-	// are dropped here as the native and -tags rust builds drop them.
 	ms := normalizeMultisample(desc.Multisample)
 	rpd.Multisample = &browser.MultisampleStateJS{
 		Count:                  ms.Count,
@@ -502,9 +458,7 @@ func convertRenderPipelineDescriptor(desc *RenderPipelineDescriptor) js.Value {
 		AlphaToCoverageEnabled: ms.AlphaToCoverageEnabled,
 	}
 
-	// Fragment state, with the WebGPU defaults for zero blend components
-	// (BlendFactorToJS sent "one" for an undefined dstFactor, whose default is
-	// "zero"); a copy, so the caller's targets are unchanged.
+	// Fragment state, with the WebGPU defaults for zero blend components.
 	if desc.Fragment != nil {
 		fs := *desc.Fragment
 		fs.Targets = normalizeColorTargets(fs.Targets)

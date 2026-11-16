@@ -4,13 +4,13 @@
 # context = all | native | native+rust | rust | wasm   (see README §3)
 # src	dst	context	class	reason
 # --- device -> children (construction, top-down; these are the legal direction) ---
-internal/device	internal/queue	all	N	device_native.go:24 queue *Queue (device_rust.go:23, device_browser.go:19)
-internal/device	internal/encoder	all	N	device_native.go:1034 CreateCommandEncoder; device_rust.go:368; device_browser.go:288
-internal/device	internal/resource	all	N	device_native.go:69 CreateBuffer; device_browser.go:41; rust device CreateBuffer
-internal/device	internal/pipeline	all	N	device_native.go:308 CreateShaderModule; device_browser.go:156
-internal/device	internal/surface	native	N	device_native.go:1284 d.instance.surfacesForDevice -> []*Surface, :1288 surface.discardForDevice
-internal/device	internal/hal	all	N	domain baseline: every extracted package keeps its hal imports (today root -> hal)
-internal/device	internal/core	all	N	domain baseline: device holds *core.Device (device_native.go:21)
+internal/device	internal/queue	all	N	device_native.go:56 queue *queue.Queue (the native implementation holds it; rust and browser keep the queue in the root layer)
+internal/device	internal/encoder	all	N	device_native.go:1397 CreateCommandEncoder; device_rust.go:251; device_browser.go:178
+internal/device	internal/resource	all	N	device_native.go:193 CreateBuffer; device_rust.go:82; device_browser.go:73
+internal/device	internal/pipeline	all	N	device_native.go:976 CreateRenderPipeline; device_rust.go; device_browser.go
+internal/device	internal/surface	native	N	device_native.go:1670 host.SurfacesForDevice -> []*surface.Surface (Release; seams_native.go InstanceHost)
+internal/device	internal/hal	all	N	domain baseline: every extracted package keeps its hal imports (native device_native.go; rust/browser bind their backend directly)
+internal/device	internal/core	all	N	domain baseline: device holds *core.Device (device_native.go:52; rust core.ErrReleased/PollType)
 internal/instance	internal/device	all	N	adapter_native.go:46 RequestDevice() (*Device, error), :63 adoptDevice(device); every variant has an adapter
 internal/instance	internal/surface	all	N	Instance.CreateSurface() (*Surface, error) (surface_browser.go:60, native path same signature)
 # --- the rest of the extraction graph (no cycle candidate, listed for completeness) ---
@@ -58,10 +58,12 @@ internal/resource	internal/core/track	native	N	texture_native.go:8
 internal/encoder	internal/core/track	native	N	computepass_native.go:11, encoder_native.go:10, renderbundle_finish.go:11
 internal/pendingwrites	internal/core/track	native	N	internal/pendingwrites/pending_writes.go:10
 internal/queue	internal/core/track	native	N	queue_native.go:12
+internal/device	internal/core/track	native	N	device_native.go:37 import; :874 track.TextureUsesResource; :889 bufferBindingUses; :901 storageTextureUses
+internal/device	internal/stencilblit	native	N	device_native.go:43 import; :1473 NewStencilUpload -> stencilblit.NewUpload(stencilHost{d: d}, ...); stencil_blit_cache_native.go:27 and stencil_host_native.go:25 import it (the upload payload the queue seam constructs)
 # --- the indirect draw helpers the encoder's pass encoder declares state for.
 internal/encoder	internal/indirect	all	N	renderpass_native.go RangeFits + record sizes 16/20; renderpass_rust.go:121 RecordOffset; renderpass_browser.go:116 RecordOffset
 # --- the pipeline constants the device's rust and browser variants derive state from.
-internal/device	internal/pipeconst	rust	N	device_rust.go:15
-internal/device	internal/pipeconst	wasm	N	device_browser.go:12
+internal/device	internal/pipeconst	rust	N	device_rust.go:23
+internal/device	internal/pipeconst	wasm	N	device_browser.go:22
 # --- the shader IR the resource shader module lowers through.
 internal/resource	internal/shaderir	native	N	shader_native.go:13

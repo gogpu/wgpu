@@ -378,7 +378,7 @@ func TestRenderPassDescriptorToHAL(t *testing.T) {
 }
 
 func TestImageCopyTextureToHAL(t *testing.T) {
-	texture := &Texture{impl: resource.NewTexture(nil, (&Device{}).seamView(), TextureFormatBGRA8Unorm, nil, nil)}
+	texture := &Texture{impl: resource.NewTexture(nil, nil, TextureFormatBGRA8Unorm, nil, nil)}
 	tex := ImageCopyTexture{
 		Texture:  texture,
 		MipLevel: 1,

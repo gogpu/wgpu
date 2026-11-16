@@ -101,7 +101,7 @@ func TestBindGroupHoldsTextureViewRefs(t *testing.T) {
 	texture.Release()
 	checkRefCounts("after user Release", 1)
 	group.Release()
-	device.destroyQueue().FlushAll()
+	device.impl.DestroyQueue().FlushAll()
 	checkRefCounts("after the bind group is destroyed", 0)
 }
 
@@ -203,10 +203,10 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 			buffer.Release()
 			texture.Release()
 			checkRefCounts("after user Release", 1)
-			device.destroyQueue().Triage(submission - 1)
+			device.impl.DestroyQueue().Triage(submission - 1)
 			checkRefCounts("before retirement", 1)
 			delayed.completed = submission
-			device.destroyQueue().Triage(delayed.PollCompleted())
+			device.impl.DestroyQueue().Triage(delayed.PollCompleted())
 			checkRefCounts("after retirement", 0)
 		})
 	}

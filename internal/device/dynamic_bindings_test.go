@@ -1,6 +1,9 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+package device
 
 import (
 	"testing"
@@ -9,6 +12,15 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/resource"
 )
+
+// testBuffer returns a Buffer backed by core state only, as the pre-move root
+// fixture did (NewTestBuffer): the dynamic-binding derivation reads Size and
+// never a HAL handle.
+func testBuffer(size uint64, usage gputypes.BufferUsage, label string) *resource.Buffer {
+	coreBuf := core.NewBuffer(nil, nil, usage, size, label)
+	coreBuf.Ref = core.NewResourceRef("Buffer:"+label, nil)
+	return resource.NewBufferFromCore(coreBuf)
+}
 
 // dynamicOffsetsTestGroup returns a bind group with, listed out of binding
 // order: binding 3, a 512-byte buffer bound at [0, 64) as dynamic read-only
@@ -21,9 +33,9 @@ func dynamicOffsetsTestGroup() *resource.BindGroup {
 		{Binding: 1, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, HasDynamicOffset: true}},
 	}
 	entries := []BindGroupEntry{
-		{Binding: 0, Buffer: NewTestBuffer(64, gputypes.BufferUsageUniform, "plain")},
-		{Binding: 1, Buffer: NewTestBuffer(1024, gputypes.BufferUsageUniform, "uniform"), Offset: 256, Size: 32},
-		{Binding: 3, Buffer: NewTestBuffer(512, gputypes.BufferUsageStorage, "storage"), Size: 64},
+		{Binding: 0, Buffer: testBuffer(64, gputypes.BufferUsageUniform, "plain")},
+		{Binding: 1, Buffer: testBuffer(1024, gputypes.BufferUsageUniform, "uniform"), Offset: 256, Size: 32},
+		{Binding: 3, Buffer: testBuffer(512, gputypes.BufferUsageStorage, "storage"), Size: 64},
 	}
 	return resource.NewBindGroup(&resource.BindGroupInit{DynamicBindings: buildDynamicBindings(layout, entries)})
 }

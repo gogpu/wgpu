@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/device"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
@@ -27,31 +29,34 @@ import (
 // (nil disables batching) and gets pool as the device's HAL encoder pool. The
 // queue's device seam is the device itself, exactly as the production
 // constructors wire it.
-func newTestDeviceWithQueue(coreDevice *core.Device, pool *encoderPool, halQueue hal.Queue, pending *pendingwrites.Writes) *Device {
-	device := &Device{core: coreDevice}
-	replaceTestQueue(device, pool, halQueue, pending)
-	return device
+func newTestDeviceWithQueue(coreDevice *core.Device, pool *encoder.Pool, halQueue hal.Queue, pending *pendingwrites.Writes) *Device {
+	q := newQueue(halQueue, pending)
+	impl := device.New(coreDevice, q.impl, pool)
+	dev := &Device{impl: impl, queue: q}
+	q.impl.SetDevice(impl)
+	return dev
 }
 
 // replaceTestQueue installs a hand-built queue on device: the queue submits
 // through halQueue, holds pending and gets pool as the device's HAL encoder
-// pool. Its device seam is the device itself.
-func replaceTestQueue(device *Device, pool *encoderPool, halQueue hal.Queue, pending *pendingwrites.Writes) {
-	device.cmdEncoderPool = pool
+// pool. Its device seam is the device's implementation.
+func replaceTestQueue(dev *Device, pool *encoder.Pool, halQueue hal.Queue, pending *pendingwrites.Writes) {
 	q := newQueue(halQueue, pending)
-	q.impl.SetDevice(newQueueDeviceHost(device))
-	device.queue = q
+	dev.impl.SetPoolForTest(pool)
+	dev.impl.SetQueueForTest(q.impl)
+	dev.queue = q
+	q.impl.SetDevice(dev.impl)
 }
 
 // newTestDeviceWithTracker creates a device that has a DeviceTracker and
 // encoder pool, using the noop backend.
 func newTestDeviceWithTracker(t *testing.T) (*Instance, *Adapter, *Device) {
 	t.Helper()
-	inst, adapter, device := newTestDevice(t)
-	if device.core == nil || device.core.Tracker() == nil {
+	inst, adapter, dev := newTestDevice(t)
+	if dev.impl.Core() == nil || dev.impl.Core().Tracker() == nil {
 		t.Skip("device has no tracker (no HAL integration)")
 	}
-	return inst, adapter, device
+	return inst, adapter, dev
 }
 
 // newTestDevice creates a noop test device (internal package wgpu access).
@@ -68,8 +73,8 @@ func newTestDevice(t *testing.T) (*Instance, *Adapter, *Device) {
 // drives the queue's completion behavior (a delayed PollCompleted).
 func newTestDeviceWithHALQueue(t *testing.T, wrap func(hal.Queue) hal.Queue) *Device {
 	t.Helper()
-	_, _, device := newTestDeviceThrough(t, wrap)
-	return device
+	_, _, dev := newTestDeviceThrough(t, wrap)
+	return dev
 }
 
 // newTestDeviceThrough creates a noop test device. A non-nil wrap replaces the
@@ -94,13 +99,13 @@ func newTestDeviceThrough(t *testing.T, wrap func(hal.Queue) hal.Queue) (*Instan
 	if wrap != nil {
 		halQueue = wrap(open.Queue)
 	}
-	device := newDeviceFromHAL(open.Device, halQueue, 0, adapters[0].Capabilities.Limits, "test-noop")
-	// The caller defers device.Release(); Release is idempotent, so releasing
+	dev := newDeviceFromHAL(open.Device, halQueue, 0, adapters[0].Capabilities.Limits, "test-noop")
+	// The caller defers dev.Release(); Release is idempotent, so releasing
 	// here too keeps the instance alive until the device is actually gone.
 	t.Cleanup(func() {
-		device.Release()
+		dev.Release()
 		adapters[0].Adapter.Destroy()
 		instance.Destroy()
 	})
-	return nil, nil, device
+	return nil, nil, dev
 }

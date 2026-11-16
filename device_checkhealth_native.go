@@ -1,5 +1,8 @@
 //go:build !rust && !(js && wasm)
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
 // CheckHealth returns an error when the backend reports the device as lost or
@@ -9,26 +12,8 @@ package wgpu
 // the DX12 backend implements the check (DEVICE_REMOVED diagnostics); the
 // other backends have no health signal and return nil.
 func (d *Device) CheckHealth() error {
-	if d == nil {
+	if d == nil || d.impl == nil {
 		return nil
 	}
-	if d.released.Load() {
-		return ErrReleased
-	}
-	if d.core == nil || !d.core.HasHAL() {
-		return nil
-	}
-	// Call the backend under the snatch read guard: a concurrent Release must
-	// not destroy the HAL device (and its diagnostic state) mid-check.
-	guard := d.core.SnatchLock().Read()
-	defer guard.Release()
-	halDevice := d.core.Raw(guard)
-	if halDevice == nil {
-		return nil
-	}
-	checker, ok := halDevice.(interface{ CheckHealth(string) error })
-	if !ok {
-		return nil
-	}
-	return checker.CheckHealth("Device.CheckHealth")
+	return d.impl.CheckHealth()
 }

@@ -48,3 +48,16 @@ target	internal/surface	internal/resource	all	S10
 target	internal/surface	internal/browser	wasm	S10
 inverted	internal/surface	internal/device	all	S10
 inverted	internal/surface	internal/instance	native	S10
+target	internal/device	internal/queue	all	S11
+target	internal/device	internal/encoder	all	S11
+target	internal/device	internal/resource	all	S11
+target	internal/device	internal/pipeline	all	S11
+target	internal/device	internal/surface	native	S11
+target	internal/device	internal/hal	all	S11
+target	internal/device	internal/core	all	S11
+target	internal/device	internal/browser	wasm	S11
+target	internal/device	internal/pipeconst	rust	S11
+target	internal/device	internal/pipeconst	wasm	S11
+target	internal/device	internal/core/track	native	S11
+inverted	internal/device	internal/instance	native+rust	S11
+target	internal/device	internal/stencilblit	native	S11

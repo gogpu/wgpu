@@ -155,7 +155,11 @@ func (i *Instance) createSurfaceFromCanvas(canvas js.Value) (*Surface, error) {
 //
 // Matches Rust wgpu SurfaceInterface::configure for WebSurface.
 func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error {
-	return s.impl.Configure(newSurfaceDeviceHost(device), surfaceConfiguration(config))
+	var host surface.DeviceHost
+	if device != nil && device.impl != nil {
+		host = device.impl
+	}
+	return s.impl.Configure(host, surfaceConfiguration(config))
 }
 
 // surfaceConfiguration converts the public surface configuration into the

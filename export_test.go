@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/device"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
@@ -97,12 +98,14 @@ func CommandBufferTestHALEncoder(cb *CommandBuffer) interface{} {
 // TestCmdEncoderPoolSize returns the number of free encoders in the device's pool (testing only).
 // Returns -1 if no pool is configured.
 func (d *Device) TestCmdEncoderPoolSize() int {
-	if d.cmdEncoderPool == nil {
+	if d == nil || d.impl == nil {
 		return -1
 	}
-	d.cmdEncoderPool.mu.Lock()
-	defer d.cmdEncoderPool.mu.Unlock()
-	return len(d.cmdEncoderPool.free)
+	pool, ok := d.impl.EncoderPool().(*encoder.Pool)
+	if !ok {
+		return -1
+	}
+	return pool.FreeCount()
 }
 
 // BufferTestReleased reports whether the buffer has been released (testing
@@ -126,7 +129,10 @@ func NewTestBufferFromCore(coreBuf *core.Buffer) *Buffer {
 
 // TestDestroyQueue returns the device's DestroyQueue (testing only).
 func (d *Device) TestDestroyQueue() *core.DestroyQueue {
-	return d.destroyQueue()
+	if d == nil || d.impl == nil {
+		return nil
+	}
+	return d.impl.DestroyQueue()
 }
 
 // TestResourceCounts returns resource counts from the global hub (testing only).
@@ -213,11 +219,41 @@ func SetTestRenderPipelineStripIndexFormat(p *RenderPipeline, format *gputypes.I
 }
 
 // TestMaintainAfterIdle exposes the private maintainAfterIdle for targeted coverage tests.
-func (d *Device) TestMaintainAfterIdle() { d.maintainAfterIdle() }
+func (d *Device) TestMaintainAfterIdle() {
+	if d == nil || d.impl == nil {
+		return
+	}
+	d.impl.MaintainAfterIdle()
+}
 
 // NewBareDeviceForTest returns a Device with no queue or HAL state (testing only).
 // Used to exercise nil-queue guard clauses in maintainAfterIdle.
-func NewBareDeviceForTest() *Device { return &Device{} }
+func NewBareDeviceForTest() *Device { return &Device{impl: &device.Device{}} }
+
+// NewTestDeviceWithCore returns a Device declaration layer over coreDevice,
+// with no queue and no pool (testing only).
+func NewTestDeviceWithCore(coreDevice *core.Device) *Device {
+	return &Device{impl: device.New(coreDevice, nil, nil)}
+}
+
+// testDeviceView returns the implementation as the shared device view, or an
+// untyped nil for a device without one (testing only).
+func testDeviceView(d *Device) core.DeviceView {
+	if d == nil || d.impl == nil {
+		return nil
+	}
+	return d.impl
+}
+
+// testDevicePool returns the device's encoder pool as its concrete type, or
+// nil when it has none (testing only).
+func testDevicePool(d *Device) *encoder.Pool {
+	if d == nil || d.impl == nil {
+		return nil
+	}
+	pool, _ := d.impl.EncoderPool().(*encoder.Pool)
+	return pool
+}
 
 // NewTestBuffer returns a Buffer backed by core state only (testing only).
 // HAL is nil; sufficient for validation unit tests that read Size/Usage/Label.
@@ -229,19 +265,17 @@ func NewTestBuffer(size uint64, usage gputypes.BufferUsage, label string) *Buffe
 
 // NewTestDeviceWithFeatures returns a Device with core state only (testing only).
 func NewTestDeviceWithFeatures(features gputypes.Features) *Device {
-	return &Device{
-		core: core.NewDevice(nil, nil, features, gputypes.DefaultLimits(), "test-device"),
-	}
+	return NewTestDeviceWithCore(core.NewDevice(nil, nil, features, gputypes.DefaultLimits(), "test-device"))
 }
 
 // NewTestCommandEncoderForDevice returns a minimal command encoder for validation tests.
-func NewTestCommandEncoderForDevice(device *Device) *CommandEncoder {
+func NewTestCommandEncoderForDevice(d *Device) *CommandEncoder {
 	return &CommandEncoder{
 		impl: encoder.NewCommandEncoder(encoder.CommandEncoderInit{
 			Core:   &core.CoreCommandEncoder{},
-			Device: encoderDeviceHost{d: device},
+			Device: d.impl,
 		}),
-		device: device,
+		device: d,
 	}
 }
 
@@ -282,21 +316,21 @@ func NewSurfaceFromHALForTest(halSurface hal.Surface, label string) *Surface {
 }
 
 // NewTextureFromHALForTest wraps a HAL texture in a Texture.
-func NewTextureFromHALForTest(halTexture hal.Texture, device *Device, format gputypes.TextureFormat) *Texture {
-	impl := resource.NewTexture(halTexture, device.seamView(), format, nil, nil)
+func NewTextureFromHALForTest(halTexture hal.Texture, d *Device, format gputypes.TextureFormat) *Texture {
+	impl := resource.NewTexture(halTexture, testDeviceView(d), format, nil, nil)
 	tex := &Texture{impl: impl}
 	impl.Pub = tex
 	return tex
 }
 
 // NewTextureViewFromHALForTest wraps a HAL texture view in a TextureView.
-func NewTextureViewFromHALForTest(halView hal.TextureView, device *Device) *TextureView {
-	return &TextureView{impl: resource.NewTextureView(&resource.TextureViewInit{HAL: halView, Device: device.seamView()})}
+func NewTextureViewFromHALForTest(halView hal.TextureView, d *Device) *TextureView {
+	return &TextureView{impl: resource.NewTextureView(&resource.TextureViewInit{HAL: halView, Device: testDeviceView(d)})}
 }
 
 // NewSamplerFromHALForTest wraps a HAL sampler in a Sampler.
-func NewSamplerFromHALForTest(halSampler hal.Sampler, device *Device) *Sampler {
-	return &Sampler{impl: resource.NewSampler(halSampler, device.seamView(), nil, 0, 0, 0)}
+func NewSamplerFromHALForTest(halSampler hal.Sampler, d *Device) *Sampler {
+	return &Sampler{impl: resource.NewSampler(halSampler, testDeviceView(d), nil, 0, 0, 0)}
 }
 
 // DeviceHalDeviceForTest returns the HAL device behind d.
@@ -308,8 +342,8 @@ func DeviceHalDeviceForTest(d *Device) hal.Device { return d.halDevice() }
 // requires an attachment. The bundle lives in internal/encoder after the S6
 // Move; the hook is one delegation, a free function for the reason the
 // render-pipeline hook above is one.
-func newEmptyBundle(device *Device) *RenderBundle {
-	return &RenderBundle{impl: encoder.NewEmptyBundleForTest(device.seamView())}
+func newEmptyBundle(d *Device) *RenderBundle {
+	return &RenderBundle{impl: encoder.NewEmptyBundleForTest(testDeviceView(d))}
 }
 
 // SetPassStateForTest seeds the render pass state the ExecuteBundles test

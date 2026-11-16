@@ -26,7 +26,7 @@ func TestQuerySet_NilSafeAccessors(t *testing.T) {
 // released field directly.
 func TestQuerySet_ReleaseNilCore(t *testing.T) {
 	t.Parallel()
-	qs := &QuerySet{impl: resource.NewQuerySet(nil, NewBareDeviceForTest().seamView())}
+	qs := &QuerySet{impl: resource.NewQuerySet(nil, testDeviceView(NewBareDeviceForTest()))}
 	if qs.impl.IsReleased() {
 		t.Fatal("a fresh query set must not be released")
 	}

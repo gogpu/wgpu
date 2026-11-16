@@ -79,8 +79,8 @@ func TestCommandBufferNilReleaseIsNoop(t *testing.T) {
 // CommandBuffer.Release) keep their meaning across the interface. A typed nil
 // boxed in the interface would compare non-nil and be called.
 func TestEncoderDeviceHostPoolIsUntypedNil(t *testing.T) {
-	host := encoderDeviceHost{d: &Device{}}
-	if pool := host.EncoderPool(); pool != nil {
+	device := NewBareDeviceForTest()
+	if pool := device.impl.EncoderPool(); pool != nil {
 		t.Fatalf("a device without a pool must give an untyped nil, got %T", pool)
 	}
 }

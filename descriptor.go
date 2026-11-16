@@ -266,39 +266,6 @@ type BindGroupEntry struct {
 	TextureView *TextureView // For texture bindings
 }
 
-// toHAL converts a BindGroupEntry to a gputypes.BindGroupEntry.
-func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
-	entry := gputypes.BindGroupEntry{
-		Binding: e.Binding,
-	}
-	var halView hal.TextureView
-	if e.TextureView != nil && e.TextureView.impl != nil {
-		halView = e.TextureView.impl.ResolveHAL()
-	}
-
-	switch {
-	case e.Buffer != nil:
-		halBuf := e.Buffer.impl.HALBuffer()
-		if halBuf != nil {
-			entry.Resource = gputypes.BufferBinding{
-				Buffer: halBuf.NativeHandle(),
-				Offset: e.Offset,
-				Size:   e.Size,
-			}
-		}
-	case e.Sampler != nil && e.Sampler.impl != nil && e.Sampler.impl.HAL() != nil:
-		entry.Resource = gputypes.SamplerBinding{
-			Sampler: e.Sampler.impl.HAL().NativeHandle(),
-		}
-	case halView != nil:
-		entry.Resource = gputypes.TextureViewBinding{
-			TextureView: halView.NativeHandle(),
-		}
-	}
-
-	return entry
-}
-
 // PipelineLayoutDescriptor describes a pipeline layout.
 type PipelineLayoutDescriptor struct {
 	Label            string
@@ -327,16 +294,6 @@ type StencilFaceState struct {
 
 func (s StencilFaceState) toHAL() hal.StencilFaceState {
 	return hal.StencilFaceState{Compare: s.Compare, FailOp: s.FailOp, DepthFailOp: s.DepthFailOp, PassOp: s.PassOp}
-}
-
-// keepsStencil reports whether the face keeps the stencil value whether the
-// stencil or the depth test passes or fails. The zero operation is WebGPU's
-// default, keep. Matches Rust wgpu-types StencilFaceState::is_read_only.
-func (s StencilFaceState) keepsStencil() bool {
-	keep := func(op gputypes.StencilOperation) bool {
-		return op == gputypes.StencilOperationKeep || op == gputypes.StencilOperationUndefined
-	}
-	return keep(s.FailOp) && keep(s.DepthFailOp) && keep(s.PassOp)
 }
 
 // DepthStencilState describes depth and stencil testing configuration.
@@ -372,19 +329,6 @@ func (d *DepthStencilState) toHAL() *hal.DepthStencilState {
 		DepthBias:           d.DepthBias,
 		DepthBiasSlopeScale: d.DepthBiasSlopeScale,
 		DepthBiasClamp:      d.DepthBiasClamp,
-	}
-}
-
-// resolveDepthCompare gives the HAL CompareFunctionAlways for a depthCompare
-// the descriptor left undefined. GPUDepthStencilState.depthCompare has no
-// default: core validation, which runs first, rejects its absence where the
-// spec requires it, and elsewhere the spec's "compare fragment" algorithm
-// passes every fragment for an undefined compare, which is "always"
-// (index.bs). The backends take the value literally: DX12 mapped Undefined to
-// NEVER and drew nothing. Rust wgpu-hal does ds.depth_compare.unwrap_or_default().
-func resolveDepthCompare(ds *hal.DepthStencilState) {
-	if ds != nil && ds.DepthCompare == gputypes.CompareFunctionUndefined {
-		ds.DepthCompare = gputypes.CompareFunctionAlways
 	}
 }
 

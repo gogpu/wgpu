@@ -32,39 +32,6 @@ func TestRustStencilOperationValues(t *testing.T) {
 	}
 }
 
-// TestRustErrorFilterToNative checks that each error scope filter reaches
-// wgpu-native as the webgpu.h member of the same name. ErrorFilter has no
-// gputypes counterpart: its values are core's (Validation = 0), as on the
-// native build, while webgpu.h numbers them from 1, so a plain cast pushed a
-// scope for the wrong error type (OutOfMemory became Validation).
-func TestRustErrorFilterToNative(t *testing.T) {
-	for _, c := range []struct {
-		filter ErrorFilter
-		want   rwgpu.ErrorFilter
-	}{
-		{ErrorFilterValidation, rwgpu.ErrorFilterValidation},
-		{ErrorFilterOutOfMemory, rwgpu.ErrorFilterOutOfMemory},
-		{ErrorFilterInternal, rwgpu.ErrorFilterInternal},
-	} {
-		got, err := errorFilterToRust(c.filter)
-		if err != nil {
-			t.Errorf("%v: errorFilterToRust = %v, want wgpu-native filter %d", c.filter, err, c.want)
-			continue
-		}
-		if got != c.want {
-			t.Errorf("%v: wgpu-native filter %d, want %d", c.filter, got, c.want)
-		}
-	}
-	// An unmapped filter is an error, never a silent Validation fallback:
-	// wgpu-native panics on an unknown filter and the panic aborts the process
-	// across the FFI boundary (P3-API-025).
-	for _, f := range []ErrorFilter{-1, 3, 42} {
-		if _, err := errorFilterToRust(f); err == nil {
-			t.Errorf("errorFilterToRust(%d) = nil error, want an error", int(f))
-		}
-	}
-}
-
 // TestRustMapModeValues pins the -tags rust MapMode constants, which have no
 // gputypes counterpart and are cast to go-webgpu's type in MapAsync, to the
 // go-webgpu (webgpu.h) values.

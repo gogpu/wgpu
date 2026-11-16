@@ -61,11 +61,11 @@ func (e *passRecordingEncoder) BeginComputePass(desc *hal.ComputePassDescriptor)
 func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 	command := &passRecordingEncoder{CommandEncoder: &noop.CommandEncoder{}}
 	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}, commandEncoder: command})
-	iv := device.core.IndirectValidation()
+	iv := device.impl.Core().IndirectValidation()
 	if iv == nil {
 		t.Fatal("the noop device has no indirect validation; the test needs it")
 	}
-	indirectCore := core.NewBuffer(&noop.Buffer{}, device.core, BufferUsageIndirect|BufferUsageStorage, 64, "indirect")
+	indirectCore := core.NewBuffer(&noop.Buffer{}, device.impl.Core(), BufferUsageIndirect|BufferUsageStorage, 64, "indirect")
 	indirectCore.Ref = core.NewResourceRef("Buffer:indirect", nil)
 	indirect := NewTestBufferFromCore(indirectCore)
 	encoder, err := device.CreateCommandEncoder(nil)

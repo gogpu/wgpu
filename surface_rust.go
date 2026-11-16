@@ -98,7 +98,11 @@ func (i *Instance) createSurface(target SurfaceTargetUnsafe, targetSource Surfac
 
 // Configure configures the surface for presentation.
 func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error {
-	return s.impl.Configure(newSurfaceDeviceHost(device), surfaceConfiguration(config))
+	var host surface.DeviceHost
+	if device != nil && device.impl != nil {
+		host = device.impl
+	}
+	return s.impl.Configure(host, surfaceConfiguration(config))
 }
 
 // surfaceConfiguration converts the public surface configuration into the

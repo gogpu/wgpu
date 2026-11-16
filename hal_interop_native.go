@@ -26,10 +26,10 @@ func (a *Adapter) halHandles() hal.Handles {
 
 // halHandles is the native-build body of Device.HAL.
 func (d *Device) halHandles() hal.Handles {
-	if d == nil || d.core == nil {
+	if d == nil || d.impl == nil || d.impl.Core() == nil {
 		return hal.Handles{}
 	}
-	return d.core.HALHandles()
+	return d.impl.Core().HALHandles()
 }
 
 // halHandles is the native-build body of Surface.HAL.

@@ -257,7 +257,14 @@ func (t SurfaceTargetUnsafe) halTarget() (hal.SurfaceTarget, error) {
 // Configure configures the surface for presentation.
 // Must be called before GetCurrentTexture().
 func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error {
-	host := newSurfaceDeviceHost(device)
+	// The device implementation is the surface seam value: the internal device
+	// satisfies surface.DeviceHost directly (the S1 to S10 adapter is gone). A
+	// nil device, or a declaration layer without an implementation, hands the
+	// surface an untyped nil, which its "not configured" checks keep reading.
+	var host surface.DeviceHost
+	if device != nil && device.impl != nil {
+		host = device.impl
+	}
 
 	// The cross-instance rejection is a root fact: the instance the surface is
 	// registered with is this package's type. Standard API objects must share an
@@ -281,8 +288,8 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	// the device's backend and hand it in as a value; the implementation never
 	// names the instance.
 	var halInstance hal.Instance
-	if device != nil && device.core != nil && s.instance != nil && s.instance.core != nil {
-		halInstance = s.instance.core.HALInstanceForBackend(device.core.Backend())
+	if device != nil && device.impl != nil && device.impl.Core() != nil && s.instance != nil && s.instance.core != nil {
+		halInstance = s.instance.core.HALInstanceForBackend(device.impl.Core().Backend())
 	}
 
 	return mapSurfaceConfigureError(s.impl.Configure(host, surfaceConfiguration(config), sameInstance, halInstance))

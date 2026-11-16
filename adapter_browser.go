@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/device"
 	"github.com/gogpu/wgpu/internal/queue"
 )
 
@@ -69,10 +70,8 @@ func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
 	q := &Queue{impl: queue.New(bd.Queue())}
 
 	return &Device{
-		browser:  bd,
-		queue:    q,
-		features: deviceFeatures,
-		limits:   deviceLimits,
+		impl:  device.NewBrowser(bd, deviceFeatures, deviceLimits),
+		queue: q,
 	}, nil
 }
 

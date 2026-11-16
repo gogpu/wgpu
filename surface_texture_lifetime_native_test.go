@@ -8,6 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
@@ -142,7 +143,7 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	// Install the batching path used by Vulkan, DX12, and Metal. The write is
 	// valid when recorded, then its acquisition retires before Submit.
 	rawQueue := &mockBatchingQueue{}
-	pool := newEncoderPool(rawDevice)
+	pool := encoder.NewPool(rawDevice)
 	replaceTestQueue(device, pool, rawQueue, pendingwrites.New(rawDevice, rawQueue, pool, nil))
 
 	texture := surfaceTexture.AsTexture()
@@ -182,7 +183,7 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 
 	submitErr := errors.New("submit rejected")
 	rawQueue := &mockBatchingQueue{submitErr: submitErr}
-	pool := newEncoderPool(rawDevice)
+	pool := encoder.NewPool(rawDevice)
 	replaceTestQueue(device, pool, rawQueue, pendingwrites.New(rawDevice, rawQueue, pool, nil))
 
 	err := device.Queue().WriteTexture(
@@ -222,12 +223,12 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		defer view.Release()
 		surface.DiscardTexture()
 
-		encoder, err := device.CreateCommandEncoder(nil)
+		enc, err := device.CreateCommandEncoder(nil)
 		if err != nil {
 			t.Fatalf("CreateCommandEncoder: %v", err)
 		}
-		defer encoder.DiscardEncoding()
-		_, err = encoder.BeginRenderPass(&RenderPassDescriptor{
+		defer enc.DiscardEncoding()
+		_, err = enc.BeginRenderPass(&RenderPassDescriptor{
 			ColorAttachments: []RenderPassColorAttachment{{
 				View:    view,
 				LoadOp:  gputypes.LoadOpClear,
@@ -245,13 +246,13 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		defer surface.Release()
 
 		texture := surfaceTexture.AsTexture()
-		encoder, err := device.CreateCommandEncoder(nil)
+		enc, err := device.CreateCommandEncoder(nil)
 		if err != nil {
 			t.Fatalf("CreateCommandEncoder: %v", err)
 		}
 		surface.DiscardTexture()
-		encoder.CopyTextureToTexture(texture, texture, nil)
-		if _, err := encoder.Finish(); !errors.Is(err, ErrReleased) {
+		enc.CopyTextureToTexture(texture, texture, nil)
+		if _, err := enc.Finish(); !errors.Is(err, ErrReleased) {
 			t.Fatalf("Finish after copy from retired texture = %v, want ErrReleased", err)
 		}
 	})
@@ -301,11 +302,11 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 			t.Fatalf("CreateView: %v", err)
 		}
 		defer view.Release()
-		encoder, err := device.CreateCommandEncoder(nil)
+		enc, err := device.CreateCommandEncoder(nil)
 		if err != nil {
 			t.Fatalf("CreateCommandEncoder: %v", err)
 		}
-		pass, err := encoder.BeginRenderPass(&RenderPassDescriptor{
+		pass, err := enc.BeginRenderPass(&RenderPassDescriptor{
 			ColorAttachments: []RenderPassColorAttachment{{
 				View:    view,
 				LoadOp:  gputypes.LoadOpClear,
@@ -318,14 +319,14 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		if err := pass.End(); err != nil {
 			t.Fatalf("RenderPass.End: %v", err)
 		}
-		commandBuffer, err := encoder.Finish()
+		commandBuffer, err := enc.Finish()
 		if err != nil {
 			t.Fatalf("Finish: %v", err)
 		}
 		defer commandBuffer.Release()
 
 		rawQueue := &mockBatchingQueue{}
-		replaceTestQueue(device, device.cmdEncoderPool, rawQueue, nil)
+		replaceTestQueue(device, testDevicePool(device), rawQueue, nil)
 		surface.DiscardTexture()
 		if _, err := device.Queue().Submit(commandBuffer); !errors.Is(err, ErrSubmitTextureDestroyed) {
 			t.Fatalf("Submit with retired attachment = %v, want ErrSubmitTextureDestroyed", err)
@@ -404,12 +405,12 @@ func TestBufferCopyToSurfaceTextureHonorsAcquisitionLifetime(t *testing.T) {
 		Size:         Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
 	}}
 
-	encoder, err := device.CreateCommandEncoder(nil)
+	enc, err := device.CreateCommandEncoder(nil)
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder: %v", err)
 	}
-	encoder.CopyBufferToTexture(buffer, texture, region)
-	commandBuffer, err := encoder.Finish()
+	enc.CopyBufferToTexture(buffer, texture, region)
+	commandBuffer, err := enc.Finish()
 	if err != nil {
 		t.Fatalf("active CopyBufferToTexture: %v", err)
 	}
@@ -441,12 +442,12 @@ func TestBufferCopyToSurfaceTextureHonorsAcquisitionLifetime(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			encoder, err := device.CreateCommandEncoder(nil)
+			enc, err := device.CreateCommandEncoder(nil)
 			if err != nil {
 				t.Fatalf("CreateCommandEncoder: %v", err)
 			}
-			test.record(encoder)
-			if _, err := encoder.Finish(); !errors.Is(err, ErrReleased) {
+			test.record(enc)
+			if _, err := enc.Finish(); !errors.Is(err, ErrReleased) {
 				t.Fatalf("Finish = %v, want ErrReleased", err)
 			}
 		})

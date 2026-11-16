@@ -22,7 +22,7 @@ func (a *Adapter) halHandles() hal.Handles {
 
 // halHandles is the browser-build body of Device.HAL.
 func (d *Device) halHandles() hal.Handles {
-	if d == nil || d.released {
+	if d == nil || d.impl == nil || d.impl.IsReleased() {
 		return hal.Handles{}
 	}
 	return hal.Handles{Kind: hal.KindBrowser}

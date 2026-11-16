@@ -91,13 +91,13 @@ func (d *captureDevice) CreateCommandEncoder(*hal.CommandEncoderDescriptor) (hal
 func newCaptureDevice(h *captureDevice) *Device {
 	limits := DefaultLimits()
 	features := gputypes.Features(gputypes.FeatureTimestampQuery)
-	return &Device{core: core.NewDevice(h, nil, features, limits, "query-render-bundle-test")}
+	return NewTestDeviceWithCore(core.NewDevice(h, nil, features, limits, "query-render-bundle-test"))
 }
 
 func newTestQuerySet(raw hal.QuerySet, device *Device) *QuerySet {
 	return &QuerySet{impl: resource.NewQuerySet(
-		core.NewQuerySet(raw, device.core, hal.QueryTypeTimestamp, 4, "test query set"),
-		device.seamView(),
+		core.NewQuerySet(raw, device.impl.Core(), hal.QueryTypeTimestamp, 4, "test query set"),
+		testDeviceView(device),
 	)}
 }
 
@@ -183,8 +183,8 @@ func TestBeginComputePassTimestampWrites(t *testing.T) {
 	released := newTestQuerySet(raw, device)
 	released.Release()
 	occlusion := &QuerySet{impl: resource.NewQuerySet(
-		core.NewQuerySet(raw, device.core, hal.QueryTypeOcclusion, 4, "occlusion"),
-		device.seamView(),
+		core.NewQuerySet(raw, device.impl.Core(), hal.QueryTypeOcclusion, 4, "occlusion"),
+		testDeviceView(device),
 	)}
 	other := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
 	foreign := newTestQuerySet(raw, other)
@@ -254,7 +254,7 @@ func TestBeginComputePassTimestampWritesNeedsFeature(t *testing.T) {
 	end := uint32(1)
 	raw := &testHALResource{}
 	h := &captureDevice{Device: &noop.Device{}, commandEncoder: &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}}
-	device := &Device{core: core.NewDevice(h, nil, 0, DefaultLimits(), "no-timestamp-feature")}
+	device := NewTestDeviceWithCore(core.NewDevice(h, nil, 0, DefaultLimits(), "no-timestamp-feature"))
 	querySet := newTestQuerySet(raw, device)
 	encoder, err := device.CreateCommandEncoder(nil)
 	if err != nil {
@@ -412,7 +412,7 @@ func TestResolveQuerySetRecordsErrors(t *testing.T) {
 }
 
 func TestCreationWithoutHALDevice(t *testing.T) {
-	device := &Device{core: nil}
+	device := NewTestDeviceWithCore(nil)
 	tests := []struct {
 		name string
 		call func() error
@@ -432,7 +432,7 @@ func TestRenderPassDescriptorTimestampWritesToHAL(t *testing.T) {
 	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}})
 	raw := &testHALResource{}
 	active := newTestQuerySet(raw, device)
-	defer device.destroyQueue().FlushAll()
+	defer device.impl.DestroyQueue().FlushAll()
 	defer active.Release()
 	released := newTestQuerySet(raw, device)
 	released.Release()

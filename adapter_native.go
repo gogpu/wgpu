@@ -7,6 +7,8 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/device"
+	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
 )
 
@@ -50,22 +52,22 @@ func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
 	}
 
 	var (
-		device *Device
-		err    error
+		dev *Device
+		err error
 	)
 	if a.core.HasHAL() {
-		device, err = a.requestDeviceHAL(desc)
+		dev, err = a.requestDeviceHAL(desc)
 	} else {
-		device, err = a.requestDeviceCore(desc)
+		dev, err = a.requestDeviceCore(desc)
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := a.instance.adoptDevice(device); err != nil {
-		device.Release()
+	if err := a.instance.adoptDevice(dev); err != nil {
+		dev.Release()
 		return nil, err
 	}
-	return device, nil
+	return dev, nil
 }
 
 func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
@@ -104,20 +106,17 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 	// Single shared encoder pool for both user command encoders (CreateCommandEncoder)
 	// and internal staging encoders (PendingWrites). Matches Rust wgpu-core which uses
 	// one device.command_allocator for both (queue.rs:1373).
-	pool := newEncoderPool(openDevice.Device)
+	pool := encoder.NewPool(openDevice.Device)
 
 	q := newQueue(openDevice.Queue, pendingwrites.New(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()))
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
 
-	device := &Device{
-		core:           coreDevice,
-		queue:          q,
-		cmdEncoderPool: pool,
-	}
-	q.impl.SetDevice(newQueueDeviceHost(device))
+	impl := device.New(coreDevice, q.impl, pool)
+	dev := &Device{impl: impl, queue: q}
+	q.impl.SetDevice(impl)
 
-	return device, nil
+	return dev, nil
 }
 
 func (a *Adapter) requestDeviceCore(desc *DeviceDescriptor) (*Device, error) {
@@ -143,7 +142,7 @@ func (a *Adapter) requestDeviceCore(desc *DeviceDescriptor) (*Device, error) {
 		coreDevice.Label = desc.Label
 	}
 
-	return &Device{core: coreDevice}, nil
+	return &Device{impl: device.New(coreDevice, nil, nil)}, nil
 }
 
 // SurfaceCapabilities describes what a surface supports on this adapter.

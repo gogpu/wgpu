@@ -16,8 +16,8 @@ func TestEncoderPool_AcquireCreatesNew(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
-	defer pool.destroy()
+	pool := encoder.NewPool(dev)
+	defer pool.Destroy()
 
 	enc, err := pool.Acquire()
 	if err != nil {
@@ -32,8 +32,8 @@ func TestEncoderPool_ReleaseAndReacquire(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
-	defer pool.destroy()
+	pool := encoder.NewPool(dev)
+	defer pool.Destroy()
 
 	// Acquire, use, release.
 	enc1, err := pool.Acquire()
@@ -63,9 +63,7 @@ func TestEncoderPool_ReleaseAndReacquire(t *testing.T) {
 	}
 
 	// The pool should be empty now.
-	pool.mu.Lock()
-	freeCount := len(pool.free)
-	pool.mu.Unlock()
+	freeCount := pool.FreeCount()
 	if freeCount != 0 {
 		t.Errorf("expected 0 free encoders after acquire, got %d", freeCount)
 	}
@@ -75,8 +73,8 @@ func TestEncoderPool_MultipleEncoders(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
-	defer pool.destroy()
+	pool := encoder.NewPool(dev)
+	defer pool.Destroy()
 
 	// Acquire multiple encoders (simulates maxFramesInFlight=2).
 	enc1, err := pool.Acquire()
@@ -92,10 +90,7 @@ func TestEncoderPool_MultipleEncoders(t *testing.T) {
 	pool.Release(enc1)
 	pool.Release(enc2)
 
-	pool.mu.Lock()
-	freeCount := len(pool.free)
-	pool.mu.Unlock()
-	if freeCount != 2 {
+	if freeCount := pool.FreeCount(); freeCount != 2 {
 		t.Errorf("expected 2 free encoders, got %d", freeCount)
 	}
 }
@@ -104,7 +99,7 @@ func TestEncoderPool_DestroyReleasesAll(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
+	pool := encoder.NewPool(dev)
 
 	enc1, err := pool.Acquire()
 	if err != nil {
@@ -113,12 +108,9 @@ func TestEncoderPool_DestroyReleasesAll(t *testing.T) {
 	pool.Release(enc1)
 
 	// Destroy should not panic.
-	pool.destroy()
+	pool.Destroy()
 
-	pool.mu.Lock()
-	freeCount := len(pool.free)
-	pool.mu.Unlock()
-	if freeCount != 0 {
+	if freeCount := pool.FreeCount(); freeCount != 0 {
 		t.Errorf("expected 0 free encoders after destroy, got %d", freeCount)
 	}
 }
@@ -131,11 +123,9 @@ func TestEncoderPool_TracksOutstanding(t *testing.T) {
 	defer cleanup()
 
 	dev := &countingDevice{Device: noopDev}
-	pool := newEncoderPool(dev)
+	pool := encoder.NewPool(dev)
 	outstanding := func() int {
-		pool.mu.Lock()
-		defer pool.mu.Unlock()
-		return len(pool.outstanding)
+		return pool.OutstandingCount()
 	}
 	released, retired, abandoned := mustAcquire(t, pool), mustAcquire(t, pool), mustAcquire(t, pool)
 	if n := outstanding(); n != 3 {
@@ -153,7 +143,7 @@ func TestEncoderPool_TracksOutstanding(t *testing.T) {
 	if dev.destroyed != 1 {
 		t.Fatalf("%d encoders destroyed before destroy, want 1 (the retired one)", dev.destroyed)
 	}
-	pool.destroy()
+	pool.Destroy()
 	if n := outstanding(); n != 0 {
 		t.Errorf("%d outstanding after destroy, want 0", n)
 	}
@@ -188,7 +178,7 @@ type countingEncoder struct {
 
 func (e *countingEncoder) Destroy() { e.device.destroyed++ }
 
-func mustAcquire(t *testing.T, pool *encoderPool) hal.CommandEncoder {
+func mustAcquire(t *testing.T, pool *encoder.Pool) hal.CommandEncoder {
 	t.Helper()
 	enc, err := pool.Acquire()
 	if err != nil {

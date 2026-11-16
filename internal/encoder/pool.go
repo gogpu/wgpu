@@ -1,17 +1,26 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+package encoder
+
+// This file holds the device's HAL command encoder pool. It arrived here from
+// the root package with the device in the S11 Move (ADR-070 §15.1: encoder.Pool),
+// which supersedes the two stale comments on the old root files: encoder_pool.go
+// said the pool "moves to internal/device at S11" and recording_registry.go said
+// the same. The contract is the ADR's, and the types implement internal/core's
+// seam interfaces, which the encoder domain names.
 
 import (
 	"fmt"
 	"sync"
 
-	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
-// encoderPool pools hal.CommandEncoder instances to avoid creating expensive
-// GPU resources (DX12 command allocators, Vulkan command pools) every frame.
+// Pool pools hal.CommandEncoder instances to avoid creating expensive GPU
+// resources (DX12 command allocators, Vulkan command pools) every frame.
 // Matches Rust wgpu-core's CommandAllocator pattern (allocator.rs).
 //
 // Each encoder in the pool is in "closed" state — ready for BeginEncoding.
@@ -21,7 +30,7 @@ import (
 // The pool is backend-agnostic: DX12 encoders keep their ID3D12CommandAllocator,
 // Vulkan encoders keep their VkCommandPool, and lightweight backends (GLES,
 // Software, Metal, Noop) pass through with negligible overhead.
-type encoderPool struct {
+type Pool struct {
 	mu   sync.Mutex
 	free []hal.CommandEncoder
 
@@ -40,9 +49,9 @@ type encoderPool struct {
 	halDevice hal.Device
 }
 
-// newEncoderPool creates a new encoder pool for the given HAL device.
-func newEncoderPool(halDevice hal.Device) *encoderPool {
-	return &encoderPool{
+// NewPool creates a new encoder pool for the given HAL device.
+func NewPool(halDevice hal.Device) *Pool {
+	return &Pool{
 		outstanding: make(map[hal.CommandEncoder]struct{}),
 		halDevice:   halDevice,
 	}
@@ -56,7 +65,7 @@ type poolManagedSetter interface {
 
 // Acquire returns a command encoder from the pool, or creates a new one.
 // The returned encoder is in "closed" state, ready for BeginEncoding.
-func (p *encoderPool) Acquire() (hal.CommandEncoder, error) {
+func (p *Pool) Acquire() (hal.CommandEncoder, error) {
 	p.mu.Lock()
 	if n := len(p.free); n > 0 {
 		enc := p.free[n-1]
@@ -89,26 +98,29 @@ func (p *encoderPool) Acquire() (hal.CommandEncoder, error) {
 
 // Release returns an encoder to the pool after ResetAll has been called.
 // The encoder must be in "closed" state (not recording).
-func (p *encoderPool) Release(enc hal.CommandEncoder) {
+func (p *Pool) Release(enc hal.CommandEncoder) {
 	p.mu.Lock()
 	delete(p.outstanding, enc)
 	p.free = append(p.free, enc)
 	p.mu.Unlock()
 }
 
-// retire destroys an acquired encoder that its holder will not return (the
+// Retire destroys an acquired encoder that its holder will not return (the
 // pending writes of a device being released).
-func (p *encoderPool) Retire(enc hal.CommandEncoder) {
+func (p *Pool) Retire(enc hal.CommandEncoder) {
 	p.mu.Lock()
 	delete(p.outstanding, enc)
 	p.mu.Unlock()
 	enc.Destroy()
 }
 
-// destroy releases every encoder of the pool, the pooled ones and the ones
+// Destroy releases every encoder of the pool, the pooled ones and the ones
 // still handed out. Called during device shutdown, after the GPU is idle:
 // destroying an encoder frees its command buffers in any state but pending.
-func (p *encoderPool) destroy() {
+func (p *Pool) Destroy() {
+	if p == nil {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -122,9 +134,25 @@ func (p *encoderPool) destroy() {
 	clear(p.outstanding)
 }
 
-// The pool implements the encoder seam's HAL pool interface declared in
-// internal/core (ADR-070 shape B). The concrete type stays in the root
-// package until S11 moves it into internal/device with the Device; from S4's
-// Move the encoder domain reaches it through the seam accessor's
-// core.HalEncoderPool result, never by naming encoderPool.
-var _ core.HalEncoderPool = (*encoderPool)(nil)
+// FreeCount returns the number of encoders the pool holds ready for reuse.
+// The root package's test hooks read it; the pool's lifecycle never uses it.
+func (p *Pool) FreeCount() int {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.free)
+}
+
+// OutstandingCount returns the number of encoders the pool handed out that
+// have not come back. The root package's test hooks read it; the pool's
+// lifecycle never uses it.
+func (p *Pool) OutstandingCount() int {
+	if p == nil {
+		return 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.outstanding)
+}

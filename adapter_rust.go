@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/device"
 	"github.com/gogpu/wgpu/internal/queue"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
@@ -73,12 +74,13 @@ func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
 
 	rq := rd.Queue()
 
+	impl := device.NewRust(rd, deviceFeatures, deviceLimits)
+	impl.SetInstance(rustInstanceHost{i: a.instance})
+
 	return &Device{
-		r:        rd,
+		impl:     impl,
 		instance: a.instance,
 		queue:    &Queue{impl: queue.New(rq)},
-		features: deviceFeatures,
-		limits:   deviceLimits,
 	}, nil
 }
 

@@ -34,10 +34,10 @@ func (a *Adapter) halHandles() hal.Handles {
 // halHandles is the "rust"-build body of Device.HAL. Adapter stays zero: the
 // wrapper does not keep the adapter it was requested from; call Adapter.HAL.
 func (d *Device) halHandles() hal.Handles {
-	if d == nil || d.released || d.r == nil {
+	if d == nil || d.impl == nil || d.impl.IsReleased() || d.impl.R() == nil {
 		return hal.Handles{}
 	}
-	h := hal.WebGPUHandles{Device: d.r.Handle()}
+	h := hal.WebGPUHandles{Device: d.impl.R().Handle()}
 	if d.instance != nil && d.instance.r != nil {
 		h.Instance = d.instance.r.Handle()
 	}

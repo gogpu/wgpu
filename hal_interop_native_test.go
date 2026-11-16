@@ -57,13 +57,13 @@ func TestHALNativeNilObjects(t *testing.T) {
 // hands the HAL device through, the no-op backend names its Kind, and a device
 // with no HAL implementation yields the zero Handles.
 func TestHALNativeNoopDevice(t *testing.T) {
-	device := &Device{core: core.NewDevice(&noop.Device{}, nil, 0, gputypes.DefaultLimits(), "hal-test")}
+	device := NewTestDeviceWithCore(core.NewDevice(&noop.Device{}, nil, 0, gputypes.DefaultLimits(), "hal-test"))
 	want := publichal.Handles{Kind: publichal.KindNoop}
 	if got := device.HAL(); got != want {
 		t.Fatalf("noop device HAL() = %+v, want %+v", got, want)
 	}
 
-	coreOnly := &Device{core: core.NewDevice(nil, nil, 0, gputypes.DefaultLimits(), "hal-test")}
+	coreOnly := NewTestDeviceWithCore(core.NewDevice(nil, nil, 0, gputypes.DefaultLimits(), "hal-test"))
 	if got := coreOnly.HAL(); got != (publichal.Handles{}) {
 		t.Fatalf("device without HAL HAL() = %+v, want zero Handles", got)
 	}
@@ -108,7 +108,7 @@ func TestHALNativeReleasedObjects(t *testing.T) {
 	})
 
 	t.Run("Device", func(t *testing.T) {
-		device := &Device{core: core.NewDevice(&noop.Device{}, nil, 0, gputypes.DefaultLimits(), "hal-test")}
+		device := NewTestDeviceWithCore(core.NewDevice(&noop.Device{}, nil, 0, gputypes.DefaultLimits(), "hal-test"))
 		device.Release()
 		if got := device.HAL(); got != (publichal.Handles{}) {
 			t.Fatalf("released device HAL() = %+v, want zero Handles", got)

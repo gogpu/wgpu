@@ -1,6 +1,9 @@
 //go:build rust
 
-package wgpu
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+package device
 
 import (
 	"errors"
@@ -13,7 +16,9 @@ import (
 // TestRustPipelineConstants checks that pipeline constants on any stage are
 // refused under -tags rust instead of being dropped (go-webgpu does not map
 // them yet), and that a bad key or value gets the same error as every other
-// build first.
+// build first. It moved with the check into internal/device at S11; the
+// descriptor the check reads is now the vertex/fragment constant maps the root
+// declaration layer passes.
 func TestRustPipelineConstants(t *testing.T) {
 	type consts = map[string]float64
 	tests := []struct {
@@ -34,11 +39,8 @@ func TestRustPipelineConstants(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			render := &RenderPipelineDescriptor{
-				Vertex:   VertexState{Constants: tt.vertex},
-				Fragment: &FragmentState{Constants: tt.fragment},
-			}
-			err := errors.Join(checkRustRenderConstants(render), checkRustStageConstants("compute", tt.compute))
+			hasFragment := tt.fragment != nil
+			err := errors.Join(checkRustRenderConstants(tt.vertex, tt.fragment, hasFragment), checkRustStageConstants("compute", tt.compute))
 			if tt.wantIs == nil {
 				if err != nil {
 					t.Fatalf("error = %v, want none", err)
@@ -51,7 +53,7 @@ func TestRustPipelineConstants(t *testing.T) {
 		})
 	}
 	// A pipeline without a fragment stage checks only the vertex stage.
-	if err := checkRustRenderConstants(&RenderPipelineDescriptor{}); err != nil {
+	if err := checkRustRenderConstants(nil, nil, false); err != nil {
 		t.Fatalf("no fragment stage: %v", err)
 	}
 }
