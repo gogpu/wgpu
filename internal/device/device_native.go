@@ -929,8 +929,11 @@ func buildBindGroupUsages(layoutEntries []gputypes.BindGroupLayoutEntry, entries
 			if layoutEntry.StorageTexture != nil {
 				usage = storageTextureUses(layoutEntry.StorageTexture.Access)
 			}
+			view := entry.TextureView
 			usages.Textures = append(usages.Textures, core.BindGroupTextureUse{
 				Texture: texture.CoreTexture(),
+				Subresources: texture.CoreTexture().Subresources(view.BaseMipLevel(), view.MipLevelCount(),
+					view.BaseArrayLayer(), view.ArrayLayerCount()),
 				Usage:   usage,
 				Resolve: texture.ResolveHAL,
 			})

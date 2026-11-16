@@ -575,7 +575,7 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 	// Transition attachments from their state after earlier commands of this
 	// encoder (e.g. CopyDst after an upload) into their pass state. Must be
 	// recorded before the HAL pass begins.
-	e.transitionRenderPassAttachments(raw, desc, attachments, guard)
+	e.transitionRenderPassAttachments(raw, attachments, guard)
 
 	// Begin HAL render pass
 	halPass := raw.BeginRenderPass(halDesc)
@@ -590,7 +590,7 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 		device:      e.device,
 		label:       desc.Label,
 		passContext: passCtx,
-		scope:       newPassUsageScopeWithTextures(attachments.scope),
+		scope:       newRenderPassUsageScope(attachments),
 	}
 	e.mutable.activePass = pass
 
@@ -1168,6 +1168,10 @@ func (e *CoreCommandEncoder) convertRenderPassDescriptor(desc *RenderPassDescrip
 type renderPassAttachmentScope struct {
 	scope *track.TextureUsageScope
 	views map[track.TrackerIndex]*TextureView
+
+	// resolveView is the descriptor's ResolveAttachmentTexture, nil for
+	// the views' parent textures.
+	resolveView func(view *TextureView) hal.Texture
 }
 
 // buildRenderPassAttachmentScope builds the usage scope of a render pass from
@@ -1184,8 +1188,9 @@ type renderPassAttachmentScope struct {
 // (scope.textures.merge_single for each attachment)
 func buildRenderPassAttachmentScope(desc *RenderPassDescriptor) (*renderPassAttachmentScope, error) {
 	pass := &renderPassAttachmentScope{
-		scope: track.NewTextureUsageScope(),
-		views: make(map[track.TrackerIndex]*TextureView, len(desc.ColorAttachments)+1),
+		scope:       track.NewTextureUsageScope(),
+		views:       make(map[track.TrackerIndex]*TextureView, len(desc.ColorAttachments)+1),
+		resolveView: desc.ResolveAttachmentTexture,
 	}
 	for i := range desc.ColorAttachments {
 		ca := &desc.ColorAttachments[i]
@@ -1214,13 +1219,28 @@ func (p *renderPassAttachmentScope) add(view *TextureView, usage track.TextureUs
 	if td == nil || !td.Index().IsValid() {
 		return nil
 	}
-	if err := p.scope.SetUsage(td.Index(), usage); err != nil {
+	subresources := view.Parent.Subresources(view.BaseMipLevel, view.MipLevelCount, view.BaseArrayLayer, view.ArrayLayerCount)
+	if err := p.scope.SetSubresourceUsage(td.Index(), subresources, usage); err != nil {
 		return err
 	}
 	if _, seen := p.views[td.Index()]; !seen {
 		p.views[td.Index()] = view
 	}
 	return nil
+}
+
+// resolveTexture returns the HAL texture of the attachment of tracker index
+// index, or nil if there is none or it is gone.
+func (p *renderPassAttachmentScope) resolveTexture(index track.TrackerIndex, guard SnatchGuard) hal.Texture {
+	view := p.views[index]
+	switch {
+	case view == nil:
+		return nil
+	case p.resolveView != nil:
+		return p.resolveView(view)
+	default:
+		return view.Parent.Raw(guard)
+	}
 }
 
 // transitionRenderPassAttachments applies the pass's attachment scope to the
@@ -1232,7 +1252,6 @@ func (p *renderPassAttachmentScope) add(view *TextureView, usage track.TextureUs
 // buffer tracker, barriers recorded ahead of the pass)
 func (e *CoreCommandEncoder) transitionRenderPassAttachments(
 	halEncoder hal.CommandEncoder,
-	desc *RenderPassDescriptor,
 	pass *renderPassAttachmentScope,
 	guard SnatchGuard,
 ) {
@@ -1245,13 +1264,7 @@ func (e *CoreCommandEncoder) transitionRenderPassAttachments(
 	}
 	barriers := make([]hal.TextureBarrier, 0, len(transitions))
 	for _, transition := range transitions {
-		view := pass.views[transition.Index]
-		var halTexture hal.Texture
-		if desc.ResolveAttachmentTexture != nil {
-			halTexture = desc.ResolveAttachmentTexture(view)
-		} else {
-			halTexture = view.Parent.Raw(guard)
-		}
+		halTexture := pass.resolveTexture(transition.Index, guard)
 		if halTexture == nil {
 			continue
 		}
@@ -1276,17 +1289,26 @@ func depthStencilUsage(ds *RenderPassDepthStencilAttachment) track.TextureUses {
 
 // RecordTextureTransition records a texture barrier the caller has already
 // encoded explicitly on the HAL encoder (public CommandEncoder.
-// TransitionTextures). The command buffer tracker adopts newUsage as the
-// texture's current state, so later commands transition from the state the
-// explicit barrier left the texture in instead of repeating that barrier.
-// If this is the texture's first use in the command buffer, oldUsage is the
-// state the command buffer expects on entry (its start state).
+// TransitionTextures) over every subresource of texture; see
+// RecordTextureSubresourceTransition.
+func (e *CoreCommandEncoder) RecordTextureTransition(texture *Texture, oldUsage, newUsage gputypes.TextureUsage) {
+	e.RecordTextureSubresourceTransition(texture, hal.TextureRange{}, oldUsage, newUsage)
+}
+
+// RecordTextureSubresourceTransition records a texture barrier the caller
+// has already encoded explicitly on the HAL encoder (public CommandEncoder.
+// TransitionTextures) over the subresources of subresources. The command
+// buffer tracker adopts newUsage as their current state, so later commands
+// transition from the state the explicit barrier left them in instead of
+// repeating that barrier. For each of them used for the first time in the
+// command buffer, oldUsage is the state the command buffer expects on entry
+// (its start state).
 //
 // Textures without valid tracking data are skipped.
 //
 // Reference: wgpu-core command/transition_resources.rs (explicit transitions
 // go through the command buffer tracker)
-func (e *CoreCommandEncoder) RecordTextureTransition(texture *Texture, oldUsage, newUsage gputypes.TextureUsage) {
+func (e *CoreCommandEncoder) RecordTextureSubresourceTransition(texture *Texture, subresources hal.TextureRange, oldUsage, newUsage gputypes.TextureUsage) {
 	if e.mutable == nil || e.mutable.textureTracker == nil || texture == nil {
 		return
 	}
@@ -1295,7 +1317,9 @@ func (e *CoreCommandEncoder) RecordTextureTransition(texture *Texture, oldUsage,
 		return
 	}
 	depthStencil := texture.Format().IsDepthStencil()
-	e.mutable.textureTracker.RecordTransition(td.Index(),
+	selector := texture.Subresources(subresources.BaseMipLevel, subresources.MipLevelCount,
+		subresources.BaseArrayLayer, subresources.ArrayLayerCount)
+	e.mutable.textureTracker.RecordSubresourceTransition(td.Index(), selector,
 		track.TextureUsesFromUsage(oldUsage, depthStencil),
 		track.TextureUsesFromUsage(newUsage, depthStencil))
 }

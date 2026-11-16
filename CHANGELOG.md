@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defaulted depth writes on, and a pipeline with no `DepthStencil` keeps the defaults, so every 2D draw paid a
   per-fragment write into a depth buffer nothing tested against. Depth writes now match WebGPU — enabled only by a
   `depthWriteEnabled` depth-stencil state. Rendered output is unchanged; the per-fragment work is gone.
+- **A render pass may sample one mip level or array layer of a texture while drawing into another.** Such a pass,
+  as mipmap generation draws a level at a time, was refused with a usage conflict when it set the bind group. Render
+  pass attachments, bind group views and explicit barriers now pass the subresources they cover to the tracker, so
+  a usage scope conflicts only where two usages meet on one subresource and each barrier moves a subresource from
+  its own state. A bound view of a texture that is also an attachment of the pass now gets its barrier; it used to
+  be dropped. New readback tests draw one level, or layer, from another and the next from it in one command buffer
+  on every backend, with the Vulkan validation layer and the DX12 debug layer silent.
 
 ### Migration
 
