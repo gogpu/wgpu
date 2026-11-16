@@ -19,3 +19,9 @@ target	internal/pipeline	internal/resource	all	S3
 target	internal/pipeline	internal/hal	all	S3
 target	internal/pipeline	internal/core	all	S3
 target	internal/pipeline	internal/browser	wasm	S3
+target	internal/encoder	internal/resource	all	S4
+target	internal/encoder	internal/pipeline	all	S4
+target	internal/encoder	internal/hal	all	S4
+target	internal/encoder	internal/core	all	S4
+target	internal/encoder	internal/browser	wasm	S4
+target	internal/encoder	internal/core/track	native	S4
