@@ -233,7 +233,7 @@ func (i *Instance) surfacesForDevice(device *Device) []*Surface {
 	// The association is therefore stable for this teardown snapshot even though
 	// Surface deliberately has no second ownership lock.
 	for surface := range i.surfaces {
-		if surface != nil && surface.device == device {
+		if surface != nil && surface.sameDevice(device) {
 			surfaces = append(surfaces, surface)
 		}
 	}

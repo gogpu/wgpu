@@ -10,6 +10,7 @@ import (
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // Compile-time assertion: Surface must implement all public API methods (ADR-047).
@@ -31,8 +32,12 @@ var _ interface {
 // Surface represents a platform rendering surface.
 // On Rust backend, this wraps go-webgpu/webgpu Surface.
 type Surface struct {
-	r        *rwgpu.Surface
-	device   *Device
+	r *rwgpu.Surface
+	// device is the seam view of the device the surface is configured
+	// against; nil until Configure succeeds or after Unconfigure. All device
+	// access below goes through it, so the implementation can move to
+	// internal/surface without naming a root type.
+	device   surface.DeviceHost
 	released bool
 
 	// targetSource is retained only for CreateSurfaceFromTarget.
@@ -113,6 +118,7 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	if device == nil {
 		return fmt.Errorf("wgpu: device is nil")
 	}
+	host := newSurfaceDeviceHost(device)
 
 	rConfig := &rwgpu.SurfaceConfiguration{
 		Format:      config.Format,
@@ -123,11 +129,11 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 		PresentMode: config.PresentMode,
 	}
 
-	if err := s.r.Configure(device.r, rConfig); err != nil {
+	if err := s.r.Configure(host.R(), rConfig); err != nil {
 		return fmt.Errorf("wgpu: failed to configure surface: %w", err)
 	}
 
-	s.device = device
+	s.device = host
 	s.configFormat = config.Format
 	s.configWidth = config.Width
 	s.configHeight = config.Height

@@ -59,7 +59,7 @@ func newAcquiredSurfaceForLifetimeTest(t *testing.T) (*Surface, *SurfaceTexture,
 	rawSurface := &noop.Surface{}
 	surface := &Surface{
 		core:           core.NewSurface(rawSurface, "surface-texture-lifetime-test"),
-		device:         device,
+		device:         newSurfaceDeviceHost(device),
 		surfaceCreated: true,
 		currentBackend: gputypes.BackendEmpty,
 	}
@@ -504,7 +504,7 @@ func TestSurfacePresentRejectsTextureFromAnotherAcquisition(t *testing.T) {
 	surface, surfaceTexture, device, _ := newAcquiredSurfaceForLifetimeTest(t)
 	defer device.Release()
 
-	other := &SurfaceTexture{hal: surfaceTexture.hal, surface: surface, device: device, lease: surfaceTexture.lease + 1}
+	other := &SurfaceTexture{hal: surfaceTexture.hal, surface: surface, device: newSurfaceDeviceHost(device), lease: surfaceTexture.lease + 1}
 	if err := surface.Present(other); !errors.Is(err, ErrReleased) {
 		t.Fatalf("Present with foreign token = %v, want ErrReleased", err)
 	}
@@ -584,7 +584,7 @@ func TestSurfaceSwapchainTextureCaching(t *testing.T) {
 	rawSurface := &noop.Surface{}
 	surface := &Surface{
 		core:           core.NewSurface(rawSurface, "cache-test"),
-		device:         device,
+		device:         newSurfaceDeviceHost(device),
 		surfaceCreated: true,
 		currentBackend: gputypes.BackendEmpty,
 	}

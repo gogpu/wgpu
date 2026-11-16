@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // Compile-time assertion: Surface must implement all public API methods (ADR-047).
@@ -43,9 +44,16 @@ const (
 // Surface delegates lifecycle management to core.Surface, which enforces
 // the state machine: Unconfigured -> Configured -> Acquired -> Configured.
 type Surface struct {
-	core     *core.Surface
+	core *core.Surface
+	// instance stays a root value: the surface is registered with it for
+	// device teardown, and the root declaration layer owns the identity the
+	// surface domain must not see (ADR-070 §15.3, ruling of 2026-11-16).
 	instance *Instance
-	device   *Device
+	// device is the seam view of the device the surface is configured
+	// against; nil until Configure succeeds. All device access below goes
+	// through it, so the implementation can move to internal/surface without
+	// naming a root type.
+	device   surface.DeviceHost
 	released bool
 
 	// targetSource is retained only for CreateSurfaceFromTarget. Raw handles
@@ -149,7 +157,7 @@ func (i *Instance) adoptCreatedSurface(
 ) (*Surface, error) {
 	halSurface := halSurfaces[initialBackend]
 	coreSurface := core.NewSurface(halSurface, "")
-	surface := &Surface{
+	created := &Surface{
 		core:           coreSurface,
 		target:         target,
 		targetSource:   targetSource,
@@ -157,11 +165,11 @@ func (i *Instance) adoptCreatedSurface(
 		surfaceCreated: true,
 		halSurfaces:    halSurfaces,
 	}
-	if err := i.adoptSurface(surface); err != nil {
+	if err := i.adoptSurface(created); err != nil {
 		destroyHALSurfaces(coreSurface, halSurfaces, initialBackend, true)
 		return nil, err
 	}
-	return surface, nil
+	return created, nil
 }
 
 func createHALSurfaces(entries []core.HALInstanceEntry, target hal.SurfaceTarget) (map[gputypes.Backend]hal.Surface, gputypes.Backend, error) {
@@ -278,7 +286,8 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	if device == nil {
 		return fmt.Errorf("wgpu: device is nil")
 	}
-	if device.released.Load() {
+	host := newSurfaceDeviceHost(device)
+	if host.IsReleased() {
 		return ErrReleased
 	}
 	// Standard API objects must share an Instance so device teardown can find
@@ -311,7 +320,7 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	// Surface creation is deferred from CreateSurface() to here because we need
 	// to know the device's backend. Creating a Vulkan surface then destroying it
 	// (when device is software) corrupts GDI state on some drivers.
-	if err := s.ensureHALSurface(device.core.Backend()); err != nil {
+	if err := s.ensureHALSurface(host.Core().Backend()); err != nil {
 		return err
 	}
 
@@ -320,8 +329,8 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	// will be lazily created on the next GetCurrentTexture().
 	s.destroySwapchainTexture()
 
-	s.device = device
-	return mapSurfaceConfigureError(s.core.Configure(device.core, halConfig))
+	s.device = host
+	return mapSurfaceConfigureError(s.core.Configure(host.Core(), halConfig))
 }
 
 // mapSurfaceConfigureError gives the backend's device-mismatch error its
@@ -368,11 +377,11 @@ func (s *Surface) GetCurrentTexture() (*SurfaceTexture, bool, error) {
 	// created from this SurfaceTexture. At submit time, the TrackerIndex
 	// is used by populateTextureScope to record surface texture usage in
 	// the command buffer's TextureUsageScope for barrier generation.
-	if s.swapchainTexture == nil && s.device != nil && s.device.core != nil {
+	if s.swapchainTexture == nil && s.device != nil && s.device.Core() != nil {
 		cfg := s.core.Config()
 		if cfg != nil {
 			s.swapchainTexture = core.NewTexture(
-				acquired.Texture, s.device.core,
+				acquired.Texture, s.device.Core(),
 				cfg.Format,
 				gputypes.TextureDimension2D,
 				cfg.Usage,
@@ -416,7 +425,7 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 	if s.device == nil {
 		return fmt.Errorf("wgpu: surface not configured")
 	}
-	if s.device.queue == nil || s.device.queue.impl.HALQueue() == nil {
+	if s.device.HALQueue() == nil {
 		return fmt.Errorf("wgpu: queue not available")
 	}
 
@@ -427,7 +436,7 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 		return ErrReleased
 	}
 
-	return s.core.PresentWithDamage(s.device.queue.impl.HALQueue(), damageRects)
+	return s.core.PresentWithDamage(s.device.HALQueue(), damageRects)
 }
 
 // SetPresentsWithTransaction toggles Core Animation transaction-based present
@@ -556,15 +565,27 @@ func (s *Surface) DiscardTexture() {
 	s.core.DiscardTexture()
 }
 
+// sameDevice reports whether the surface is configured against device. The
+// seam exposes the device's core state, not the root pointer, so identity is
+// compared there: an adapter value built per call would never compare equal to
+// the stored one. A nil device, or a nil core on either side, is no match.
+func (s *Surface) sameDevice(device *Device) bool {
+	if s == nil || s.device == nil || device == nil {
+		return false
+	}
+	coreDevice := s.device.Core()
+	return coreDevice != nil && coreDevice == device.core
+}
+
 func (s *Surface) discardForDevice(device *Device) {
-	if s == nil || s.core == nil || s.device != device {
+	if s == nil || s.core == nil || !s.sameDevice(device) {
 		return
 	}
 	s.core.DiscardTexture()
 }
 
 func (s *Surface) retireDevice(device *Device) {
-	if s == nil || s.core == nil || s.device != device {
+	if s == nil || s.core == nil || !s.sameDevice(device) {
 		return
 	}
 	// The swapchainTexture holds a reference to this device's TrackerIndex
@@ -645,8 +666,8 @@ func (s *Surface) halSurfacesForAdapterRequest() map[gputypes.Backend]hal.Surfac
 		return nil
 	}
 	result := make(map[gputypes.Backend]hal.Surface, len(s.halSurfaces))
-	for backend, surface := range s.halSurfaces {
-		result[backend] = surface
+	for backend, halSurface := range s.halSurfaces {
+		result[backend] = halSurface
 	}
 	if len(result) == 0 {
 		if raw := s.core.RawSurface(); raw != nil {
@@ -694,12 +715,12 @@ func destroyHALSurfaces(coreSurface *core.Surface, surfaces map[gputypes.Backend
 	if coreSurface != nil {
 		coreSurface.Destroy()
 	}
-	for backend, surface := range surfaces {
+	for backend, halSurface := range surfaces {
 		if currentSet && backend == currentBackend {
 			continue
 		}
-		if surface != nil {
-			surface.Destroy()
+		if halSurface != nil {
+			halSurface.Destroy()
 		}
 	}
 }
@@ -708,7 +729,7 @@ func destroyHALSurfaces(coreSurface *core.Surface, surfaces map[gputypes.Backend
 type SurfaceTexture struct {
 	hal         hal.SurfaceTexture
 	surface     *Surface
-	device      *Device
+	device      surface.DeviceHost
 	lease       uint64
 	coreTexture *core.Texture // for TrackerIndex-based barrier generation
 }
@@ -716,7 +737,7 @@ type SurfaceTexture struct {
 func (st *SurfaceTexture) isUsable() bool {
 	if st == nil || st.hal == nil || st.surface == nil ||
 		st.surface.released || st.surface.core == nil ||
-		st.device == nil || st.device.released.Load() {
+		st.device == nil || st.device.IsReleased() {
 		return false
 	}
 	return st.surface.core.AcquisitionValid(st.lease)
@@ -745,7 +766,7 @@ func (st *SurfaceTexture) borrowedTexture() *Texture {
 	} else if cfg := st.surface.core.Config(); cfg != nil {
 		format = cfg.Format
 	}
-	impl := resource.NewSurfaceTexture(st.hal, st.device.seamView(), format, st.surface.core, st.lease, st.coreTexture)
+	impl := resource.NewSurfaceTexture(st.hal, st.device, format, st.surface.core, st.lease, st.coreTexture)
 	tex := &Texture{impl: impl}
 	impl.Pub = tex
 	return tex
@@ -756,7 +777,7 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 	if !st.isUsable() {
 		return nil, ErrReleased
 	}
-	halDevice := st.device.halDevice()
+	halDevice := st.device.HALDevice()
 	if halDevice == nil {
 		return nil, ErrReleased
 	}
@@ -784,7 +805,7 @@ func (st *SurfaceTexture) CreateView(desc *TextureViewDescriptor) (*TextureView,
 	parent := st.borrowedTexture()
 	init := &resource.TextureViewInit{
 		HAL:          halView,
-		Device:       st.device.seamView(),
+		Device:       st.device,
 		Parent:       parent.impl,
 		Surface:      st.surface.core,
 		SurfaceLease: st.lease,

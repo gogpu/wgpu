@@ -11,6 +11,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // Compile-time assertion: Surface must implement all public API methods (ADR-047).
@@ -35,8 +36,12 @@ var _ interface {
 // Matches Rust wgpu WebSurface which holds a Canvas enum, a GpuCanvasContext,
 // and an optional Gpu reference.
 type Surface struct {
-	browser  *browser.Surface
-	device   *Device
+	browser *browser.Surface
+	// device is the seam view of the device the surface is configured
+	// against; nil until Configure succeeds. All device access below goes
+	// through it, so the implementation can move to internal/surface without
+	// naming a root type.
+	device   surface.DeviceHost
 	released bool
 
 	// targetSource is retained only for CreateSurfaceFromTarget.
@@ -167,6 +172,7 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 	if device == nil {
 		return fmt.Errorf("wgpu: device is nil")
 	}
+	host := newSurfaceDeviceHost(device)
 
 	// Validate present mode (Rust wgpu panics on Mailbox/Immediate on web).
 	switch config.PresentMode {
@@ -176,7 +182,7 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 
 	// Build the JS GPUCanvasConfiguration object.
 	jsConfig := browser.BuildSurfaceConfiguration(
-		device.browser.Ref(),
+		host.Browser().Ref(),
 		config.Format,
 		config.Usage,
 		config.AlphaMode,
@@ -185,7 +191,7 @@ func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error 
 
 	formatStr := browser.TextureFormatToJS(config.Format)
 	s.browser.Configure(jsConfig, config.Width, config.Height, formatStr)
-	s.device = device
+	s.device = host
 	s.configFormat = config.Format
 	return nil
 }
