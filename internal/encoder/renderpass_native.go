@@ -8,7 +8,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
-	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/indirect"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -26,21 +25,13 @@ import (
 // resource.BindGroup), and the root declaration layer converts at the call
 // boundary.
 //
-// Superseded 2026-11-16 (S6 Prepare). At S5 the public wrapper kept the
-// bundle-conformance checks and the ExecuteBundles loop, because they name the
-// public RenderBundle type, which this package cannot; ReplayBundle and
-// ResetBundleState here are the bundle-free half the wrapper calls. That split
-// rested on the premise that RenderBundle stays in the root package through S6
-// — and S6 is exactly the step that ends it: RenderBundle moves into this
-// package, so at the S6 Move the whole bundle-execution path (the checks, the
-// resource tracking, the replay and the reset) becomes this package's, against
-// its own RenderBundle, and the root wrapper delegates. The second reason is
-// the one the S5 fix 56e4471 pinned for the reverse direction: a check or a
-// replay that reads the bundle's resolved state cannot be written in a
-// declaration layer once the type is destination-resident.
-//
-// Until that Move the wrapper still calls ReplayBundle and ResetBundleState,
-// so this comment describes the tree as it is now.
+// The S5 split of the bundle path was executed at S6 (2026-11-16): RenderBundle
+// moved into this package, so the whole path is this package's — the
+// conformance checks, the usage merge, the resource tracking, the replay and
+// the pass-state reset live in renderbundle_execute.go against this package's
+// own RenderBundle, and the root wrapper delegates. The reason the S5 fix
+// 56e4471 pinned holds in both directions: a method — here a check or a
+// replay — cannot stay behind the type whose resolved state it reads.
 type RenderPassEncoder struct {
 	core    *core.CoreRenderPassEncoder
 	encoder *CommandEncoder
@@ -87,10 +78,8 @@ type RenderPassEncoder struct {
 }
 
 // NewRenderPassEncoder builds the pass encoder BeginRenderPass describes. The
-// root declaration layer calls it with the start value and the encoder, and
-// keeps its own copy of the read-only flags and the core pass for the bundle
-// checks (the public RenderBundle type stays root until the S6 Move — see the
-// type comment for the superseded split).
+// root declaration layer calls it with the start value and the encoder; the
+// pass holds the read-only flags and the core pass the bundle checks read.
 func NewRenderPassEncoder(start *RenderPassStart, e *CommandEncoder) *RenderPassEncoder {
 	return &RenderPassEncoder{
 		core:            start.Core,
@@ -570,39 +559,14 @@ func (p *RenderPassEncoder) End() error {
 	return p.core.End()
 }
 
-// ReplayBundle merges a bundle's usage scope into the pass, runs track, and
-// replays the bundle's commands into the backend pass. The public wrapper
-// runs the bundle-conformance checks first (they name the public RenderBundle
-// type, which this package cannot) and builds both callbacks from the bundle;
-// the error wrapping is the pre-move one. The S5 split is superseded at S6
-// (see the type comment): the S6 Move re-homes the checks here.
-//
-// Matches Rust wgpu-core command/render.rs execute_bundle and
-// command/bundle.rs RenderBundle::execute.
-func (p *RenderPassEncoder) ReplayBundle(scope *core.RenderBundleScope, label string, track func(), replay func(hal.RenderPassEncoder) error) error {
-	if err := p.core.MergeRenderBundle(scope); err != nil {
-		return fmt.Errorf("bundle %q: %w", label, err)
-	}
-	track()
-	if err := replay(p.core.RawPass()); err != nil {
-		return fmt.Errorf("bundle %q: %w", label, err)
-	}
-	return nil
-}
-
-// ResetBundleState clears the pipeline, bind groups, vertex buffers and
+// resetBundleState clears the pipeline, bind groups, vertex buffers and
 // index buffer after ExecuteBundles: a bundle leaves the backend with its own
 // state, and WebGPU requires them to be set again (executeBundles; Rust
 // wgpu-core State::reset_bundle). Without it the binder would take the
 // backend's bindings for current.
 //
-// The public wrapper calls it once after its bundle loop, exactly where the
-// pre-move ExecuteBundles did.
-func (p *RenderPassEncoder) ResetBundleState() {
-	p.resetBundleState()
-}
-
-// resetBundleState is the state clear ResetBundleState exposes.
+// ExecuteBundles calls it once after its bundle loop, exactly where the
+// pre-move method did — including after an error break.
 func (p *RenderPassEncoder) resetBundleState() {
 	p.binder.reset()
 	p.pipelineSet = false

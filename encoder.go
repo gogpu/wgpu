@@ -3,7 +3,6 @@
 package wgpu
 
 import (
-	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/resource"
 )
@@ -46,13 +45,7 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 	if err != nil {
 		return nil, err
 	}
-	pass := &ComputePassEncoder{
-		core:     start.Core,
-		encoder:  e,
-		test:     start.Test,
-		testPass: start.TestPass,
-	}
-	return pass, nil
+	return newComputePassEncoder(start, e), nil
 }
 
 // CopyBufferToBuffer copies data between buffers.
@@ -227,17 +220,3 @@ func encoderComputePassDescriptor(desc *ComputePassDescriptor) *encoder.ComputeP
 // call it for the errors they detect while recording; the error surfaces at
 // Finish.
 func (e *CommandEncoder) setError(err error) { e.impl.SetError(err) }
-
-// trackRef keeps a resource alive until the command buffer is spent: the
-// public pass encoders hand it every reference their commands take.
-func (e *CommandEncoder) trackRef(ref *core.ResourceRef) { e.impl.TrackRef(ref) }
-
-// trackBindGroup records a bind group for submit-time validation.
-func (e *CommandEncoder) trackBindGroup(bg *resource.BindGroup) { e.impl.TrackBindGroup(bg) }
-
-// trackBuffer records a buffer for submit-time validation.
-func (e *CommandEncoder) trackBuffer(buf *resource.Buffer) { e.impl.TrackBuffer(buf) }
-
-// coreEncoder returns the core command encoder the public pass encoders record
-// through (the raw HAL encoder, the usage scopes, the pass ends).
-func (e *CommandEncoder) coreEncoder() *core.CoreCommandEncoder { return e.impl.Core() }

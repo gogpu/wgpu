@@ -301,6 +301,16 @@ func NewSamplerFromHALForTest(halSampler hal.Sampler, device *Device) *Sampler {
 // DeviceHalDeviceForTest returns the HAL device behind d.
 func DeviceHalDeviceForTest(d *Device) hal.Device { return d.halDevice() }
 
+// newEmptyBundle returns a finished bundle with no commands for a render pass
+// with no attachments: the ExecuteBundles pass-state test needs a bundle
+// compatible with an attachment-free pass, and the public creation path
+// requires an attachment. The bundle lives in internal/encoder after the S6
+// Move; the hook is one delegation, a free function for the reason the
+// render-pipeline hook above is one.
+func newEmptyBundle(device *Device) *RenderBundle {
+	return &RenderBundle{impl: encoder.NewEmptyBundleForTest(device.seamView())}
+}
+
 // SetPassStateForTest seeds the render pass state the ExecuteBundles test
 // asserts on: a pipeline is considered set and the binder holds one group at
 // slot 0 with its expected layout. The state lives in internal/encoder after

@@ -41,12 +41,30 @@ func encoderBindGroup(g *BindGroup) *resource.BindGroup {
 }
 
 // encoderPipeline maps a public pipeline wrapper to its implementation. A
-// zero-value wrapper stays a nil implementation: the pass then reads the zero
-// values it read before the move (those reads are nil-safe), and a nil
-// wrapper never reaches this function — the declaration layer reports it.
+// non-nil wrapper with a nil implementation stays a non-nil zero pipeline: the
+// pass reads the zero values through the nil-safe accessors, and a bundle
+// records the pipeline, so Finish reports it as another device's (its nil
+// device view fails the identity check) exactly as the pre-move wrapper did. A
+// nil wrapper stays nil, and the destination reports the nil pipeline, as the
+// pre-move pass did.
 func encoderPipeline(p *RenderPipeline) *pipeline.RenderPipeline {
 	if p == nil {
 		return nil
+	}
+	if p.impl == nil {
+		return &pipeline.RenderPipeline{}
+	}
+	return p.impl
+}
+
+// encoderComputePipeline maps a public compute pipeline wrapper to its
+// implementation, by the same rule as encoderPipeline.
+func encoderComputePipeline(p *ComputePipeline) *pipeline.ComputePipeline {
+	if p == nil {
+		return nil
+	}
+	if p.impl == nil {
+		return &pipeline.ComputePipeline{}
 	}
 	return p.impl
 }

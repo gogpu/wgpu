@@ -1,27 +1,118 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package encoder
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
-	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
+// The bundle tests moved here with the types (S6's Move): they read the
+// encoder's recording, the bundle's label and the pass's read-only flags,
+// which no root declaration layer can name. The fixtures are local — a core
+// device over the test HAL doubles and resources built from it. No
+// internal/hal/noop import: a test import is a graph edge like any other
+// (layoutcheck golden-subset).
+
 var rgba8Formats = []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}
+
+// testHALRenderResource is the HAL pipeline and bind group double: the
+// fixtures never call anything through it.
+type testHALRenderResource struct{ hal.RenderPipeline }
+
+func (*testHALRenderResource) Destroy() {}
+
+func (*testHALRenderResource) NativeHandle() uintptr { return 0 }
+
+// bundleTestRenderPass records the commands core sends to the backend pass.
+type bundleTestRenderPass struct {
+	hal.RenderPassEncoder
+	calls []string
+}
+
+func (p *bundleTestRenderPass) End() {}
+
+func (p *bundleTestRenderPass) SetPipeline(hal.RenderPipeline) {
+	p.calls = append(p.calls, "SetPipeline")
+}
+
+func (p *bundleTestRenderPass) SetBindGroup(index uint32, _ hal.BindGroup, offsets []uint32) {
+	p.calls = append(p.calls, fmt.Sprintf("SetBindGroup(%d, %v)", index, offsets))
+}
+
+func (p *bundleTestRenderPass) SetVertexBuffer(slot uint32, _ hal.Buffer, offset uint64) {
+	p.calls = append(p.calls, fmt.Sprintf("SetVertexBuffer(%d, %d)", slot, offset))
+}
+
+func (p *bundleTestRenderPass) SetIndexBuffer(_ hal.Buffer, format gputypes.IndexFormat, offset uint64) {
+	p.calls = append(p.calls, fmt.Sprintf("SetIndexBuffer(%v, %d)", format, offset))
+}
+
+func (p *bundleTestRenderPass) Draw(args gputypes.DrawArgs) {
+	p.calls = append(p.calls, fmt.Sprintf("Draw(%d)", args.VertexCount))
+}
+
+func (p *bundleTestRenderPass) DrawIndexed(args gputypes.DrawIndexedArgs) {
+	p.calls = append(p.calls, fmt.Sprintf("DrawIndexed(%d)", args.IndexCount))
+}
+
+// bundleTestCommandEncoder hands out the recording pass on BeginRenderPass and
+// carries the test HAL encoder's lifecycle doubles.
+type bundleTestCommandEncoder struct {
+	testHALCommandEncoder
+	pass *bundleTestRenderPass
+}
+
+func (e *bundleTestCommandEncoder) BeginRenderPass(*hal.RenderPassDescriptor) hal.RenderPassEncoder {
+	return e.pass
+}
+
+// bundleTestHALDevice is the HAL device whose command encoder records.
+type bundleTestHALDevice struct {
+	testHALDevice
+	commandEncoder *bundleTestCommandEncoder
+}
+
+func (d bundleTestHALDevice) CreateCommandEncoder(*hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	return d.commandEncoder, nil
+}
+
+// bundleTestRig is a core device with the default limits (the bundle
+// validation reads maxColorAttachments and maxVertexBuffers) and a render pass
+// whose backend pass records the commands it gets.
+type bundleTestRig struct {
+	device *core.Device
+	view   testDeviceView
+	pass   *bundleTestRenderPass
+}
+
+func newBundleTestRig(t *testing.T) *bundleTestRig {
+	t.Helper()
+	command := &bundleTestCommandEncoder{pass: &bundleTestRenderPass{}}
+	raw := bundleTestHALDevice{commandEncoder: command}
+	limits := gputypes.DefaultLimits()
+	// Zero workgroup limits keep the indirect-validation pipeline, which would
+	// need a real HAL device, out of the fixture.
+	limits.MaxComputeWorkgroupsPerDimension = 0
+	device := core.NewDevice(raw, nil, 0, limits, "bundle-test")
+	t.Cleanup(device.Destroy)
+	return &bundleTestRig{device: device, view: testDeviceView{device: device, raw: raw}, pass: command.pass}
+}
 
 // newEmptyBundle returns a finished bundle with no commands for a render
 // pass with no attachments.
-func newEmptyBundle(device *Device) *RenderBundle {
+func newEmptyBundle(view testDeviceView) *RenderBundle {
 	return &RenderBundle{
-		device: device.seamView(),
+		device: view,
 		bundleContents: &bundleContents{
 			target: renderBundleTarget{context: core.RenderPassContext{SampleCount: 1}, depthReadOnly: true, stencilReadOnly: true},
 			scope:  core.NewRenderBundleScope(),
@@ -29,51 +120,30 @@ func newEmptyBundle(device *Device) *RenderBundle {
 	}
 }
 
-// bundleTestRig is a noop device with a render pass whose backend pass
-// records the commands it gets.
-type bundleTestRig struct {
-	device *Device
-	pass   *captureRenderPass
-}
-
-func newBundleTestRig() *bundleTestRig {
-	pass := &captureRenderPass{RenderPassEncoder: &noop.RenderPassEncoder{}}
-	command := &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}, renderPass: pass}
-	return &bundleTestRig{device: newCaptureDevice(&captureDevice{Device: &noop.Device{}, commandEncoder: command}), pass: pass}
-}
-
 // beginPass begins a render pass with no attachments, or with one RGBA8
 // color attachment.
 func (r *bundleTestRig) beginPass(t *testing.T, color bool) (*CommandEncoder, *RenderPassEncoder) {
 	t.Helper()
-	encoder, err := r.device.CreateCommandEncoder(nil)
+	coreEncoder, err := r.device.CreateCommandEncoder("bundle-test")
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder() error = %v", err)
 	}
+	encoder := &CommandEncoder{core: coreEncoder}
 	desc := &RenderPassDescriptor{}
 	if color {
-		tex, err := r.device.CreateTexture(&TextureDescriptor{
-			Size: Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}, MipLevelCount: 1, SampleCount: 1,
-			Dimension: TextureDimension2D, Format: gputypes.TextureFormatRGBA8Unorm, Usage: TextureUsageRenderAttachment,
-		})
-		if err != nil {
-			t.Fatalf("CreateTexture() error = %v", err)
-		}
-		view, err := r.device.CreateTextureView(tex, nil)
-		if err != nil {
-			t.Fatalf("CreateTextureView() error = %v", err)
-		}
+		tex := newTrackedTexture(t, r.device, r.view, "attachment", gputypes.TextureUsageRenderAttachment)
+		view := newTestTextureView(t, r.device, r.view, tex)
 		desc.ColorAttachments = []RenderPassColorAttachment{{View: view, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore}}
 	}
-	pass, err := encoder.BeginRenderPass(desc)
+	start, err := encoder.BeginRenderPass(desc)
 	if err != nil {
 		t.Fatalf("BeginRenderPass() error = %v", err)
 	}
-	return encoder, pass
+	return encoder, NewRenderPassEncoder(start, encoder)
 }
 
 // pipeline returns a pipeline rendering to formats with the given layouts.
-func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*resource.BindGroupLayout) *RenderPipeline {
+func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*resource.BindGroupLayout) *pipeline.RenderPipeline {
 	return r.pipelineInit(&pipeline.RenderPipelineInit{
 		BindGroupLayouts: layouts,
 		PassContext:      core.RenderPassContext{ColorFormats: formats, SampleCount: 1},
@@ -82,33 +152,29 @@ func (r *bundleTestRig) pipeline(formats []gputypes.TextureFormat, layouts ...*r
 
 // pipelineInit returns a pipeline over init, with the rig's device, a HAL
 // double and a fresh ref filled in where init leaves them unset.
-func (r *bundleTestRig) pipelineInit(init *pipeline.RenderPipelineInit) *RenderPipeline {
-	init.Device = r.device.seamView()
+func (r *bundleTestRig) pipelineInit(init *pipeline.RenderPipelineInit) *pipeline.RenderPipeline {
+	init.Device = r.view
 	if init.HAL == nil {
-		init.HAL = &testHALResource{}
+		init.HAL = &testHALRenderResource{}
 	}
 	if init.Ref == nil {
 		init.Ref = core.NewResourceRef("RenderPipeline:test", nil)
 	}
-	return &RenderPipeline{impl: pipeline.NewRenderPipeline(init)}
+	return pipeline.NewRenderPipeline(init)
 }
 
-func (r *bundleTestRig) group(layout *resource.BindGroupLayout) *BindGroup {
-	return &BindGroup{impl: resource.NewBindGroup(&resource.BindGroupInit{
-		HAL:    &testHALResource{},
-		Device: r.device.seamView(),
+func (r *bundleTestRig) group(layout *resource.BindGroupLayout) *resource.BindGroup {
+	return resource.NewBindGroup(&resource.BindGroupInit{
+		HAL:    &testHALRenderResource{},
+		Device: r.view,
 		Layout: layout,
 		Ref:    core.NewResourceRef("BindGroup:test", nil),
-	})}
+	})
 }
 
-func (r *bundleTestRig) buffer(t *testing.T, usage gputypes.BufferUsage) *Buffer {
+func (r *bundleTestRig) buffer(t *testing.T, usage gputypes.BufferUsage) *resource.Buffer {
 	t.Helper()
-	buf, err := r.device.CreateBuffer(&BufferDescriptor{Label: "bundle", Size: 256, Usage: usage})
-	if err != nil {
-		t.Fatalf("CreateBuffer() error = %v", err)
-	}
-	return buf
+	return newTestResourceBuffer(t, r.device, r.view, 256, usage, "bundle")
 }
 
 func (r *bundleTestRig) encoder(t *testing.T, desc *RenderBundleEncoderDescriptor) *RenderBundleEncoder {
@@ -116,9 +182,9 @@ func (r *bundleTestRig) encoder(t *testing.T, desc *RenderBundleEncoderDescripto
 	if desc == nil {
 		desc = &RenderBundleEncoderDescriptor{ColorFormats: rgba8Formats}
 	}
-	enc, err := r.device.CreateRenderBundleEncoder(desc)
+	enc, err := NewRenderBundleEncoder(r.view, desc)
 	if err != nil {
-		t.Fatalf("CreateRenderBundleEncoder() error = %v", err)
+		t.Fatalf("NewRenderBundleEncoder() error = %v", err)
 	}
 	return enc
 }
@@ -145,18 +211,18 @@ func TestRenderBundleEncoderDescriptor(t *testing.T) {
 		{name: "stencil read-only", desc: RenderBundleEncoderDescriptor{DepthStencilFormat: gputypes.TextureFormatDepth24PlusStencil8, StencilReadOnly: true},
 			depthRO: false, stencilRO: true, wantSampleCount: 1, wantDepthStencilFormat: gputypes.TextureFormatDepth24PlusStencil8},
 	}
-	rig := newBundleTestRig()
+	rig := newBundleTestRig(t)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			enc, err := rig.device.CreateRenderBundleEncoder(&tt.desc)
+			enc, err := NewRenderBundleEncoder(rig.view, &tt.desc)
 			if tt.wantErr {
-				if !errors.Is(err, errBundleDescriptor) {
-					t.Fatalf("CreateRenderBundleEncoder() error = %v, want errBundleDescriptor", err)
+				if !errors.Is(err, ErrBundleDescriptor) {
+					t.Fatalf("NewRenderBundleEncoder() error = %v, want ErrBundleDescriptor", err)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("CreateRenderBundleEncoder() error = %v", err)
+				t.Fatalf("NewRenderBundleEncoder() error = %v", err)
 			}
 			got := enc.target
 			if got.depthReadOnly != tt.depthRO || got.stencilReadOnly != tt.stencilRO ||
@@ -165,15 +231,12 @@ func TestRenderBundleEncoderDescriptor(t *testing.T) {
 			}
 		})
 	}
-	if _, err := rig.device.CreateRenderBundleEncoder(nil); err == nil {
-		t.Fatal("CreateRenderBundleEncoder(nil) succeeded")
-	}
 }
 
 func TestRenderBundleFinishValidation(t *testing.T) {
-	rig := newBundleTestRig()
+	rig := newBundleTestRig(t)
 	layout := rebindLayout(false)
-	other := newBundleTestRig()
+	other := newBundleTestRig(t)
 	draw := gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}
 	released := rig.pipeline(rgba8Formats)
 	released.Release()
@@ -182,10 +245,10 @@ func TestRenderBundleFinishValidation(t *testing.T) {
 		WritesDepth: true,
 	})
 	needsVertex := rig.pipeline(rgba8Formats)
-	needsVertex.impl.SetRequiredVertexBuffers(1)
-	uniform := rig.buffer(t, BufferUsageUniform)
-	vertex := rig.buffer(t, BufferUsageVertex)
-	index := rig.buffer(t, BufferUsageIndex)
+	needsVertex.SetRequiredVertexBuffers(1)
+	uniform := rig.buffer(t, gputypes.BufferUsageUniform)
+	vertex := rig.buffer(t, gputypes.BufferUsageVertex)
+	index := rig.buffer(t, gputypes.BufferUsageIndex)
 
 	tests := []struct {
 		name   string
@@ -193,35 +256,35 @@ func TestRenderBundleFinishValidation(t *testing.T) {
 		record func(e *RenderBundleEncoder)
 		want   error
 	}{
-		{"draw without pipeline", nil, func(e *RenderBundleEncoder) { e.Draw(draw) }, ErrDrawMissingPipeline},
-		{"nil pipeline", nil, func(e *RenderBundleEncoder) { e.SetPipeline(nil) }, errBundleCommand},
-		{"released pipeline", nil, func(e *RenderBundleEncoder) { e.SetPipeline(released) }, ErrReleased},
-		{"pipeline of another device", nil, func(e *RenderBundleEncoder) { e.SetPipeline(other.pipeline(rgba8Formats)) }, errBundleDevice},
+		{"draw without pipeline", nil, func(e *RenderBundleEncoder) { e.Draw(draw) }, core.ErrDrawMissingPipeline},
+		{"nil pipeline", nil, func(e *RenderBundleEncoder) { e.SetPipeline(nil) }, ErrBundleCommand},
+		{"released pipeline", nil, func(e *RenderBundleEncoder) { e.SetPipeline(released) }, core.ErrReleased},
+		{"pipeline of another device", nil, func(e *RenderBundleEncoder) { e.SetPipeline(other.pipeline(rgba8Formats)) }, ErrBundleDevice},
 		{"pipeline color format", nil, func(e *RenderBundleEncoder) {
 			e.SetPipeline(rig.pipeline([]gputypes.TextureFormat{gputypes.TextureFormatBGRA8Unorm}))
 		}, &core.RenderPassCompatibilityError{}},
 		{"pipeline writes read-only depth", &RenderBundleEncoderDescriptor{
 			DepthStencilFormat: gputypes.TextureFormatDepth32Float, DepthReadOnly: true,
-		}, func(e *RenderBundleEncoder) { e.SetPipeline(depthWriter) }, errBundleDepthWrite},
+		}, func(e *RenderBundleEncoder) { e.SetPipeline(depthWriter) }, ErrBundleDepthWrite},
 		{"missing bind group", nil, func(e *RenderBundleEncoder) {
 			e.SetPipeline(rig.pipeline(rgba8Formats, layout))
 			e.Draw(draw)
-		}, ErrDrawMissingBindGroup},
-		{"bind group of another device", nil, func(e *RenderBundleEncoder) { e.SetBindGroup(0, other.group(layout), nil) }, errBundleDevice},
-		{"bind group index out of range", nil, func(e *RenderBundleEncoder) { e.SetBindGroup(MaxBindGroups, rig.group(layout), nil) }, nil},
+		}, core.ErrDrawMissingBindGroup},
+		{"bind group of another device", nil, func(e *RenderBundleEncoder) { e.SetBindGroup(0, other.group(layout), nil) }, ErrBundleDevice},
+		{"bind group index out of range", nil, func(e *RenderBundleEncoder) { e.SetBindGroup(core.MaxBindGroups, rig.group(layout), nil) }, nil},
 		{"missing vertex buffer", nil, func(e *RenderBundleEncoder) {
 			e.SetPipeline(needsVertex)
 			e.Draw(draw)
-		}, ErrDrawMissingVertexBuffer},
-		{"vertex buffer without vertex usage", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, uniform, 0) }, errBundleCommand},
-		{"vertex offset unaligned", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, vertex, 2) }, errBundleCommand},
-		{"vertex offset past the end", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, vertex, 260) }, errBundleCommand},
-		{"nil vertex buffer", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, nil, 0) }, errBundleCommand},
-		{"index offset unaligned", nil, func(e *RenderBundleEncoder) { e.SetIndexBuffer(index, gputypes.IndexFormatUint32, 2) }, errBundleCommand},
+		}, core.ErrDrawMissingVertexBuffer},
+		{"vertex buffer without vertex usage", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, uniform, 0) }, ErrBundleCommand},
+		{"vertex offset unaligned", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, vertex, 2) }, ErrBundleCommand},
+		{"vertex offset past the end", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, vertex, 260) }, ErrBundleCommand},
+		{"nil vertex buffer", nil, func(e *RenderBundleEncoder) { e.SetVertexBuffer(0, nil, 0) }, ErrBundleCommand},
+		{"index offset unaligned", nil, func(e *RenderBundleEncoder) { e.SetIndexBuffer(index, gputypes.IndexFormatUint32, 2) }, ErrBundleCommand},
 		{"draw indexed without index buffer", nil, func(e *RenderBundleEncoder) {
 			e.SetPipeline(rig.pipeline(rgba8Formats))
 			e.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1})
-		}, ErrDrawMissingIndexBuffer},
+		}, core.ErrDrawMissingIndexBuffer},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -253,12 +316,12 @@ func TestRenderBundleFinishValidation(t *testing.T) {
 // uses it; vertex and index buffers keep their place; a draw with no
 // vertices is dropped; the list replays the same way each time.
 func TestRenderBundleReplay(t *testing.T) {
-	rig := newBundleTestRig()
+	rig := newBundleTestRig(t)
 	layout := rebindLayout(false)
 	group := rig.group(layout)
 	pipe := rig.pipeline(rgba8Formats, layout)
-	vertex := rig.buffer(t, BufferUsageVertex)
-	index := rig.buffer(t, BufferUsageIndex)
+	vertex := rig.buffer(t, gputypes.BufferUsageVertex)
+	index := rig.buffer(t, gputypes.BufferUsageIndex)
 
 	enc := rig.encoder(t, nil)
 	enc.SetBindGroup(0, group, nil)
@@ -294,7 +357,7 @@ func TestRenderBundleReplay(t *testing.T) {
 // TestRenderBundleCopiesOffsets checks that the encoder keeps its own copy
 // of the dynamic offsets given to SetBindGroup.
 func TestRenderBundleCopiesOffsets(t *testing.T) {
-	rig := newBundleTestRig()
+	rig := newBundleTestRig(t)
 	enc := rig.encoder(t, nil)
 	offsets := []uint32{256}
 	enc.SetBindGroup(0, rig.group(rebindLayout(true)), offsets)
@@ -307,7 +370,7 @@ func TestRenderBundleCopiesOffsets(t *testing.T) {
 // TestRenderBundleEncoderAfterFinish checks that commands after Finish are
 // ignored and that a second Finish fails.
 func TestRenderBundleEncoderAfterFinish(t *testing.T) {
-	rig := newBundleTestRig()
+	rig := newBundleTestRig(t)
 	enc := rig.encoder(t, nil)
 	if _, err := enc.Finish(nil); err != nil {
 		t.Fatalf("Finish() error = %v", err)
@@ -316,11 +379,11 @@ func TestRenderBundleEncoderAfterFinish(t *testing.T) {
 	if len(enc.commands) != 0 {
 		t.Fatalf("commands after Finish = %d, want 0", len(enc.commands))
 	}
-	if bundle, err := enc.Finish(nil); bundle != nil || !errors.Is(err, ErrReleased) {
+	if bundle, err := enc.Finish(nil); bundle != nil || !errors.Is(err, core.ErrReleased) {
 		t.Fatalf("second Finish() = (%v, %v), want ErrReleased", bundle, err)
 	}
 	var nilEncoder *RenderBundleEncoder
-	if _, err := nilEncoder.Finish(nil); !errors.Is(err, ErrReleased) {
+	if _, err := nilEncoder.Finish(nil); !errors.Is(err, core.ErrReleased) {
 		t.Fatalf("nil Finish() error = %v, want ErrReleased", err)
 	}
 }
@@ -329,7 +392,7 @@ func TestRenderBundleEncoderAfterFinish(t *testing.T) {
 // each resource it uses until Release, and that executing it gives the
 // command encoder references of its own.
 func TestRenderBundleKeepsResources(t *testing.T) {
-	rig := newBundleTestRig()
+	rig := newBundleTestRig(t)
 	layout := rebindLayout(false)
 	pipe := rig.pipeline(rgba8Formats, layout)
 	group := rig.group(layout)
@@ -342,23 +405,23 @@ func TestRenderBundleKeepsResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finish() error = %v", err)
 	}
-	if got := pipe.impl.Ref().RefCount(); got != 2 {
+	if got := pipe.Ref().RefCount(); got != 2 {
 		t.Fatalf("pipeline refs after Finish = %d, want 2 (one per resource, however often it is used)", got)
 	}
 
 	encoder, pass := rig.beginPass(t, true)
 	pass.ExecuteBundles(bundle)
-	if got := group.impl.Ref().RefCount(); got != 3 {
+	if got := group.Ref().RefCount(); got != 3 {
 		t.Fatalf("bind group refs after ExecuteBundles = %d, want 3", got)
 	}
 	bundle.Release()
 	bundle.Release()
-	if got := group.impl.Ref().RefCount(); got != 2 {
+	if got := group.Ref().RefCount(); got != 2 {
 		t.Fatalf("bind group refs after Release = %d, want 2 (the encoder keeps its own)", got)
 	}
 	pass.ExecuteBundles(bundle)
 	_ = pass.End()
-	if _, err := encoder.Finish(); !errors.Is(err, ErrReleased) {
+	if _, err := encoder.Finish(); !errors.Is(err, core.ErrReleased) {
 		t.Fatalf("Finish() after executing a released bundle: error = %v, want ErrReleased", err)
 	}
 	var nilBundle *RenderBundle
@@ -366,11 +429,11 @@ func TestRenderBundleKeepsResources(t *testing.T) {
 }
 
 func TestExecuteBundlesChecks(t *testing.T) {
-	rig := newBundleTestRig()
-	other := newBundleTestRig()
-	colorBundle := newEmptyBundle(rig.device)
+	rig := newBundleTestRig(t)
+	other := newBundleTestRig(t)
+	colorBundle := newEmptyBundle(rig.view)
 	colorBundle.target.context.ColorFormats = rgba8Formats
-	writingBundle := newEmptyBundle(rig.device)
+	writingBundle := newEmptyBundle(rig.view)
 	writingBundle.target.depthReadOnly = false
 	tests := []struct {
 		name     string
@@ -378,10 +441,10 @@ func TestExecuteBundlesChecks(t *testing.T) {
 		readOnly bool
 		want     error
 	}{
-		{name: "nil", want: errBundleCommand},
-		{name: "another device", bundle: newEmptyBundle(other.device), want: errBundleDevice},
+		{name: "nil", want: ErrBundleCommand},
+		{name: "another device", bundle: newEmptyBundle(other.view), want: ErrBundleDevice},
 		{name: "color formats", bundle: colorBundle, want: &core.RenderPassCompatibilityError{}},
-		{name: "depth written in a read-only pass", bundle: writingBundle, readOnly: true, want: errBundleReadOnly},
+		{name: "depth written in a read-only pass", bundle: writingBundle, readOnly: true, want: ErrBundleReadOnly},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -408,19 +471,19 @@ func TestExecuteBundlesChecks(t *testing.T) {
 // with each other when the bundle is finished, and with the pass's usages
 // when it is executed (Rust RenderBundleScope, merge_render_bundle).
 func TestRenderBundleUsageScope(t *testing.T) {
-	rig := newBundleTestRig()
+	rig := newBundleTestRig(t)
 	layout := rebindLayout(false)
-	buffer := rig.buffer(t, BufferUsageVertex|BufferUsageStorage)
-	if td := buffer.impl.CoreBuffer().TrackingData(); td == nil || !td.Index().IsValid() {
-		t.Skip("noop buffers have no tracker index")
+	buffer := rig.buffer(t, gputypes.BufferUsageVertex|gputypes.BufferUsageStorage)
+	if td := buffer.CoreBuffer().TrackingData(); td == nil || !td.Index().IsValid() {
+		t.Skip("the test buffers have no tracker index")
 	}
-	writer := &BindGroup{impl: resource.NewBindGroup(&resource.BindGroupInit{
-		HAL:    &testHALResource{},
-		Device: rig.device.seamView(),
+	writer := resource.NewBindGroup(&resource.BindGroupInit{
+		HAL:    &testHALRenderResource{},
+		Device: rig.view,
 		Layout: layout,
 		Ref:    core.NewResourceRef("BindGroup:test", nil),
-		Usages: &core.BindGroupUsages{Buffers: []core.BindGroupBufferUse{{Buffer: buffer.impl.CoreBuffer(), Usage: track.BufferUsesStorageWrite}}},
-	})}
+		Usages: &core.BindGroupUsages{Buffers: []core.BindGroupBufferUse{{Buffer: buffer.CoreBuffer(), Usage: track.BufferUsesStorageWrite}}},
+	})
 
 	t.Run("inside the bundle", func(t *testing.T) {
 		enc := rig.encoder(t, nil)

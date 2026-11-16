@@ -5,6 +5,9 @@ package wgpu
 import (
 	"errors"
 	"testing"
+
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 // These tests pin the ADR-070 §15.5 zero-value contract of the pipeline
@@ -68,8 +71,11 @@ func TestComputePipelineNilReleasePanics(t *testing.T) {
 // pipeline — the pre-move zero value's nil device failed the same identity
 // check — and it is not a "pipeline is nil" command error.
 func TestRenderBundleRejectsZeroValuePipeline(t *testing.T) {
-	rig := newBundleTestRig()
-	enc := rig.encoder(t, nil)
+	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}, commandEncoder: &captureCommandEncoder{CommandEncoder: &noop.CommandEncoder{}}})
+	enc, err := device.CreateRenderBundleEncoder(&RenderBundleEncoderDescriptor{ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}})
+	if err != nil {
+		t.Fatalf("CreateRenderBundleEncoder() error = %v", err)
+	}
 	enc.SetPipeline(&RenderPipeline{})
 	bundle, err := enc.Finish(nil)
 	if bundle != nil {

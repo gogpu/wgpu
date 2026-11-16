@@ -107,23 +107,23 @@ var (
 
 	// ErrDispatchMissingPipeline is returned when Dispatch/DispatchIndirect is
 	// called before SetPipeline on a compute pass encoder.
-	ErrDispatchMissingPipeline = errors.New("wgpu: dispatch called without SetPipeline")
+	ErrDispatchMissingPipeline = core.ErrDispatchMissingPipeline
 
 	// ErrDispatchMissingBindGroup is returned when a dispatch command is issued
 	// but not all bind groups required by the current pipeline have been set.
-	ErrDispatchMissingBindGroup = errors.New("wgpu: dispatch called with missing bind group")
+	ErrDispatchMissingBindGroup = core.ErrDispatchMissingBindGroup
 
 	// ErrDispatchIncompatibleBindGroup is returned when a dispatch command is
 	// issued but the bind group set at a slot has an incompatible layout.
-	ErrDispatchIncompatibleBindGroup = errors.New("wgpu: dispatch called with incompatible bind group layout")
+	ErrDispatchIncompatibleBindGroup = core.ErrDispatchIncompatibleBindGroup
 
 	// ErrDispatchLateBufferTooSmall is returned when a buffer bound via
 	// SetBindGroup is smaller than the shader-required minimum for a dispatch.
-	ErrDispatchLateBufferTooSmall = errors.New("wgpu: dispatch: bound buffer smaller than shader-required minimum")
+	ErrDispatchLateBufferTooSmall = core.ErrDispatchLateBufferTooSmall
 
 	// ErrDispatchWorkgroupCountExceeded is returned when Dispatch is called with
 	// workgroup counts exceeding the device limit.
-	ErrDispatchWorkgroupCountExceeded = errors.New("wgpu: dispatch workgroup count exceeds device limit")
+	ErrDispatchWorkgroupCountExceeded = core.ErrDispatchWorkgroupCountExceeded
 
 	// ErrDrawIndexFormatMismatch is returned when the index buffer format
 	// does not match the pipeline's StripIndexFormat for strip topologies.
@@ -143,12 +143,12 @@ var (
 	// ErrDispatchIndirectBufferUsage is returned when DispatchIndirect is called
 	// with a buffer that lacks BufferUsageIndirect.
 	// Matches Rust wgpu-core check_usage(BufferUsages::INDIRECT) (compute.rs:896).
-	ErrDispatchIndirectBufferUsage = errors.New("wgpu: indirect dispatch buffer missing INDIRECT usage")
+	ErrDispatchIndirectBufferUsage = core.ErrDispatchIndirectBufferUsage
 
 	// ErrDispatchIndirectOffsetAlignment is returned when DispatchIndirect is
 	// called with an offset that is not 4-byte aligned.
 	// Matches Rust wgpu-core UnalignedIndirectBufferOffset (compute.rs:899).
-	ErrDispatchIndirectOffsetAlignment = errors.New("wgpu: indirect dispatch buffer offset not 4-byte aligned")
+	ErrDispatchIndirectOffsetAlignment = core.ErrDispatchIndirectOffsetAlignment
 
 	// ErrDrawIndirectBufferOverrun is returned when DrawIndirect or
 	// DrawIndexedIndirect args extend past the end of the buffer.
@@ -158,7 +158,7 @@ var (
 	// ErrDispatchIndirectBufferOverrun is returned when DispatchIndirect
 	// args extend past the end of the buffer.
 	// Matches Rust wgpu-core IndirectBufferOverrun (compute.rs:903-909).
-	ErrDispatchIndirectBufferOverrun = errors.New("wgpu: indirect dispatch args exceed buffer size")
+	ErrDispatchIndirectBufferOverrun = core.ErrDispatchIndirectBufferOverrun
 )
 
 // Queue.Submit validation sentinel errors (VAL-A6).

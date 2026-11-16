@@ -3,51 +3,39 @@
 package wgpu
 
 import (
-	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/encoder"
 )
 
 // ComputePassEncoder records compute dispatch commands.
 // On browser, this wraps a GPUComputePassEncoder via internal/browser.ComputePassEncoder.
+//
+// The implementation lives in internal/encoder (ADR-070 S6); this declaration
+// is the public surface: every method is one delegation.
 type ComputePassEncoder struct {
-	browser  *browser.ComputePassEncoder
-	released bool
+	impl *encoder.ComputePassEncoder
 }
 
 // SetPipeline sets the active compute pipeline.
 func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
-	if pipeline == nil || pipeline.impl.Browser() == nil {
-		return
-	}
-	p.browser.SetPipeline(pipeline.impl.Browser().Ref())
+	p.impl.SetPipeline(encoderComputePipeline(pipeline))
 }
 
 // SetBindGroup sets a bind group for the given index.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if group == nil || group.impl.Browser() == nil {
-		return
-	}
-	p.browser.SetBindGroup(index, group.impl.Browser().Ref(), offsets)
+	p.impl.SetBindGroup(index, encoderBindGroup(group), offsets)
 }
 
 // Dispatch dispatches compute work.
 func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
-	p.browser.DispatchWorkgroups(x, y, z)
+	p.impl.Dispatch(x, y, z)
 }
 
 // DispatchIndirect dispatches compute work with GPU-generated parameters.
 func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
-	if buffer == nil || buffer.impl.Browser() == nil {
-		return
-	}
-	p.browser.DispatchIndirect(buffer.impl.Browser().Ref(), offset)
+	p.impl.DispatchIndirect(encoderBuffer(buffer), offset)
 }
 
 // End ends the compute pass.
 func (p *ComputePassEncoder) End() error {
-	if p.released {
-		return ErrReleased
-	}
-	p.released = true
-	p.browser.End()
-	return nil
+	return p.impl.End()
 }

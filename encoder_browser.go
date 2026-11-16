@@ -30,7 +30,7 @@ func (e *CommandEncoder) BeginComputePass(desc *ComputePassDescriptor) (*Compute
 	if err != nil {
 		return nil, err
 	}
-	return &ComputePassEncoder{browser: bp}, nil
+	return &ComputePassEncoder{impl: encoder.NewComputePassEncoder(bp)}, nil
 }
 
 // CopyBufferToBuffer copies data between buffers.

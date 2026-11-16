@@ -1,19 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
-
-// The render bundle's record model and its constructor live here, in the root
-// package, until the S6 Move relocates them into internal/encoder. They are
-// named from staying root files — device_native.go creates the encoder through
-// the constructor, and the root-side bundle execution path and the white-box
-// tests name the target and contents types — and a move may not leave an
-// unexported package-scope declaration behind for a staying file (the
-// `unexported-boundary` refusal class; the pattern is the S5 binder shuttle).
-//
-// These declarations are byte-identical to their pre-shuttle form except the
-// constructor's device argument, which is the core.DeviceView seam the S6
-// destination can name. They travel at the Move together with their users —
-// the bundle encoder, the bundle and the bundle's validation state.
+package encoder
 
 import (
 	"errors"
@@ -21,16 +8,43 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
-// Unexported sentinels of render bundle validation, wrapped with the details.
+// The render bundle's record model and its constructor. They were the root
+// package's shuttled declarations until the S6 Move: a move may not leave an
+// unexported package-scope declaration behind for a staying root file (the
+// `unexported-boundary` refusal class), so they sat next to their staying root
+// users, and they travel here together with their users — the bundle encoder,
+// the bundle and the bundle's validation state.
+//
+// The sentinels are exported because the root declaration layer still names
+// them (its zero-value tests match with errors.Is), and the root keeps
+// unexported aliases of these values, so the identity is the same value on
+// both sides (the S5 ErrDraw* precedent).
+
+// Sentinels of render bundle validation, wrapped with the details.
 var (
-	errBundleDescriptor = errors.New("invalid render bundle encoder descriptor")
-	errBundleCommand    = errors.New("invalid render bundle command")
-	errBundleDepthWrite = errors.New("pipeline writes a depth/stencil aspect the render bundle keeps read-only")
-	errBundleReadOnly   = errors.New("render pass depth/stencil is read-only but the render bundle is not")
-	errBundleDevice     = errors.New("resource belongs to another device")
+	// ErrBundleDescriptor is wrapped by a render bundle encoder descriptor
+	// whose attachment formats are invalid.
+	ErrBundleDescriptor = errors.New("invalid render bundle encoder descriptor")
+
+	// ErrBundleCommand is wrapped by the first invalid command a bundle
+	// encoder records.
+	ErrBundleCommand = errors.New("invalid render bundle command")
+
+	// ErrBundleDepthWrite is wrapped when a pipeline writes a depth/stencil
+	// aspect the bundle keeps read-only.
+	ErrBundleDepthWrite = errors.New("pipeline writes a depth/stencil aspect the render bundle keeps read-only")
+
+	// ErrBundleReadOnly is wrapped when a bundle that writes a read-only
+	// aspect is executed in a read-only pass.
+	ErrBundleReadOnly = errors.New("render pass depth/stencil is read-only but the render bundle is not")
+
+	// ErrBundleDevice is wrapped when a resource recorded in a bundle belongs
+	// to another device.
+	ErrBundleDevice = errors.New("resource belongs to another device")
 )
 
 // bundleCommandKind identifies a render bundle command.
@@ -52,11 +66,11 @@ type bundleCommand struct {
 	kind bundleCommandKind
 	// slot is the bind group index or the vertex buffer slot.
 	slot     uint32
-	pipeline *RenderPipeline
+	pipeline *pipeline.RenderPipeline
 	group    *resource.BindGroup
 	// offsets is the command's own copy of the dynamic offsets.
 	offsets     []uint32
-	buffer      *Buffer
+	buffer      *resource.Buffer
 	format      gputypes.IndexFormat
 	offset      uint64
 	draw        gputypes.DrawArgs
@@ -77,9 +91,9 @@ type bundleRecording struct {
 	commands []bundleCommand
 }
 
-// newRenderBundleEncoder validates desc and returns an encoder for it.
+// NewRenderBundleEncoder validates desc and returns an encoder for it.
 // Matches Rust wgpu-core RenderBundleEncoder::new.
-func newRenderBundleEncoder(device core.DeviceView, desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
+func NewRenderBundleEncoder(device core.DeviceView, desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
 	target, err := renderBundleTargetOf(desc, &device.Core().Limits)
 	if err != nil {
 		return nil, err
@@ -103,7 +117,7 @@ func renderBundleTargetOf(desc *RenderBundleEncoderDescriptor, limits *gputypes.
 	}
 	if limits.MaxColorAttachments > 0 && uint32(len(desc.ColorFormats)) > limits.MaxColorAttachments { //nolint:gosec // slice length fits uint32
 		return target, fmt.Errorf("%w: %d color formats exceed maxColorAttachments %d",
-			errBundleDescriptor, len(desc.ColorFormats), limits.MaxColorAttachments)
+			ErrBundleDescriptor, len(desc.ColorFormats), limits.MaxColorAttachments)
 	}
 	hasAttachment := false
 	for i, format := range desc.ColorFormats {
@@ -113,19 +127,19 @@ func renderBundleTargetOf(desc *RenderBundleEncoderDescriptor, limits *gputypes.
 		hasAttachment = true
 		if format.IsDepthStencil() || format.IsCompressed() {
 			return target, fmt.Errorf("%w: color format [%d] %s is not a renderable color format",
-				errBundleDescriptor, i, format)
+				ErrBundleDescriptor, i, format)
 		}
 	}
 	if ds := desc.DepthStencilFormat; ds != gputypes.TextureFormatUndefined {
 		hasAttachment = true
 		if !ds.IsDepthStencil() {
-			return target, fmt.Errorf("%w: depth/stencil format %s is not a depth or stencil format", errBundleDescriptor, ds)
+			return target, fmt.Errorf("%w: depth/stencil format %s is not a depth or stencil format", ErrBundleDescriptor, ds)
 		}
 		target.depthReadOnly = !ds.HasDepth() || desc.DepthReadOnly
 		target.stencilReadOnly = !ds.HasStencil() || desc.StencilReadOnly
 	}
 	if !hasAttachment {
-		return target, fmt.Errorf("%w: a render bundle needs at least one color or depth/stencil format", errBundleDescriptor)
+		return target, fmt.Errorf("%w: a render bundle needs at least one color or depth/stencil format", ErrBundleDescriptor)
 	}
 	return target, nil
 }
@@ -144,5 +158,5 @@ type bundleContents struct {
 	// groups and buffers are recorded on the command encoder of every pass
 	// that executes the bundle, for submit-time validation.
 	groups  []*resource.BindGroup
-	buffers []*Buffer
+	buffers []*resource.Buffer
 }

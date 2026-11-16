@@ -12,8 +12,8 @@ import "errors"
 // internal/encoder (ADR-070 S5): a destination declaration cannot name a root
 // value, so the values live here and the root package re-exports the same
 // ones (error.go), which keeps errors.Is working through the public API
-// (§15.1). The dispatch sentinels stay in the root package until the compute
-// pass moves (S6).
+// (§15.1). The dispatch sentinels followed with the compute pass (S6, see
+// error_dispatch.go).
 var (
 	// ErrDrawMissingPipeline is returned when Draw/DrawIndexed/DrawIndirect is
 	// called before SetPipeline on a render pass encoder.

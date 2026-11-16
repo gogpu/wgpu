@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package encoder
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
-	"github.com/gogpu/wgpu/internal/encoder"
+	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -33,9 +33,9 @@ func refLabel(ref *core.ResourceRef) string {
 type bundleState struct {
 	device core.DeviceView
 	target *renderBundleTarget
-	binder encoder.Binder
+	binder Binder
 
-	pipeline          *RenderPipeline
+	pipeline          *pipeline.RenderPipeline
 	vertexBufferCount uint32
 	indexBufferSet    bool
 	indexFormat       gputypes.IndexFormat
@@ -46,7 +46,7 @@ type bundleState struct {
 	refs    []*core.ResourceRef
 	seen    map[*core.ResourceRef]struct{}
 	groups  []*resource.BindGroup
-	buffers []*Buffer
+	buffers []*resource.Buffer
 }
 
 func newBundleState(device core.DeviceView, target *renderBundleTarget) *bundleState {
@@ -75,37 +75,37 @@ func (s *bundleState) apply(cmd *bundleCommand) error {
 	case bundleDrawIndexed:
 		return s.drawIndexed(cmd.drawIndexed)
 	default:
-		return fmt.Errorf("%w: unknown command %d", errBundleCommand, cmd.kind)
+		return fmt.Errorf("%w: unknown command %d", ErrBundleCommand, cmd.kind)
 	}
 }
 
 // setPipeline checks the pipeline against the bundle's attachment formats,
 // sample count and read-only aspects. Matches Rust bundle.rs set_pipeline.
-func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
-	if pipeline == nil {
-		return fmt.Errorf("SetPipeline: %w: pipeline is nil", errBundleCommand)
+func (s *bundleState) setPipeline(pl *pipeline.RenderPipeline) error {
+	if pl == nil {
+		return fmt.Errorf("SetPipeline: %w: pipeline is nil", ErrBundleCommand)
 	}
 	// A zero-value pipeline has no implementation: its reads are nil-safe and
 	// yield the zero values the pre-move type carried, so its nil device view
-	// fails the identity check below as errBundleDevice, not a panic.
-	if pipeline.impl.IsReleased() {
-		return fmt.Errorf("SetPipeline: pipeline: %w", ErrReleased)
+	// fails the identity check below as ErrBundleDevice, not a panic.
+	if pl.IsReleased() {
+		return fmt.Errorf("SetPipeline: pipeline: %w", core.ErrReleased)
 	}
-	if pipeline.impl.Device() != s.device {
-		return fmt.Errorf("SetPipeline: pipeline: %w", errBundleDevice)
+	if pl.Device() != s.device {
+		return fmt.Errorf("SetPipeline: pipeline: %w", ErrBundleDevice)
 	}
-	passContext := pipeline.impl.PassContext()
-	if err := s.target.context.CheckCompatible(&passContext, refLabel(pipeline.impl.Ref())); err != nil {
+	passContext := pl.PassContext()
+	if err := s.target.context.CheckCompatible(&passContext, refLabel(pl.Ref())); err != nil {
 		return fmt.Errorf("SetPipeline: %w", err)
 	}
-	if (pipeline.impl.WritesDepth() && s.target.depthReadOnly) || (pipeline.impl.WritesStencil() && s.target.stencilReadOnly) {
-		return fmt.Errorf("SetPipeline: %w", errBundleDepthWrite)
+	if (pl.WritesDepth() && s.target.depthReadOnly) || (pl.WritesStencil() && s.target.stencilReadOnly) {
+		return fmt.Errorf("SetPipeline: %w", ErrBundleDepthWrite)
 	}
-	s.commands = append(s.commands, bundleCommand{kind: bundleSetPipeline, pipeline: pipeline})
-	s.pipeline = pipeline
-	s.binder.UpdateExpectations(pipeline.impl.BindGroupLayouts())
-	s.binder.UpdateLateBufferBindingsFromPipeline(pipeline.impl.LateSizedBufferGroups())
-	s.keep(pipeline.impl.Ref())
+	s.commands = append(s.commands, bundleCommand{kind: bundleSetPipeline, pipeline: pl})
+	s.pipeline = pl
+	s.binder.UpdateExpectations(pl.BindGroupLayouts())
+	s.binder.UpdateLateBufferBindingsFromPipeline(pl.LateSizedBufferGroups())
+	s.keep(pl.Ref())
 	return nil
 }
 
@@ -113,14 +113,14 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 // the binder; nothing is emitted until a draw uses it.
 // Matches Rust bundle.rs set_bind_group.
 func (s *bundleState) setBindGroup(index uint32, group *resource.BindGroup, offsets []uint32) error {
-	if err := encoder.ValidateSetBindGroup("RenderBundleEncoder", index, group, offsets, &s.device.Core().Limits); err != nil {
+	if err := ValidateSetBindGroup("RenderBundleEncoder", index, group, offsets, &s.device.Core().Limits); err != nil {
 		return err
 	}
 	if group.IsReleased() {
-		return fmt.Errorf("SetBindGroup: index %d: %w", index, ErrReleased)
+		return fmt.Errorf("SetBindGroup: index %d: %w", index, core.ErrReleased)
 	}
 	if group.Device() != s.device {
-		return fmt.Errorf("SetBindGroup: index %d: %w", index, errBundleDevice)
+		return fmt.Errorf("SetBindGroup: index %d: %w", index, ErrBundleDevice)
 	}
 	if err := s.scope.MergeBindGroup(group.Usages()); err != nil {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, err)
@@ -131,23 +131,23 @@ func (s *bundleState) setBindGroup(index uint32, group *resource.BindGroup, offs
 }
 
 // checkBuffer validates a vertex or index buffer of the bundle.
-func (s *bundleState) checkBuffer(method string, buffer *Buffer, usage gputypes.BufferUsage, offset uint64) error {
+func (s *bundleState) checkBuffer(method string, buffer *resource.Buffer, usage gputypes.BufferUsage, offset uint64) error {
 	if buffer == nil {
-		return fmt.Errorf("%s: %w: buffer is nil", method, errBundleCommand)
+		return fmt.Errorf("%s: %w: buffer is nil", method, ErrBundleCommand)
 	}
-	if buffer.impl.CoreBuffer() == nil || buffer.impl.IsReleased() {
-		return fmt.Errorf("%s: buffer: %w", method, ErrReleased)
+	if buffer.CoreBuffer() == nil || buffer.IsReleased() {
+		return fmt.Errorf("%s: buffer: %w", method, core.ErrReleased)
 	}
 	// The buffer's host is the shared device view; the device's cached adapter
 	// is one pointer per Device, so interface equality is device identity.
-	if buffer.impl.Device() != s.device {
-		return fmt.Errorf("%s: buffer: %w", method, errBundleDevice)
+	if buffer.Device() != s.device {
+		return fmt.Errorf("%s: buffer: %w", method, ErrBundleDevice)
 	}
 	if buffer.Usage()&usage == 0 {
-		return fmt.Errorf("%s: %w: buffer %q lacks usage %v", method, errBundleCommand, buffer.Label(), usage)
+		return fmt.Errorf("%s: %w: buffer %q lacks usage %v", method, ErrBundleCommand, buffer.Label(), usage)
 	}
 	if offset > buffer.Size() {
-		return fmt.Errorf("%s: %w: offset %d exceeds buffer size %d", method, errBundleCommand, offset, buffer.Size())
+		return fmt.Errorf("%s: %w: offset %d exceeds buffer size %d", method, ErrBundleCommand, offset, buffer.Size())
 	}
 	return nil
 }
@@ -155,16 +155,16 @@ func (s *bundleState) checkBuffer(method string, buffer *Buffer, usage gputypes.
 // setVertexBuffer matches Rust bundle.rs set_vertex_buffer.
 func (s *bundleState) setVertexBuffer(cmd *bundleCommand) error {
 	if limit := s.device.Core().Limits.MaxVertexBuffers; limit > 0 && cmd.slot >= limit {
-		return fmt.Errorf("SetVertexBuffer: %w: slot %d >= maxVertexBuffers %d", errBundleCommand, cmd.slot, limit)
+		return fmt.Errorf("SetVertexBuffer: %w: slot %d >= maxVertexBuffers %d", ErrBundleCommand, cmd.slot, limit)
 	}
-	if err := s.checkBuffer("SetVertexBuffer", cmd.buffer, BufferUsageVertex, cmd.offset); err != nil {
+	if err := s.checkBuffer("SetVertexBuffer", cmd.buffer, gputypes.BufferUsageVertex, cmd.offset); err != nil {
 		return err
 	}
 	if cmd.offset%vertexBufferAlignment != 0 {
 		return fmt.Errorf("SetVertexBuffer: %w: offset %d is not a multiple of %d",
-			errBundleCommand, cmd.offset, vertexBufferAlignment)
+			ErrBundleCommand, cmd.offset, vertexBufferAlignment)
 	}
-	if err := s.scope.MergeBuffer(cmd.buffer.impl.CoreBuffer(), track.BufferUsesVertex); err != nil {
+	if err := s.scope.MergeBuffer(cmd.buffer.CoreBuffer(), track.BufferUsesVertex); err != nil {
 		return fmt.Errorf("SetVertexBuffer: slot %d: %w", cmd.slot, err)
 	}
 	s.vertexBufferCount = max(s.vertexBufferCount, cmd.slot+1)
@@ -175,18 +175,18 @@ func (s *bundleState) setVertexBuffer(cmd *bundleCommand) error {
 
 // setIndexBuffer matches Rust bundle.rs set_index_buffer.
 func (s *bundleState) setIndexBuffer(cmd *bundleCommand) error {
-	if err := s.checkBuffer("SetIndexBuffer", cmd.buffer, BufferUsageIndex, cmd.offset); err != nil {
+	if err := s.checkBuffer("SetIndexBuffer", cmd.buffer, gputypes.BufferUsageIndex, cmd.offset); err != nil {
 		return err
 	}
 	size := uint64(cmd.format.Size())
 	if size == 0 {
-		return fmt.Errorf("SetIndexBuffer: %w: invalid index format %v", errBundleCommand, cmd.format)
+		return fmt.Errorf("SetIndexBuffer: %w: invalid index format %v", ErrBundleCommand, cmd.format)
 	}
 	if cmd.offset%size != 0 {
 		return fmt.Errorf("SetIndexBuffer: %w: offset %d is not a multiple of the index size %d",
-			errBundleCommand, cmd.offset, size)
+			ErrBundleCommand, cmd.offset, size)
 	}
-	if err := s.scope.MergeBuffer(cmd.buffer.impl.CoreBuffer(), track.BufferUsesIndex); err != nil {
+	if err := s.scope.MergeBuffer(cmd.buffer.CoreBuffer(), track.BufferUsesIndex); err != nil {
 		return fmt.Errorf("SetIndexBuffer: %w", err)
 	}
 	s.indexBufferSet = true
@@ -200,31 +200,31 @@ func (s *bundleState) setIndexBuffer(cmd *bundleCommand) error {
 // Matches Rust bundle.rs State::is_ready.
 func (s *bundleState) isReady(method string, indexed bool) error {
 	if s.pipeline == nil {
-		return fmt.Errorf("%s: no pipeline set (call SetPipeline first): %w", method, ErrDrawMissingPipeline)
+		return fmt.Errorf("%s: no pipeline set (call SetPipeline first): %w", method, core.ErrDrawMissingPipeline)
 	}
 	if err := s.binder.CheckCompatibility(); err != nil {
-		sentinel := ErrDrawMissingBindGroup
-		if errors.Is(err, encoder.ErrBindGroupIncompatible) {
-			sentinel = ErrDrawIncompatibleBindGroup
+		sentinel := core.ErrDrawMissingBindGroup
+		if errors.Is(err, ErrBindGroupIncompatible) {
+			sentinel = core.ErrDrawIncompatibleBindGroup
 		}
 		return fmt.Errorf("%s: %w: %w", method, sentinel, err)
 	}
 	if err := s.binder.CheckLateBufferBindings(); err != nil {
-		return fmt.Errorf("%s: %w: %w", method, ErrDrawLateBufferTooSmall, err)
+		return fmt.Errorf("%s: %w: %w", method, core.ErrDrawLateBufferTooSmall, err)
 	}
-	if s.vertexBufferCount < s.pipeline.impl.RequiredVertexBuffers() {
+	if s.vertexBufferCount < s.pipeline.RequiredVertexBuffers() {
 		return fmt.Errorf("%s: pipeline requires %d vertex buffer(s) but only %d set: %w",
-			method, s.pipeline.impl.RequiredVertexBuffers(), s.vertexBufferCount, ErrDrawMissingVertexBuffer)
+			method, s.pipeline.RequiredVertexBuffers(), s.vertexBufferCount, core.ErrDrawMissingVertexBuffer)
 	}
 	if !indexed {
 		return nil
 	}
 	if !s.indexBufferSet {
-		return fmt.Errorf("%s: no index buffer set (call SetIndexBuffer first): %w", method, ErrDrawMissingIndexBuffer)
+		return fmt.Errorf("%s: no index buffer set (call SetIndexBuffer first): %w", method, core.ErrDrawMissingIndexBuffer)
 	}
-	if strip := s.pipeline.impl.StripIndexFormat(); strip != nil && s.indexFormat != *strip {
+	if strip := s.pipeline.StripIndexFormat(); strip != nil && s.indexFormat != *strip {
 		return fmt.Errorf("%s: index buffer format %v does not match pipeline strip index format %v: %w",
-			method, s.indexFormat, *strip, ErrDrawIndexFormatMismatch)
+			method, s.indexFormat, *strip, core.ErrDrawIndexFormatMismatch)
 	}
 	return nil
 }
@@ -290,8 +290,8 @@ func (s *bundleState) keepBindGroup(group *resource.BindGroup) {
 }
 
 // keepBuffer keeps a vertex or index buffer.
-func (s *bundleState) keepBuffer(buffer *Buffer) {
-	coreBuf := buffer.impl.CoreBuffer()
+func (s *bundleState) keepBuffer(buffer *resource.Buffer) {
+	coreBuf := buffer.CoreBuffer()
 	if _, ok := s.seen[coreBuf.Ref]; !ok || coreBuf.Ref == nil {
 		s.buffers = append(s.buffers, buffer)
 	}
