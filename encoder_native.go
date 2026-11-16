@@ -9,9 +9,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
-	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
-	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // CommandEncoder records GPU commands for later submission.
@@ -176,30 +174,6 @@ func (e *CommandEncoder) trackQuerySet(qs *resource.QuerySet) {
 	e.trackRef(qs.Core().Ref)
 }
 
-// copyTextureUsage describes one texture endpoint of a copy command.
-type copyTextureUsage struct {
-	texture *resource.Texture
-	usage   track.TextureUses
-}
-
-type preparedCopyTextureUsage struct {
-	texture *resource.Texture
-	index   track.TrackerIndex
-	usage   track.TextureUses
-}
-
-// copyBufferUsage describes one buffer endpoint of a copy command.
-type copyBufferUsage struct {
-	buffer *Buffer
-	usage  track.BufferUses
-}
-
-type preparedCopyBufferUsage struct {
-	buffer *Buffer
-	index  track.TrackerIndex
-	usage  track.BufferUses
-}
-
 // recordCopyUsages records the resource usages of ONE copy command.
 //
 // A copy command is its own WebGPU usage scope. Its endpoints are validated
@@ -276,84 +250,6 @@ func (e *CommandEncoder) transitionCopyBuffers(raw hal.CommandEncoder, requests 
 	if len(barriers) > 0 && raw != nil {
 		raw.TransitionBuffers(barriers)
 	}
-}
-
-// prepareCopyBufferUsages builds the buffer part of one copy command's usage
-// scope: multiple roles of the same buffer are merged, and incompatible roles
-// (a buffer as both copy source and destination) are rejected.
-//
-// Reference: wgpu-core command/transfer.rs SameSourceDestinationBuffer
-func prepareCopyBufferUsages(requests []copyBufferUsage) ([]preparedCopyBufferUsage, error) {
-	prepared := make([]preparedCopyBufferUsage, 0, len(requests))
-	positions := make(map[track.TrackerIndex]int, len(requests))
-	for _, request := range requests {
-		var cb *core.Buffer
-		if request.buffer != nil {
-			cb = request.buffer.impl.CoreBuffer()
-		}
-		if cb == nil {
-			continue
-		}
-		td := cb.TrackingData()
-		if td == nil || !td.Index().IsValid() {
-			continue
-		}
-		index := td.Index()
-		position, exists := positions[index]
-		if !exists {
-			positions[index] = len(prepared)
-			prepared = append(prepared, preparedCopyBufferUsage{
-				buffer: request.buffer, index: index, usage: request.usage,
-			})
-			continue
-		}
-		existing := prepared[position].usage
-		if !existing.IsCompatible(request.usage) {
-			return nil, &track.UsageConflictError{Index: index, Existing: existing, New: request.usage}
-		}
-		prepared[position].usage = existing | request.usage
-	}
-	return prepared, nil
-}
-
-// prepareCopyTextureUsages builds the texture part of one copy command's
-// usage scope: multiple roles of the same texture are merged, and
-// incompatible roles (a texture as both copy source and destination) are
-// rejected. Whole-texture granularity: a copy between disjoint subresources
-// of one texture, which WebGPU allows, is rejected as well until the
-// trackers become subresource-aware.
-//
-// Reference: wgpu-core command/transfer.rs validate_copy_within_same_texture
-func prepareCopyTextureUsages(requests []copyTextureUsage) ([]preparedCopyTextureUsage, error) {
-	prepared := make([]preparedCopyTextureUsage, 0, len(requests))
-	positions := make(map[track.TrackerIndex]int, len(requests))
-	for _, request := range requests {
-		if request.texture == nil || request.texture.CoreTexture() == nil {
-			continue
-		}
-		td := request.texture.CoreTexture().TrackingData()
-		if td == nil || !td.Index().IsValid() {
-			continue
-		}
-		index := td.Index()
-		position, exists := positions[index]
-		if !exists {
-			positions[index] = len(prepared)
-			prepared = append(prepared, preparedCopyTextureUsage{
-				texture: request.texture, index: index, usage: request.usage,
-			})
-			continue
-		}
-		existing := prepared[position].usage
-		combined := existing | request.usage
-		if !combined.IsCompatible(combined) {
-			return nil, &track.TextureUsageConflictError{
-				Index: index, Existing: existing, New: request.usage,
-			}
-		}
-		prepared[position].usage = combined
-	}
-	return prepared, nil
 }
 
 // BeginRenderPass begins a render pass.
@@ -768,41 +664,6 @@ func (e *CommandEncoder) recordBufferToTexture(src *Buffer, halSrc hal.Buffer, d
 	}
 	raw.CopyBufferToTexture(halSrc, halDst, halRegions)
 	return true
-}
-
-func validateRenderPassTextureViews(desc *RenderPassDescriptor) error {
-	if desc == nil {
-		return nil
-	}
-	for _, attachment := range desc.ColorAttachments {
-		if attachment.View != nil && attachment.View.impl.ResolveHAL() == nil {
-			return fmt.Errorf("wgpu: BeginRenderPass: color attachment view is released: %w", core.ErrReleased)
-		}
-		if attachment.ResolveTarget != nil && attachment.ResolveTarget.impl.ResolveHAL() == nil {
-			return fmt.Errorf("wgpu: BeginRenderPass: resolve target view is released: %w", core.ErrReleased)
-		}
-	}
-	if attachment := desc.DepthStencilAttachment; attachment != nil && attachment.View != nil && attachment.View.impl.ResolveHAL() == nil {
-		return fmt.Errorf("wgpu: BeginRenderPass: depth/stencil attachment view is released: %w", core.ErrReleased)
-	}
-	return nil
-}
-
-func trackRenderPassTextureViews(e *CommandEncoder, desc *RenderPassDescriptor) {
-	if e == nil || desc == nil {
-		return
-	}
-	for _, attachment := range desc.ColorAttachments {
-		if attachment.View != nil {
-			e.trackTextureView(attachment.View.impl)
-		}
-		if attachment.ResolveTarget != nil {
-			e.trackTextureView(attachment.ResolveTarget.impl)
-		}
-	}
-	if attachment := desc.DepthStencilAttachment; attachment != nil && attachment.View != nil {
-		e.trackTextureView(attachment.View.impl)
-	}
 }
 
 // trackTextureView keeps a render pass attachment view alive like
@@ -1338,119 +1199,3 @@ func validateBufferTextureRegion(side core.CopySide, texture *resource.Texture, 
 	}
 	return texture.CoreTexture().Device().RequireDepthTextureAndBufferCopies(view.Format)
 }
-
-// stencilRecorder adapts a CommandEncoder to stencilblit.Recorder, the seam by
-// which the stencil upload payload (still in the root package until S6) records
-// its passes into this encoder. It is an adapter rather than methods on
-// CommandEncoder itself: the interface's methods are exported, and the encoder
-// is a public type, which must not grow internal seam surface (ADR-070 §15.1).
-//
-// The adapter lives in this file so it travels with the encoder: the payload
-// never names the encoder type, and the destination never names the payload.
-type stencilRecorder struct{ e *CommandEncoder }
-
-var _ stencilblit.Recorder = stencilRecorder{}
-
-// Own hands a resource the blit created to the encoder, which releases it once
-// the command buffer is spent.
-func (r stencilRecorder) Own(x stencilblit.Releasable) { r.e.own(x) }
-
-// BeginLayerPass opens one blit layer's render pass, binds the layer's bind
-// group at index 0 and returns the pass's command recorder.
-//
-// The group is bound to the HAL pass directly: the frontend built both the
-// group and the pipeline layout for this pass alone, so the public pass
-// encoder's binder — a cache that validates user bind groups against a
-// pipeline layout — has nothing to check here. The group's usages still join
-// the pass's usage scope, so core transitions the resources it binds before
-// the pass (CoreCommandEncoder.EndRenderPass).
-func (r stencilRecorder) BeginLayerPass(desc *core.RenderPassDescriptor, group *resource.BindGroup) (stencilblit.PassRecorder, error) {
-	if r.e.released {
-		return nil, core.ErrReleased
-	}
-	corePass, err := r.e.core.BeginRenderPass(desc)
-	if err != nil {
-		return nil, err
-	}
-	if group != nil {
-		if err := corePass.MergeBindGroup(group.Usages()); err != nil {
-			// A deferred error, like the public pass encoder's: the pass stays
-			// open for End and the error surfaces at Finish.
-			r.e.setError(fmt.Errorf("wgpu: stencil blit: bind group: %w", err))
-		}
-	}
-	pass := &stencilPass{e: r.e, core: corePass, raw: corePass.RawPass(), group: group}
-	if r.e.test != nil {
-		pass.test = r.e.test
-		pass.testPass = r.e.test.PassBegan(r.e.testEncoder, false, desc.Label, nil, nil)
-		pass.test.BindGroupBound(pass.testPass, 0, nil)
-	}
-	return pass, nil
-}
-
-// stencilPass records one blit layer's commands. It drives the core pass for
-// the state core tracks (scissor, stencil reference, draws) and the HAL pass
-// for the pipeline and bind group bindings, for the reason BeginLayerPass
-// gives.
-type stencilPass struct {
-	e          *CommandEncoder
-	core       *core.CoreRenderPassEncoder
-	raw        hal.RenderPassEncoder
-	group      *resource.BindGroup
-	groupBound bool
-	test       core.TestHooks
-	testPass   int
-}
-
-var _ stencilblit.PassRecorder = (*stencilPass)(nil)
-
-// SetPipeline binds the HAL pipeline and keeps it alive until the GPU
-// completes the submission, as the public pass encoder does for user
-// pipelines (the blit's pipelines are device-cached; the reference outlives
-// device teardown races).
-func (p *stencilPass) SetPipeline(pl *pipeline.RenderPipeline) {
-	if pl == nil {
-		return
-	}
-	p.e.trackRef(pl.Ref())
-	if p.raw != nil && pl.HAL() != nil {
-		p.raw.SetPipeline(pl.HAL())
-	}
-}
-
-// SetStencilReference sets the stencil reference value.
-func (p *stencilPass) SetStencilReference(ref uint32) { p.core.SetStencilReference(ref) }
-
-// SetScissorRect sets the scissor rectangle for clipping.
-func (p *stencilPass) SetScissorRect(x, y, width, height uint32) {
-	p.core.SetScissorRect(gputypes.ScissorRect{X: x, Y: y, Width: width, Height: height})
-}
-
-// Draw draws primitives.
-func (p *stencilPass) Draw(vertexCount, instanceCount, firstVertex, firstInstance uint32) {
-	args := gputypes.DrawArgs{VertexCount: vertexCount, InstanceCount: instanceCount, FirstVertex: firstVertex, FirstInstance: firstInstance}
-	p.bindGroup()
-	p.core.Draw(args)
-	if p.test != nil {
-		p.test.Drew(p.testPass, args)
-	}
-}
-
-// bindGroup binds the layer's bind group to the HAL pass on the first draw,
-// not at the pass opening: a backend resolves the group's buffers and textures
-// against the CURRENT pipeline layout when it receives the group (GLES reads
-// it from the bound program's layout), and the pass's pipeline is set between
-// the opening and the first draw. The public pass encoder's binder defers its
-// backend binding to the first draw for the same reason.
-func (p *stencilPass) bindGroup() {
-	if p.groupBound || p.raw == nil || p.group == nil {
-		return
-	}
-	p.groupBound = true
-	if halGroup := p.group.HAL(); halGroup != nil {
-		p.raw.SetBindGroup(0, halGroup, nil)
-	}
-}
-
-// End ends the render pass.
-func (p *stencilPass) End() error { return p.core.End() }
