@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // The fixtures of the encoder domain's own tests. They build the internal
@@ -156,7 +157,7 @@ func (testDeviceHost) Recordings() core.EncoderRecordings[*CommandEncoder, *Comm
 	return nil
 }
 func (testDeviceHost) EncoderPool() core.HalEncoderPool { return nil }
-func (testDeviceHost) NewStencilUpload(*resource.Texture, uint32, gputypes.Origin3D, gputypes.Extent3D) (Upload, error) {
+func (testDeviceHost) NewStencilUpload(*resource.Texture, uint32, gputypes.Origin3D, gputypes.Extent3D) (stencilblit.Upload, error) {
 	return nil, errTestNoStencilUpload
 }
 func (h testDeviceHost) Features() gputypes.Features { return h.features }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
-	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -207,7 +206,7 @@ type stencilUpload struct {
 	temp     *Texture
 }
 
-var _ encoder.Upload = (*stencilUpload)(nil)
+var _ stencilblit.Upload = (*stencilUpload)(nil)
 
 // newStencilUpload creates the R8Uint texture an upload of size into the
 // stencil of dst at mipLevel and origin goes through.
@@ -234,7 +233,7 @@ func (u *stencilUpload) Staging() *resource.Texture { return u.temp.impl }
 // writes the layer's stencil from temp. Every pass it opens is ended. The
 // resources it creates are handed to r (Recorder.Own); the caller hands it
 // temp.
-func (u *stencilUpload) Record(r encoder.Recorder) error {
+func (u *stencilUpload) Record(r stencilblit.Recorder) error {
 	d := u.device
 	layers := u.size.DepthOrArrayLayers
 	key := stencilblit.KeyFor(u.dst.Format(), layers)
@@ -301,7 +300,7 @@ func (u *stencilUpload) paramsBuffer(layers uint32) (*Buffer, error) {
 	return buf, nil
 }
 
-func (u *stencilUpload) recordLayer(r encoder.Recorder, entry *stencilBlitEntry, impls *stencilblit.Pipelines[*pipeline.RenderPipeline], srcView *TextureView, params *Buffer, layer uint32) error {
+func (u *stencilUpload) recordLayer(r stencilblit.Recorder, entry *stencilBlitEntry, impls *stencilblit.Pipelines[*pipeline.RenderPipeline], srcView *TextureView, params *Buffer, layer uint32) error {
 	d := u.device
 	group, err := d.CreateBindGroup(&BindGroupDescriptor{
 		Label:  stencilUploadLabel,

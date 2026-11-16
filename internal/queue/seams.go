@@ -37,6 +37,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // DeviceHost is the queue domain's seam view of the device: the shared
@@ -66,8 +67,7 @@ type DeviceHost interface {
 	// into the stencil of dst at mipLevel and origin goes through, and returns
 	// the payload the queue records the blit from. dst is an implementation
 	// handle; the host maps it back to whatever its own payload works on. The
-	// payload stays in the root package through this step (S9 hands it back to
-	// internal/stencilblit), so the type this method names is the encoder
-	// domain's view of it today.
-	NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (encoder.Upload, error)
+	// payload interface is internal/stencilblit's (S9's hand-back moved it
+	// there): the payload itself stays in the root package through this step.
+	NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (stencilblit.Upload, error)
 }

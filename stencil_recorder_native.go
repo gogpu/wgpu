@@ -2,7 +2,7 @@
 
 package wgpu
 
-// The root-side adapter over the encoder domain's Recorder seam. The queue,
+// The root-side adapter over internal/stencilblit's Recorder seam. The queue,
 // which stays in this package until S9's Move, constructs it to record its
 // staging upload (writeStencilLocked, queue_native.go). The stencil upload
 // payload stays here too, and the recording itself is the destination's
@@ -15,19 +15,20 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // stencilRecorder adapts an encoder implementation handle to the Recorder seam.
 type stencilRecorder struct{ e *encoder.CommandEncoder }
 
-var _ encoder.Recorder = stencilRecorder{}
+var _ stencilblit.Recorder = stencilRecorder{}
 
 // Own hands a resource the blit created to the encoder, which releases it once
 // the command buffer is spent.
-func (r stencilRecorder) Own(x encoder.Releasable) { r.e.Own(x) }
+func (r stencilRecorder) Own(x stencilblit.Releasable) { r.e.Own(x) }
 
 // BeginLayerPass opens one blit layer's render pass, binds the layer's bind
 // group at index 0 and returns the pass's command recorder.
-func (r stencilRecorder) BeginLayerPass(desc *core.RenderPassDescriptor, group *resource.BindGroup) (encoder.PassRecorder, error) {
+func (r stencilRecorder) BeginLayerPass(desc *core.RenderPassDescriptor, group *resource.BindGroup) (stencilblit.PassRecorder, error) {
 	return r.e.BlitRecorder().BeginLayerPass(desc, group)
 }

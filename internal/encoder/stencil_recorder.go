@@ -4,14 +4,20 @@ package encoder
 
 // The stencil blit's recorder adapter, relocated from the root package by
 // S4's Move (the "staying-side shuttle" file stencil_recorder_native.go of
-// commit ae8631e). It adapts a CommandEncoder to the Recorder seam the
-// stencil upload payload records through, and it is what the encoder's own
-// stencil lowerings record into (lowerStencilCopy).
+// commit ae8631e). It adapts a CommandEncoder to the stencilblit.Recorder
+// seam the stencil upload payload records through, and it is what the
+// encoder's own stencil lowerings record into (lowerStencilCopy).
 //
-// The queue, which stays in the root package until S9, records its staging
-// uploads through a root-side adapter over the same seam
+// The queue, which stays in the root package until S9's Move, records its
+// staging uploads through a root-side adapter over the same seam
 // (stencil_recorder_native.go), which delegates here: the payload never names
 // the encoder type, and the destination never names the payload.
+//
+// The Recorder, PassRecorder and Releasable contracts are
+// internal/stencilblit's (S9's hand-back returned them to the package that
+// owns the payload); this file is the implementation side of those seams, so
+// the encoder -> stencilblit edge is generated here — the golden row that
+// closes at S9.
 //
 // It is an adapter rather than methods on CommandEncoder itself: the seam's
 // methods are exported, and the public encoder declaration layer must not grow
@@ -25,18 +31,19 @@ import (
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // BlitRecorder returns the Recorder view of the encoder: the seam the stencil
 // upload payload records its passes through.
-func (e *CommandEncoder) BlitRecorder() Recorder { return stencilRecorder{e} }
+func (e *CommandEncoder) BlitRecorder() stencilblit.Recorder { return stencilRecorder{e} }
 
-// stencilRecorder adapts a CommandEncoder to Recorder.
+// stencilRecorder adapts a CommandEncoder to stencilblit.Recorder.
 type stencilRecorder struct{ e *CommandEncoder }
 
 // Own hands a resource the blit created to the encoder, which releases it once
 // the command buffer is spent.
-func (r stencilRecorder) Own(x Releasable) { r.e.Own(x) }
+func (r stencilRecorder) Own(x stencilblit.Releasable) { r.e.Own(x) }
 
 // BeginLayerPass opens one blit layer's render pass, binds the layer's bind
 // group at index 0 and returns the pass's command recorder.
@@ -47,7 +54,7 @@ func (r stencilRecorder) Own(x Releasable) { r.e.Own(x) }
 // pipeline layout — has nothing to check here. The group's usages still join
 // the pass's usage scope, so core transitions the resources it binds before
 // the pass (CoreCommandEncoder.EndRenderPass).
-func (r stencilRecorder) BeginLayerPass(desc *core.RenderPassDescriptor, group *resource.BindGroup) (PassRecorder, error) {
+func (r stencilRecorder) BeginLayerPass(desc *core.RenderPassDescriptor, group *resource.BindGroup) (stencilblit.PassRecorder, error) {
 	if r.e.released {
 		return nil, core.ErrReleased
 	}

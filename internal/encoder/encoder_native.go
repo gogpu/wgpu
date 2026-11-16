@@ -10,6 +10,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // CommandEncoder records GPU commands for later submission.
@@ -67,7 +68,7 @@ type CommandEncoder struct {
 	// unreleased until then because Submit refuses a command buffer that
 	// references a released resource (VAL-A6); the commands' own references
 	// keep them alive until the GPU is done.
-	internal []Releasable
+	internal []stencilblit.Releasable
 }
 
 // CommandEncoderInit carries what the device has already built when it creates
@@ -135,13 +136,13 @@ func (e *CommandEncoder) Core() *core.CoreCommandEncoder { return e.core }
 func (e *CommandEncoder) TrackedRefs() []*core.ResourceRef { return e.trackedRefs }
 
 // Own hands r to the encoder, which releases it with its command buffer.
-func (e *CommandEncoder) Own(r Releasable) {
+func (e *CommandEncoder) Own(r stencilblit.Releasable) {
 	e.internal = append(e.internal, r)
 }
 
 // releaseInternal releases the frontend's own resources of a spent encoder or
 // command buffer.
-func releaseInternal(resources []Releasable) {
+func releaseInternal(resources []stencilblit.Releasable) {
 	for _, r := range resources {
 		r.Release()
 	}
@@ -1102,7 +1103,7 @@ type CommandBuffer struct {
 
 	// internal is CommandEncoder.internal, released once the command buffer
 	// is spent.
-	internal []Releasable
+	internal []stencilblit.Releasable
 
 	// submitted is set to true after this command buffer has been submitted
 	// to a queue. A command buffer cannot be submitted twice.

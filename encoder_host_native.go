@@ -7,6 +7,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // encoderDeviceHost adapts *Device to the encoder domain's DeviceHost seam
@@ -37,8 +38,9 @@ func (h encoderDeviceHost) EncoderPool() core.HalEncoderPool {
 // NewStencilUpload creates the staging upload of size into the stencil of dst.
 // The payload still works on the public Texture wrapper (it stays in this
 // package through S9); the wrapper is the one the texture's Pub cache holds,
-// so the same handle keeps the same owner.
-func (h encoderDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (encoder.Upload, error) {
+// so the same handle keeps the same owner. The payload contract itself is
+// internal/stencilblit's (S9's hand-back moved the interfaces there).
+func (h encoderDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (stencilblit.Upload, error) {
 	pub, _ := dst.Pub.(*Texture)
 	if pub == nil {
 		pub = &Texture{impl: dst}

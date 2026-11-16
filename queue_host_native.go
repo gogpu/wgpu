@@ -8,6 +8,7 @@ import (
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/queue"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/stencilblit"
 )
 
 // queueDeviceHost adapts *Device to the queue domain's DeviceHost seam
@@ -67,7 +68,7 @@ func (h queueDeviceHost) CreateCommandEncoder(label string) (*encoder.CommandEnc
 // works on the public Texture wrapper (it stays in this package through S9),
 // so the adapter maps the handle back to the wrapper the texture's Pub cache
 // holds — the same handle keeps the same owner.
-func (h queueDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (encoder.Upload, error) {
+func (h queueDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (stencilblit.Upload, error) {
 	return h.d.newStencilUpload(texturePub(dst), mipLevel, Origin3D(origin), Extent3D(size))
 }
 
