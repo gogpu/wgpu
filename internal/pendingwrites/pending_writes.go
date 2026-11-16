@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package pendingwrites
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 	"github.com/gogpu/wgpu/internal/staging"
 )
 
-// pendingWrites accumulates WriteBuffer operations into a
+// Writes accumulates WriteBuffer operations into a
 // single HAL command encoder. The accumulated commands are flushed as a single
 // batch when the user calls Queue.Submit(), prepended before user command
 // buffers. This eliminates per-write GPU submits and matches Rust wgpu-core's
@@ -27,8 +27,8 @@ import (
 // Vulkan command pools every frame, enabling maxFramesInFlight=2 on DX12.
 //
 // For GLES and Software backends (which use direct API calls, not command
-// encoders for writes), pendingWrites delegates directly to the HAL queue.
-type pendingWrites struct {
+// encoders for writes), Writes delegates directly to the HAL queue.
+type Writes struct {
 	mu sync.Mutex
 
 	// halDevice is used to create staging buffers.
@@ -38,7 +38,7 @@ type pendingWrites struct {
 	halQueue hal.Queue
 
 	// pool is a reference to the shared device-level encoder pool.
-	// Not owned by pendingWrites — owned by Device. destroy() clears the
+	// Not owned by Writes — owned by Device. destroy() clears the
 	// reference without destroying the pool. nil for non-batching backends.
 	pool core.HalEncoderPool
 
@@ -58,14 +58,14 @@ type pendingWrites struct {
 	staging []hal.Buffer
 
 	// copyRegion is a pre-allocated single-element BufferCopy slice used by
-	// writeBufferFor to avoid heap escape when calling CopyBufferToBuffer through
+	// WriteBuffer to avoid heap escape when calling CopyBufferToBuffer through
 	// the hal.CommandEncoder interface. Reused across writes within a frame.
 	copyRegion [1]hal.BufferCopy
 
 	// tracker is the device-level resource tracker. Every batched write moves
 	// its destination to COPY_DST in it and records the returned barrier
 	// before the copy, as Rust wgpu-core does (queue.rs write_staging_buffer_impl,
-	// write_texture). nil only for pendingWrites built by hand in unit tests;
+	// write_texture). nil only for Writes built by hand in unit tests;
 	// destinations without a valid tracker index are not tracked either.
 	tracker *core.DeviceTracker
 
@@ -115,12 +115,12 @@ type inflightSubmission struct {
 	// CopyBufferToTexture/CopyBufferToBuffer in this submission. This prevents
 	// premature Release() from destroying D3D12 resources while the GPU is still
 	// executing commands that reference them. Root cause of DX12 TDR (BUG-DX12-006).
-	// dstRefs (pendingWrites.dstRefs) are dropped once the encoder is reset.
+	// dstRefs (Writes.dstRefs) are dropped once the encoder is reset.
 	dstTextures []hal.Texture
 	dstRefs     []*core.ResourceRef
 }
 
-// newPendingWrites creates a pendingWrites for the given HAL device and queue.
+// New creates a Writes for the given HAL device and queue.
 // For batching backends (DX12/Vulkan/Metal), pool is the shared device-level
 // encoder pool (same pool used by CreateCommandEncoder). This matches Rust
 // wgpu-core which uses a single device.command_allocator for both user command
@@ -134,8 +134,8 @@ type inflightSubmission struct {
 //
 // tracker is the device tracker that batched writes update (nil in unit tests
 // that do not exercise barriers).
-func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool core.HalEncoderPool, tracker *core.DeviceTracker) *pendingWrites {
-	pw := &pendingWrites{
+func New(halDevice hal.Device, halQueue hal.Queue, pool core.HalEncoderPool, tracker *core.DeviceTracker) *Writes {
+	pw := &Writes{
 		halDevice:    halDevice,
 		halQueue:     halQueue,
 		tracker:      tracker,
@@ -158,7 +158,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool core.HalEnc
 	return pw
 }
 
-// writeBufferFor records a buffer write. For batching backends, creates a staging
+// WriteBuffer records a buffer write. For batching backends, creates a staging
 // buffer, copies data via CPU, and records CopyBufferToBuffer into the shared
 // encoder. For direct-write backends, delegates to halQueue.WriteBuffer.
 //
@@ -172,7 +172,7 @@ func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool core.HalEnc
 // buffer's reference, is cloned: the recorded copy keeps the buffer alive
 // until the batch is discarded, or until the GPU completes the submission
 // that carries it. ref is nil only in HAL-level tests.
-func (pw *pendingWrites) writeBufferFor(ref *core.ResourceRef, buffer hal.Buffer, index track.TrackerIndex, offset uint64, data []byte) error {
+func (pw *Writes) WriteBuffer(ref *core.ResourceRef, buffer hal.Buffer, index track.TrackerIndex, offset uint64, data []byte) error {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 
@@ -243,7 +243,7 @@ func (pw *pendingWrites) writeBufferFor(ref *core.ResourceRef, buffer hal.Buffer
 // setBufferCopyDst moves a buffer to COPY_DST in the device tracker and returns
 // the barrier from its previous state. No barrier when the buffer is not
 // tracked (no tracker, or no valid index). Must be called with pw.mu held.
-func (pw *pendingWrites) setBufferCopyDst(index track.TrackerIndex) (track.PendingTransition, bool) {
+func (pw *Writes) setBufferCopyDst(index track.TrackerIndex) (track.PendingTransition, bool) {
 	if pw.tracker == nil || !index.IsValid() {
 		return track.PendingTransition{}, false
 	}
@@ -274,20 +274,20 @@ const pendingWritesRowPitchAlignment = 256
 // state to COPY_DST (Rust wgpu-core write_texture: set_single(COPY_DST) +
 // transition_textures, queue.rs:1197-1210). The transition out of COPY_DST is
 // recorded by flush(). This ownerless form has no tracker index and records
-// no barrier; Queue.WriteTexture uses writeTextureFor.
-func (pw *pendingWrites) writeTexture(
+// no barrier; Queue.WriteTexture uses WriteTexture.
+func (pw *Writes) writeTexture(
 	dst *hal.ImageCopyTexture,
 	data []byte,
 	layout *hal.ImageDataLayout,
 	size *hal.Extent3D,
 ) error {
-	return pw.writeTextureFor(nil, dst, data, layout, size)
+	return pw.WriteTexture(nil, dst, data, layout, size)
 }
 
-// writeTextureFor records a texture write and retains the public wrapper whose
+// WriteTexture records a texture write and retains the public wrapper whose
 // lifetime authorized it. Queue.WriteTexture supplies owner; the ownerless
 // form above remains available to focused HAL-level tests.
-func (pw *pendingWrites) writeTextureFor(
+func (pw *Writes) WriteTexture(
 	owner *resource.Texture,
 	dst *hal.ImageCopyTexture,
 	data []byte,
@@ -477,7 +477,7 @@ func alignUp(n, alignment uint32) uint32 {
 
 // activate lazily begins encoding on the shared command encoder.
 // Acquires an encoder from the pool if none exists. Must be called with pw.mu held.
-func (pw *pendingWrites) activate() (hal.CommandEncoder, error) {
+func (pw *Writes) activate() (hal.CommandEncoder, error) {
 	if pw.isRecording {
 		return pw.encoder, nil
 	}
@@ -503,7 +503,7 @@ func (pw *pendingWrites) activate() (hal.CommandEncoder, error) {
 // references to track as one submission. It returns zero values when nothing
 // was recorded. Thread-safe: it takes the pending-writes lock itself, which is
 // the lock callers took around flush() before the domain became internal (S8).
-func (pw *pendingWrites) Flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []*core.ResourceRef, error) {
+func (pw *Writes) Flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []*core.ResourceRef, error) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	return pw.flush()
@@ -514,7 +514,7 @@ func (pw *pendingWrites) Flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 // The encoder is detached for inflight tracking — after GPU completion,
 // maintain() calls ResetAll and returns it to the pool.
 // Must be called with pw.mu held.
-func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []*core.ResourceRef, error) {
+func (pw *Writes) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.Texture, []*core.ResourceRef, error) {
 	if !pw.isRecording {
 		return nil, nil, nil, nil, nil
 	}
@@ -580,7 +580,7 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 // PendingWrites discards the encoding before its dst_buffers drop: dropping
 // the last reference destroys the buffer, which an open D3D12 command list
 // must not outlive. Must be called with pw.mu held.
-func (pw *pendingWrites) discardRecording() {
+func (pw *Writes) discardRecording() {
 	if pw.encoder != nil {
 		if pw.isRecording {
 			pw.encoder.DiscardEncoding()
@@ -610,7 +610,7 @@ func (pw *pendingWrites) discardRecording() {
 
 // CancelFlush releases a batch that was closed by Flush but rejected by HAL
 // Submit. Thread-safe: it takes the pending-writes lock itself.
-func (pw *pendingWrites) CancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
+func (pw *Writes) CancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	pw.cancelFlush(cmdBuf, encoder, dstTextures, dstRefs)
@@ -619,7 +619,7 @@ func (pw *pendingWrites) CancelFlush(cmdBuf hal.CommandBuffer, encoder hal.Comma
 // cancelFlush releases a batch that was closed but rejected by HAL Submit.
 // The destination references drop after the encoder is reset. Must be called
 // with pw.mu held.
-func (pw *pendingWrites) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
+func (pw *Writes) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
 	if pw.belt != nil {
 		pw.belt.DiscardLastClosed()
 	}
@@ -641,7 +641,7 @@ func (pw *pendingWrites) cancelFlush(cmdBuf hal.CommandBuffer, encoder hal.Comma
 
 // holdRef clones ref, a destination's reference, for the current batch.
 // Must be called with pw.mu held.
-func (pw *pendingWrites) holdRef(ref *core.ResourceRef) {
+func (pw *Writes) holdRef(ref *core.ResourceRef) {
 	if ref != nil {
 		ref.Clone()
 		pw.dstRefs = append(pw.dstRefs, ref)
@@ -657,7 +657,7 @@ func dropRefs(refs []*core.ResourceRef) {
 
 // maintain frees staging buffers and returns encoders to the pool from
 // completed submissions. Must be called with pw.mu held.
-func (pw *pendingWrites) maintain(completedIndex uint64) {
+func (pw *Writes) maintain(completedIndex uint64) {
 	// Recycle staging belt chunks from completed submissions.
 	if pw.belt != nil {
 		pw.belt.Recall(completedIndex)
@@ -702,7 +702,7 @@ func (pw *pendingWrites) maintain(completedIndex uint64) {
 // up to completedIndex. completedIndex is the caller's PollCompleted result,
 // taken before the call so the HAL poll stays outside this lock. Thread-safe:
 // it takes the pending-writes lock itself.
-func (pw *pendingWrites) RecordSubmission(subIdx, completedIndex uint64, cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
+func (pw *Writes) RecordSubmission(subIdx, completedIndex uint64, cmdBuf hal.CommandBuffer, encoder hal.CommandEncoder, dstTextures []hal.Texture, dstRefs []*core.ResourceRef) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 
@@ -727,14 +727,14 @@ func (pw *pendingWrites) RecordSubmission(subIdx, completedIndex uint64, cmdBuf 
 
 // Maintain recycles everything the GPU has completed up to completedIndex.
 // Thread-safe: it takes the pending-writes lock itself.
-func (pw *pendingWrites) Maintain(completedIndex uint64) {
+func (pw *Writes) Maintain(completedIndex uint64) {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	pw.maintain(completedIndex)
 }
 
 // HasPendingWork returns true if there are buffered writes waiting to be flushed.
-func (pw *pendingWrites) HasPendingWork() bool {
+func (pw *Writes) HasPendingWork() bool {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	return pw.isRecording
@@ -742,7 +742,7 @@ func (pw *pendingWrites) HasPendingWork() bool {
 
 // BeltStats returns the staging belt's statistics, zero when the backend does
 // not batch. Thread-safe; the surface-lifetime test reads it through here.
-func (pw *pendingWrites) BeltStats() staging.Stats {
+func (pw *Writes) BeltStats() staging.Stats {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 	if pw.belt == nil {
@@ -751,9 +751,9 @@ func (pw *pendingWrites) BeltStats() staging.Stats {
 	return pw.belt.Stats()
 }
 
-// Destroy releases all resources held by pendingWrites. Thread-safe: it takes
+// Destroy releases all resources held by Writes. Thread-safe: it takes
 // the pending-writes lock itself.
-func (pw *pendingWrites) Destroy() {
+func (pw *Writes) Destroy() {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
 
@@ -794,8 +794,8 @@ func (pw *pendingWrites) Destroy() {
 		pw.belt.Destroy()
 	}
 
-	// Clear pool reference — pool is owned by Device, not PendingWrites.
-	// Device.Release() destroys the shared pool after PendingWrites.destroy().
+	// Clear pool reference — pool is owned by Device, not Writes.
+	// Device.Release() destroys the shared pool after Writes.Destroy().
 	pw.pool = nil
 
 	pw.dstBuffers = nil

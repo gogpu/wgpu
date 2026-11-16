@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package pendingwrites
 
 import (
 	"bytes"
@@ -12,16 +12,24 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
-	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/resource"
 	"github.com/gogpu/wgpu/internal/staging"
 )
 
-// --- Mock types for batching backend tests ---
+// --- Local HAL doubles ---
+//
+// The doubles are local on purpose (the S7 internal/staging pattern): a test
+// import is a graph edge like any other, and internal/hal/noop maps to a
+// destination of its own.
 
-// mockBatchingQueue wraps noop.Queue but returns true for SupportsCommandBufferCopies.
-type mockBatchingQueue struct {
-	noop.Queue
+// testQueue is the shared HAL queue double: it records the writes pending
+// writes issues and, when the target buffer carries storage, copies the data
+// into it the way a direct-write backend does. mockBatchingQueue and
+// mockNonBatchingQueue are the two shapes the tests build; they differ only
+// in SupportsCommandBufferCopies.
+type testQueue struct {
+	hal.Queue
+
 	writeBufferCalls  int
 	writeTextureCalls int
 	submitCalls       int
@@ -29,10 +37,124 @@ type mockBatchingQueue struct {
 	lastWriteBuf      hal.Buffer
 	lastWriteOffset   uint64
 	lastWriteData     []byte
+
+	submissionIndex uint64
 }
 
-type barrierCaptureEncoder struct {
-	noop.CommandEncoder
+// mockBatchingQueue is the command-buffer-copies queue (DX12/Vulkan/Metal).
+type mockBatchingQueue struct{ testQueue }
+
+func (q *mockBatchingQueue) SupportsCommandBufferCopies() bool { return true }
+
+// mockNonBatchingQueue is the direct-write queue (GLES/Software).
+type mockNonBatchingQueue struct{ testQueue }
+
+func (q *mockNonBatchingQueue) SupportsCommandBufferCopies() bool { return false }
+
+func (q *testQueue) Submit(_ []hal.CommandBuffer) (uint64, error) {
+	q.submitCalls++
+	if q.submitErr != nil {
+		return 0, q.submitErr
+	}
+	q.submissionIndex++
+	return q.submissionIndex, nil
+}
+
+func (q *testQueue) PollCompleted() uint64 { return q.submissionIndex }
+
+func (q *testQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
+	q.writeBufferCalls++
+	q.lastWriteBuf = buffer
+	q.lastWriteOffset = offset
+	q.lastWriteData = make([]byte, len(data))
+	copy(q.lastWriteData, data)
+	if b, ok := buffer.(*testBuffer); ok && b.data != nil && offset+uint64(len(data)) <= uint64(len(b.data)) {
+		copy(b.data[offset:], data)
+	}
+	return nil
+}
+
+func (q *testQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
+	q.writeTextureCalls++
+	return nil
+}
+
+// testDevice is the HAL device double: buffers it creates carry storage for
+// the write round trip, it records destructions, and it hands the test the
+// last command encoder so barrier and copy order can be read back.
+type testDevice struct {
+	hal.Device
+
+	encoder   *testCommandEncoder
+	destroyed []hal.Buffer
+}
+
+func (d *testDevice) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
+	return &testBuffer{data: make([]byte, desc.Size)}, nil
+}
+
+func (d *testDevice) DestroyBuffer(buffer hal.Buffer) {
+	d.destroyed = append(d.destroyed, buffer)
+}
+
+func (d *testDevice) MapBuffer(buffer hal.Buffer, offset, size uint64) (hal.BufferMapping, error) {
+	b, ok := buffer.(*testBuffer)
+	if !ok || b.data == nil || offset+size > uint64(len(b.data)) {
+		return hal.BufferMapping{}, hal.ErrInvalidMapRange
+	}
+	return hal.BufferMapping{Ptr: unsafe.Pointer(&b.data[offset]), IsCoherent: true}, nil
+}
+
+func (d *testDevice) UnmapBuffer(hal.Buffer) error { return nil }
+
+func (d *testDevice) CreateCommandEncoder(*hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
+	d.encoder = &testCommandEncoder{}
+	return d.encoder, nil
+}
+
+// testResource is the opaque HAL resource double for the objects
+// core.NewDevice builds at startup (its indirect-dispatch validation
+// pipeline). The pending-writes tests never use them.
+type testResource struct{}
+
+func (r *testResource) Destroy() {}
+
+func (d *testDevice) CreateShaderModule(*hal.ShaderModuleDescriptor) (hal.ShaderModule, error) {
+	return &testResource{}, nil
+}
+
+func (d *testDevice) CreateBindGroupLayout(*hal.BindGroupLayoutDescriptor) (hal.BindGroupLayout, error) {
+	return &testResource{}, nil
+}
+
+func (d *testDevice) CreatePipelineLayout(*hal.PipelineLayoutDescriptor) (hal.PipelineLayout, error) {
+	return &testResource{}, nil
+}
+
+func (d *testDevice) CreateComputePipeline(*hal.ComputePipelineDescriptor) (hal.ComputePipeline, error) {
+	return &testResource{}, nil
+}
+
+// testBuffer is the HAL buffer double: an opaque identity with optional
+// in-memory storage (the non-batching write round trip reads it back).
+type testBuffer struct {
+	hal.Buffer
+	data []byte
+}
+
+// testTexture is the HAL texture double: pending references are no-ops, as on
+// the backends the batching tests model.
+type testTexture struct {
+	hal.Texture
+}
+
+func (t *testTexture) AddPendingRef() {}
+func (t *testTexture) DecPendingRef() {}
+
+// testCommandEncoder is the HAL command encoder double: it records the calls
+// pending writes makes, and in the barrier tests their order.
+type testCommandEncoder struct {
+	hal.CommandEncoder
 	textureBarriers []hal.TextureBarrier
 	bufferBarriers  []hal.BufferBarrier
 	// events are "tex-barrier", "buf-barrier", "copy", "discard" and "reset"
@@ -40,71 +162,86 @@ type barrierCaptureEncoder struct {
 	events []string
 }
 
-func (e *barrierCaptureEncoder) DiscardEncoding() {
+func (e *testCommandEncoder) BeginEncoding(string) error { return nil }
+
+func (e *testCommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
+	return &testCommandBuffer{}, nil
+}
+
+func (e *testCommandEncoder) Destroy() {}
+
+func (e *testCommandEncoder) DiscardEncoding() {
 	e.events = append(e.events, "discard")
 }
 
-func (e *barrierCaptureEncoder) ResetAll(commandBuffers []hal.CommandBuffer) {
-	e.CommandEncoder.ResetAll(commandBuffers)
+func (e *testCommandEncoder) ResetAll([]hal.CommandBuffer) {
 	e.events = append(e.events, "reset")
 }
 
-func (e *barrierCaptureEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
+func (e *testCommandEncoder) TransitionTextures(barriers []hal.TextureBarrier) {
 	e.textureBarriers = append(e.textureBarriers, barriers...)
 	e.events = append(e.events, "tex-barrier")
 }
 
-func (e *barrierCaptureEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
+func (e *testCommandEncoder) TransitionBuffers(barriers []hal.BufferBarrier) {
 	e.bufferBarriers = append(e.bufferBarriers, barriers...)
 	e.events = append(e.events, "buf-barrier")
 }
 
-func (e *barrierCaptureEncoder) CopyBufferToBuffer(_, _ hal.Buffer, _ []hal.BufferCopy) {
+func (e *testCommandEncoder) CopyBufferToBuffer(_, _ hal.Buffer, _ []hal.BufferCopy) {
 	e.events = append(e.events, "copy")
 }
 
-func (e *barrierCaptureEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []hal.BufferTextureCopy) {
+func (e *testCommandEncoder) CopyBufferToTexture(_ hal.Buffer, _ hal.Texture, _ []hal.BufferTextureCopy) {
 	e.events = append(e.events, "copy")
 }
 
-type barrierCaptureDevice struct {
-	noop.Device
-	encoder *barrierCaptureEncoder
+// testCommandBuffer is the opaque command buffer the encoder returns.
+type testCommandBuffer struct {
+	hal.CommandBuffer
 }
 
-func (d *barrierCaptureDevice) CreateCommandEncoder(*hal.CommandEncoderDescriptor) (hal.CommandEncoder, error) {
-	d.encoder = &barrierCaptureEncoder{}
-	return d.encoder, nil
+// testEncoderPool is the core.HalEncoderPool double: Acquire delegates to the
+// device's CreateCommandEncoder when one is wired, so the barrier tests read
+// the encoder they last acquired; the counters prove the lifecycle paths.
+type testEncoderPool struct {
+	device   *testDevice
+	acquired int
+	released int
+	retired  int
 }
 
-func (q *mockBatchingQueue) SupportsCommandBufferCopies() bool { return true }
-
-func (q *mockBatchingQueue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
-	q.submitCalls++
-	if q.submitErr != nil {
-		return 0, q.submitErr
+func (p *testEncoderPool) Acquire() (hal.CommandEncoder, error) {
+	p.acquired++
+	if p.device != nil {
+		return p.device.CreateCommandEncoder(nil)
 	}
-	return q.Queue.Submit(commandBuffers)
+	return &testCommandEncoder{}, nil
 }
 
-func (q *mockBatchingQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	q.writeBufferCalls++
-	q.lastWriteBuf = buffer
-	q.lastWriteOffset = offset
-	q.lastWriteData = make([]byte, len(data))
-	copy(q.lastWriteData, data)
-	return q.Queue.WriteBuffer(buffer, offset, data)
-}
+func (p *testEncoderPool) Release(hal.CommandEncoder) { p.released++ }
+func (p *testEncoderPool) Retire(hal.CommandEncoder)  { p.retired++ }
 
-func (q *mockBatchingQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
-	q.writeTextureCalls++
-	return q.Queue.WriteTexture(dst, data, layout, size)
-}
+// destroy matches the real pool's cleanup hook; the double holds nothing.
+func (p *testEncoderPool) destroy() {}
 
-// mockStagingSizeDevice wraps noop.Device and implements hal.MaxStagingBufferSizer.
-// Used to verify that newPendingWrites queries the device for the max staging buffer size.
+// testDeviceView is the core.DeviceView double for textures the tests build:
+// pending writes never query the view on these paths; it exists so the
+// resource constructor receives the seam it requires.
+type testDeviceView struct{ core *core.Device }
+
+func (v *testDeviceView) Core() *core.Device               { return v.core }
+func (v *testDeviceView) IsReleased() bool                 { return false }
+func (v *testDeviceView) HALDevice() hal.Device            { return nil }
+func (v *testDeviceView) DestroyQueue() *core.DestroyQueue { return nil }
+func (v *testDeviceView) LastSubmissionIndex() uint64      { return 0 }
+func (v *testDeviceView) Poll(core.PollType) bool          { return false }
+
+// mockStagingSizeDevice is the device double that also implements
+// hal.MaxStagingBufferSizer. Used to verify that New queries the device for
+// the max staging buffer size and passes it to the belt.
 type mockStagingSizeDevice struct {
-	noop.Device
+	testDevice
 	maxStaging uint64
 }
 
@@ -112,56 +249,31 @@ func (d *mockStagingSizeDevice) MaxStagingBufferSize() uint64 {
 	return d.maxStaging
 }
 
-// mockNonBatchingQueue wraps noop.Queue and tracks direct calls.
-type mockNonBatchingQueue struct {
-	noop.Queue
-	writeBufferCalls  int
-	writeTextureCalls int
-	lastWriteBuf      hal.Buffer
-	lastWriteOffset   uint64
-	lastWriteData     []byte
-}
-
-func (q *mockNonBatchingQueue) SupportsCommandBufferCopies() bool { return false }
-
-func (q *mockNonBatchingQueue) WriteBuffer(buffer hal.Buffer, offset uint64, data []byte) error {
-	q.writeBufferCalls++
-	q.lastWriteBuf = buffer
-	q.lastWriteOffset = offset
-	q.lastWriteData = make([]byte, len(data))
-	copy(q.lastWriteData, data)
-	return q.Queue.WriteBuffer(buffer, offset, data)
-}
-
-func (q *mockNonBatchingQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
-	q.writeTextureCalls++
-	return q.Queue.WriteTexture(dst, data, layout, size)
-}
-
 // --- Helpers ---
 
-// createBatchingPW creates a pendingWrites with a batching mock queue and shared pool.
-func createBatchingPW(t *testing.T) (*pendingWrites, *noop.Device, *mockBatchingQueue) {
+// createBatchingPW creates a Writes with a batching mock queue and a pool
+// double wired to the device.
+func createBatchingPW(t *testing.T) (*Writes, *testDevice, *mockBatchingQueue) {
 	t.Helper()
-	dev := &noop.Device{}
+	dev := &testDevice{}
 	q := &mockBatchingQueue{}
-	pool := newEncoderPool(dev)
-	pw := newPendingWrites(dev, q, pool, nil)
+	pool := &testEncoderPool{device: dev}
+	pw := New(dev, q, pool, nil)
 	t.Cleanup(func() { pool.destroy() })
 	return pw, dev, q
 }
 
-// createNonBatchingPW creates a pendingWrites with a non-batching mock queue.
-func createNonBatchingPW(t *testing.T) (*pendingWrites, *noop.Device, *mockNonBatchingQueue) {
+// createNonBatchingPW creates a Writes with a non-batching mock queue.
+func createNonBatchingPW(t *testing.T) (*Writes, *testDevice, *mockNonBatchingQueue) {
 	t.Helper()
-	dev := &noop.Device{}
+	dev := &testDevice{}
 	q := &mockNonBatchingQueue{}
-	pw := newPendingWrites(dev, q, nil, nil)
+	pw := New(dev, q, nil, nil)
 	return pw, dev, q
 }
 
 // flushAndDiscard calls flush and discards all return values except error.
-func flushAndDiscard(pw *pendingWrites) error {
+func flushAndDiscard(pw *Writes) error {
 	_, _, _, _, err := pw.flush() //nolint:dogsled // test helper discards all but error
 	return err
 }
@@ -216,7 +328,7 @@ func TestPendingWrites_WriteBufferNonBatching(t *testing.T) {
 	}
 
 	data := []byte{1, 2, 3, 4}
-	if err := pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 8, data); err != nil {
+	if err := pw.WriteBuffer(nil, buf, track.InvalidTrackerIndex, 8, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -245,10 +357,10 @@ func TestPendingWrites_WriteBufferBatching(t *testing.T) {
 	defer pw.Destroy()
 
 	// Create a destination buffer (non-mapped).
-	dstBuf := &noop.Resource{}
+	dstBuf := &testBuffer{}
 
 	data := []byte{10, 20, 30, 40, 50}
-	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 16, data); err != nil {
+	if err := pw.WriteBuffer(nil, dstBuf, track.InvalidTrackerIndex, 16, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -285,9 +397,9 @@ func TestPendingWrites_WriteBufferEmptyData(t *testing.T) {
 	pw, _, q := createBatchingPW(t)
 	defer pw.Destroy()
 
-	dstBuf := &noop.Resource{}
+	dstBuf := &testBuffer{}
 	// Empty data should be a no-op for batching.
-	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
+	if err := pw.WriteBuffer(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer empty: %v", err)
 	}
 
@@ -303,7 +415,7 @@ func TestPendingWrites_WriteTextureNonBatching(t *testing.T) {
 	pw, _, q := createNonBatchingPW(t)
 	defer pw.Destroy()
 
-	tex := &noop.Texture{}
+	tex := &testTexture{}
 	dst := &hal.ImageCopyTexture{Texture: tex}
 	data := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	layout := &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 2}
@@ -325,7 +437,7 @@ func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 	pw, _, q := createBatchingPW(t)
 	defer pw.Destroy()
 
-	tex := &noop.Texture{}
+	tex := &testTexture{}
 	dst := &hal.ImageCopyTexture{Texture: tex, MipLevel: 0}
 	data := make([]byte, 128)
 	for i := range data {
@@ -364,14 +476,14 @@ func TestPendingWrites_WriteTextureBatching(t *testing.T) {
 	}
 }
 
-// trackedPendingWrites builds a batching pendingWrites wired to a real device
+// trackedPendingWrites builds a batching Writes wired to a real device
 // tracker, with an encoder that records barriers and copies in order.
-func trackedPendingWrites(t *testing.T) (*pendingWrites, *barrierCaptureDevice, *core.Device) {
+func trackedPendingWrites(t *testing.T) (*Writes, *testDevice, *core.Device) {
 	t.Helper()
-	dev := &barrierCaptureDevice{}
+	dev := &testDevice{}
 	coreDevice := core.NewDevice(dev, &core.Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "pw-tracker")
-	pool := newEncoderPool(dev)
-	pw := newPendingWrites(dev, &mockBatchingQueue{}, pool, coreDevice.Tracker())
+	pool := &testEncoderPool{device: dev}
+	pw := New(dev, &mockBatchingQueue{}, pool, coreDevice.Tracker())
 	t.Cleanup(func() {
 		pw.Destroy()
 		pool.destroy()
@@ -381,9 +493,9 @@ func trackedPendingWrites(t *testing.T) (*pendingWrites, *barrierCaptureDevice, 
 
 // writeTrackedTexture creates a 16x16x2 texture on coreDevice, leaves it in
 // state prior in the device tracker and writes one texel of layer 1.
-func writeTrackedTexture(t *testing.T, pw *pendingWrites, coreDevice *core.Device, usage gputypes.TextureUsage, prior track.TextureUses) (*resource.Texture, track.TrackerIndex) {
+func writeTrackedTexture(t *testing.T, pw *Writes, coreDevice *core.Device, usage gputypes.TextureUsage, prior track.TextureUses) (*resource.Texture, track.TrackerIndex) {
 	t.Helper()
-	halTexture := &noop.Texture{}
+	halTexture := &testTexture{}
 	coreTexture := core.NewTexture(
 		halTexture, coreDevice, gputypes.TextureFormatRGBA8Unorm,
 		gputypes.TextureDimension2D, usage,
@@ -392,12 +504,12 @@ func writeTrackedTexture(t *testing.T, pw *pendingWrites, coreDevice *core.Devic
 	)
 	idx := coreTexture.TrackingData().Index()
 	coreDevice.Tracker().InsertTexture(idx, prior)
-	texture := resource.NewTexture(halTexture, (&Device{core: coreDevice}).seamView(), gputypes.TextureFormatRGBA8Unorm, nil, coreTexture)
+	texture := resource.NewTexture(halTexture, &testDeviceView{core: coreDevice}, gputypes.TextureFormatRGBA8Unorm, nil, coreTexture)
 	dst := &hal.ImageCopyTexture{Texture: halTexture, Origin: hal.Origin3D{Z: 1}, Aspect: gputypes.TextureAspectAll}
 	size := hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}
 	layout := &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1}
-	if err := pw.writeTextureFor(texture, dst, make([]byte, 4), layout, &size); err != nil {
-		t.Fatalf("writeTextureFor: %v", err)
+	if err := pw.WriteTexture(texture, dst, make([]byte, 4), layout, &size); err != nil {
+		t.Fatalf("WriteTexture: %v", err)
 	}
 	return texture, idx
 }
@@ -475,13 +587,13 @@ func TestPendingWrites_FlushLeavesWrittenTexturesInCopyDst(t *testing.T) {
 // before copy_buffer_to_buffer (queue.rs:919-950).
 func TestPendingWrites_WriteBufferBarrierBeforeCopy(t *testing.T) {
 	pw, dev, coreDevice := trackedPendingWrites(t)
-	buf := core.NewBuffer(&noop.Resource{}, coreDevice,
+	buf := core.NewBuffer(&testBuffer{}, coreDevice,
 		gputypes.BufferUsageStorage|gputypes.BufferUsageCopyDst|gputypes.BufferUsageCopySrc, 48, "b")
 	idx := buf.TrackingData().Index()
 	coreDevice.Tracker().InsertBuffer(idx, track.BufferUsesStorageWrite)
 
 	ref := core.NewResourceRef("b", nil)
-	if err := pw.writeBufferFor(ref, &noop.Resource{}, idx, 0, make([]byte, 48)); err != nil {
+	if err := pw.WriteBuffer(ref, &testBuffer{}, idx, 0, make([]byte, 48)); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 	enc := dev.encoder
@@ -521,7 +633,7 @@ func TestPendingWrites_WriteTextureEmptyData(t *testing.T) {
 	pw, _, q := createBatchingPW(t)
 	defer pw.Destroy()
 
-	tex := &noop.Texture{}
+	tex := &testTexture{}
 	dst := &hal.ImageCopyTexture{Texture: tex}
 	layout := &hal.ImageDataLayout{BytesPerRow: 4}
 	size := &hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}
@@ -567,12 +679,12 @@ func TestPendingWrites_FlushWithPendingWork(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
 	defer pw.Destroy()
 
-	dstBuf := &noop.Resource{}
+	dstBuf := &testBuffer{}
 	data := []byte{1, 2, 3, 4}
 	ref := core.NewResourceRef("dst", nil)
 	// Two writes to one buffer hold one reference.
 	for range 2 {
-		if err := pw.writeBufferFor(ref, dstBuf, track.InvalidTrackerIndex, 0, data); err != nil {
+		if err := pw.WriteBuffer(ref, dstBuf, track.InvalidTrackerIndex, 0, data); err != nil {
 			t.Fatalf("writeBuffer: %v", err)
 		}
 	}
@@ -639,19 +751,19 @@ func TestPendingWrites_DestinationRefsOutliveEncoding(t *testing.T) {
 	}
 
 	bufferRef := core.NewResourceRef("buffer", dropped("buffer-drop"))
-	if err := pw.writeBufferFor(bufferRef, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
-		t.Fatalf("writeBufferFor: %v", err)
+	if err := pw.WriteBuffer(bufferRef, &testBuffer{}, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
+		t.Fatalf("WriteBuffer: %v", err)
 	}
-	halTexture := &noop.Texture{}
+	halTexture := &testTexture{}
 	coreTexture := core.NewTexture(halTexture, coreDevice, gputypes.TextureFormatRGBA8Unorm,
 		gputypes.TextureDimension2D, gputypes.TextureUsageCopyDst,
 		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}, 1, 1, "texture")
 	coreTexture.Ref = core.NewResourceRef("texture", dropped("texture-drop"))
-	texture := resource.NewTexture(halTexture, (&Device{core: coreDevice}).seamView(), gputypes.TextureFormatRGBA8Unorm, nil, coreTexture)
-	if err := pw.writeTextureFor(texture, &hal.ImageCopyTexture{Texture: halTexture, Aspect: gputypes.TextureAspectAll},
+	texture := resource.NewTexture(halTexture, &testDeviceView{core: coreDevice}, gputypes.TextureFormatRGBA8Unorm, nil, coreTexture)
+	if err := pw.WriteTexture(texture, &hal.ImageCopyTexture{Texture: halTexture, Aspect: gputypes.TextureAspectAll},
 		make([]byte, 4), &hal.ImageDataLayout{BytesPerRow: 4, RowsPerImage: 1},
 		&hal.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1}); err != nil {
-		t.Fatalf("writeTextureFor: %v", err)
+		t.Fatalf("WriteTexture: %v", err)
 	}
 	events = &dev.encoder.events
 
@@ -678,7 +790,7 @@ func TestPendingWrites_FlushWithTextureWork(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
 	defer pw.Destroy()
 
-	tex := &noop.Texture{}
+	tex := &testTexture{}
 	dst := &hal.ImageCopyTexture{Texture: tex}
 	data := make([]byte, 32)
 	layout := &hal.ImageDataLayout{BytesPerRow: 32, RowsPerImage: 1}
@@ -720,11 +832,11 @@ func TestPendingWrites_Maintain(t *testing.T) {
 	defer pw.Destroy()
 
 	// Simulate two inflight submissions with staging buffers.
-	buf1 := &noop.Resource{}
-	buf2 := &noop.Resource{}
-	buf3 := &noop.Resource{}
-	enc1 := &noop.CommandEncoder{}
-	cmdBuf1 := &noop.Resource{}
+	buf1 := &testBuffer{}
+	buf2 := &testBuffer{}
+	buf3 := &testBuffer{}
+	enc1 := &testCommandEncoder{}
+	cmdBuf1 := &testBuffer{}
 
 	pw.inflight = []inflightSubmission{
 		{
@@ -760,7 +872,7 @@ func TestPendingWrites_MaintainWithPendingTextureRefs(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
 	defer pw.Destroy()
 
-	tex := &noop.Texture{}
+	tex := &testTexture{}
 
 	pw.inflight = []inflightSubmission{
 		{
@@ -770,7 +882,7 @@ func TestPendingWrites_MaintainWithPendingTextureRefs(t *testing.T) {
 	}
 
 	// maintain should call DecPendingRef on textures.
-	// noop.Texture.DecPendingRef is a no-op, but we verify the path runs without panic.
+	// testTexture.DecPendingRef is a no-op, but we verify the path runs without panic.
 	pw.maintain(1)
 
 	if len(pw.inflight) != 0 {
@@ -787,8 +899,8 @@ func TestPendingWrites_HasPendingWork(t *testing.T) {
 	}
 
 	// Write something.
-	dstBuf := &noop.Resource{}
-	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
+	dstBuf := &testBuffer{}
+	if err := pw.WriteBuffer(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{1, 2, 3, 4}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -825,8 +937,8 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
 
 	// Write to create staging + encoder.
-	dstBuf := &noop.Resource{}
-	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
+	dstBuf := &testBuffer{}
+	if err := pw.WriteBuffer(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
@@ -834,7 +946,7 @@ func TestPendingWrites_DestroyCleanup(t *testing.T) {
 	pw.mu.Lock()
 	pw.inflight = append(pw.inflight, inflightSubmission{
 		submissionIndex: 1,
-		staging:         []hal.Buffer{&noop.Resource{}},
+		staging:         []hal.Buffer{&testBuffer{}},
 	})
 	pw.mu.Unlock()
 
@@ -1130,8 +1242,8 @@ func TestPendingWrites_WriteBufferEmptyBatching(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
 	defer pw.Destroy()
 
-	dstBuf := &noop.Resource{}
-	if err := pw.writeBufferFor(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
+	dstBuf := &testBuffer{}
+	if err := pw.WriteBuffer(nil, dstBuf, track.InvalidTrackerIndex, 0, []byte{}); err != nil {
 		t.Fatalf("writeBuffer(empty): %v", err)
 	}
 	if pw.isRecording {
@@ -1143,15 +1255,15 @@ func TestPendingWrites_MultipleWritesThenFlush(t *testing.T) {
 	pw, _, _ := createBatchingPW(t)
 	defer pw.Destroy()
 
-	buf1 := &noop.Resource{}
-	buf2 := &noop.Resource{}
+	buf1 := &testBuffer{}
+	buf2 := &testBuffer{}
 	data := []byte{1, 2, 3, 4}
 
 	// Multiple writes should accumulate.
-	if err := pw.writeBufferFor(nil, buf1, track.InvalidTrackerIndex, 0, data); err != nil {
+	if err := pw.WriteBuffer(nil, buf1, track.InvalidTrackerIndex, 0, data); err != nil {
 		t.Fatalf("writeBuffer 1: %v", err)
 	}
-	if err := pw.writeBufferFor(nil, buf2, track.InvalidTrackerIndex, 0, data); err != nil {
+	if err := pw.WriteBuffer(nil, buf2, track.InvalidTrackerIndex, 0, data); err != nil {
 		t.Fatalf("writeBuffer 2: %v", err)
 	}
 
@@ -1194,13 +1306,13 @@ func TestPendingWrites_ActivateReusesEncoder(t *testing.T) {
 	defer pw.Destroy()
 
 	// First write activates encoder.
-	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
+	if err := pw.WriteBuffer(nil, &testBuffer{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("write 1: %v", err)
 	}
 	firstEncoder := pw.encoder
 
 	// Second write should reuse the same encoder.
-	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
+	if err := pw.WriteBuffer(nil, &testBuffer{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
 		t.Fatalf("write 2: %v", err)
 	}
 
@@ -1214,7 +1326,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	defer pw.Destroy()
 
 	// Write and flush.
-	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
+	if err := pw.WriteBuffer(nil, &testBuffer{}, track.InvalidTrackerIndex, 0, []byte{1}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -1230,7 +1342,7 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	_ = flushedBufs
 
 	// Write again — should get a new encoder from pool.
-	if err := pw.writeBufferFor(nil, &noop.Resource{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
+	if err := pw.WriteBuffer(nil, &testBuffer{}, track.InvalidTrackerIndex, 0, []byte{2}); err != nil {
 		t.Fatalf("write after flush: %v", err)
 	}
 
@@ -1244,28 +1356,30 @@ func TestPendingWrites_FlushThenWriteGetsNewEncoder(t *testing.T) {
 	}
 }
 
-func TestPendingWrites_NewWithNoopBackend(t *testing.T) {
-	// Using the actual noop backend via createNoopDeviceForTest.
-	dev, q, cleanup := createNoopDeviceForTest(t)
-	defer cleanup()
+// TestPendingWrites_NewWithNonBatchingHAL drives the constructor over the
+// full device and queue doubles (the shape the noop-backed test covered before
+// the move: a real, non-batching HAL implementation).
+func TestPendingWrites_NewWithNonBatchingHAL(t *testing.T) {
+	dev := &testDevice{}
+	q := &mockNonBatchingQueue{}
 
-	pw := newPendingWrites(dev, q, nil, nil)
+	pw := New(dev, q, nil, nil)
 	defer pw.Destroy()
 
 	if pw.usesBatching {
-		t.Error("noop backend should not use batching")
+		t.Error("non-batching HAL should not use batching")
 	}
 	if pw.pool != nil {
-		t.Error("noop backend should not have encoder pool")
+		t.Error("non-batching HAL should not have encoder pool")
 	}
 }
 
 func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	// Verify that non-batching actually writes data through to the buffer.
-	dev, q, cleanup := createNoopDeviceForTest(t)
-	defer cleanup()
+	dev := &testDevice{}
+	q := &mockNonBatchingQueue{}
 
-	pw := newPendingWrites(dev, q, nil, nil)
+	pw := New(dev, q, nil, nil)
 	defer pw.Destroy()
 
 	buf, err := dev.CreateBuffer(&hal.BufferDescriptor{
@@ -1279,13 +1393,14 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 	}
 
 	data := []byte{0xAA, 0xBB, 0xCC, 0xDD}
-	if err := pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 4, data); err != nil {
+	if err := pw.WriteBuffer(nil, buf, track.InvalidTrackerIndex, 4, data); err != nil {
 		t.Fatalf("writeBuffer: %v", err)
 	}
 
-	// Read back from noop buffer to verify data was written, using the
-	// new HAL MapBuffer path (replaces legacy Queue.ReadBuffer removed
-	// in FEAT-WGPU-MAPPING-001).
+	// Read back from the buffer's storage to verify data was written, using
+	// the HAL MapBuffer path (replaces legacy Queue.ReadBuffer removed in
+	// FEAT-WGPU-MAPPING-001). The double keeps the storage a real backend
+	// keeps, so the assertion is the same one the noop-backed test made.
 	mapping, mapErr := dev.MapBuffer(buf, 0, 16)
 	if mapErr != nil {
 		t.Fatalf("MapBuffer: %v", mapErr)
@@ -1303,14 +1418,14 @@ func TestPendingWrites_WriteBufferNonBatchingVerifiesData(t *testing.T) {
 }
 
 func TestPendingWrites_MaxStagingBufferSizerWiring(t *testing.T) {
-	// Verify that newPendingWrites queries the hal.MaxStagingBufferSizer
+	// Verify that New queries the hal.MaxStagingBufferSizer
 	// interface from the device and propagates it to the staging belt.
 	// This is the core of BUG-VK-001: on Vulkan, maxMemoryAllocationSize
 	// must cap the staging belt to prevent oversized allocations.
 	dev := &mockStagingSizeDevice{maxStaging: 1 << 20} // 1MB
 	q := &mockBatchingQueue{}
-	pool := newEncoderPool(&dev.Device)
-	pw := newPendingWrites(dev, q, pool, nil)
+	pool := &testEncoderPool{}
+	pw := New(dev, q, pool, nil)
 	defer pw.Destroy()
 	defer pool.destroy()
 
@@ -1326,10 +1441,10 @@ func TestPendingWrites_MaxStagingBufferSizerWiring(t *testing.T) {
 func TestPendingWrites_MaxStagingBufferSizerDefaultWhenNotImplemented(t *testing.T) {
 	// Verify that when the device does NOT implement MaxStagingBufferSizer,
 	// the belt uses the default 64MB cap.
-	dev := &noop.Device{} // noop.Device does NOT implement MaxStagingBufferSizer
+	dev := &testDevice{} // testDevice does NOT implement MaxStagingBufferSizer
 	q := &mockBatchingQueue{}
-	pool := newEncoderPool(dev)
-	pw := newPendingWrites(dev, q, pool, nil)
+	pool := &testEncoderPool{}
+	pw := New(dev, q, pool, nil)
 	defer pw.Destroy()
 	defer pool.destroy()
 

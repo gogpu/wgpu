@@ -65,7 +65,8 @@ type Texture struct {
 
 // IsHostWritable reports whether this texture was allocated with Shared storage,
 // meaning the CPU can write to it directly without a staging buffer or GPU blit.
-// Used by pendingWrites to bypass the staging belt on Apple Silicon (UMA).
+// Used by the queue's pending writes to bypass the staging belt on Apple
+// Silicon (UMA).
 func (t *Texture) IsHostWritable() bool { return t.isShared }
 
 // CurrentUsage returns 0 — Metal has no explicit resource state tracking.

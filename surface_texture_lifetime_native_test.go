@@ -10,7 +10,28 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/pendingwrites"
 )
+
+// mockBatchingQueue is the batching HAL queue double for the pending-writes
+// paths of this file. It lives here because the pending-writes domain and its
+// own doubles moved to internal/pendingwrites (S8): a root test cannot share
+// an unexported test type across the package boundary.
+type mockBatchingQueue struct {
+	noop.Queue
+	submitCalls int
+	submitErr   error
+}
+
+func (q *mockBatchingQueue) SupportsCommandBufferCopies() bool { return true }
+
+func (q *mockBatchingQueue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	q.submitCalls++
+	if q.submitErr != nil {
+		return 0, q.submitErr
+	}
+	return q.Queue.Submit(commandBuffers)
+}
 
 type surfaceTextureLifetimeDevice struct {
 	noop.Device
@@ -124,7 +145,7 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	pool := newEncoderPool(rawDevice)
 	device.cmdEncoderPool = pool
 	device.queue.hal = rawQueue
-	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool, nil)
+	device.queue.pending = pendingwrites.New(rawDevice, rawQueue, pool, nil)
 
 	texture := surfaceTexture.AsTexture()
 	err := device.Queue().WriteTexture(
@@ -166,7 +187,7 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 	pool := newEncoderPool(rawDevice)
 	device.cmdEncoderPool = pool
 	device.queue.hal = rawQueue
-	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool, nil)
+	device.queue.pending = pendingwrites.New(rawDevice, rawQueue, pool, nil)
 
 	err := device.Queue().WriteTexture(
 		&ImageCopyTexture{Texture: surfaceTexture.AsTexture()},

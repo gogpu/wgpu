@@ -25,8 +25,8 @@ import (
 // host-visible — no async map/unmap dance needed (unlike Rust wgpu where
 // buffer.map_async + mpsc channel is required for recycling).
 //
-// Thread safety: the belt is used exclusively under pendingWrites.mu.
-// No internal synchronization needed.
+// Thread safety: the belt is used exclusively under the pending-writes lock
+// (internal/pendingwrites). No internal synchronization needed.
 //
 // Steady-state allocation cost: 0 heap allocs per writeBuffer call.
 // New chunks are created only during warmup or traffic spikes.
@@ -60,9 +60,10 @@ type Belt struct {
 	oversized []hal.Buffer
 
 	// chunkedAllocs temporarily holds chunk allocations from allocateChunked.
-	// Consumed by pendingWrites.writeBuffer to issue CopyBufferToBuffer for
-	// each chunk. Reset at the start of each allocateChunked call.
-	// Only valid between allocateChunked and the next writeBuffer call.
+	// Consumed by Writes.WriteBuffer in internal/pendingwrites to issue
+	// CopyBufferToBuffer for each chunk. Reset at the start of each
+	// allocateChunked call. Only valid between allocateChunked and the next
+	// writeBuffer call.
 	chunkedAllocs []ChunkedAllocation
 }
 
@@ -105,7 +106,7 @@ const MaxOversizedSize uint64 = 64 << 20 // 64 MB
 // If maxStagingBufferSize is 0, uses the default (64MB, Rust wgpu parity).
 // Alignment must be a power of two.
 // Matches Rust wgpu StagingBelt::allocate() where alignment is per-allocation;
-// we simplify to per-belt since the belt is internal to pendingWrites.
+// we simplify to per-belt since the belt is internal to internal/pendingwrites.
 func New(halDevice hal.Device, halQueue hal.Queue, chunkSize, alignment, maxStagingBufferSize uint64) *Belt {
 	if chunkSize == 0 {
 		chunkSize = DefaultChunkSize
@@ -216,8 +217,8 @@ func (b *Belt) allocateOversized(size uint64, data []byte) (Allocation, error) {
 
 	// Large write: chunk into multiple staging buffers.
 	// Each chunk gets its own staging buffer + is tracked as oversized.
-	// The caller (pendingWrites.writeBuffer) will issue CopyBufferToBuffer
-	// for each chunk separately via allocateChunked.
+	// The caller (Writes.WriteBuffer in internal/pendingwrites) will issue
+	// CopyBufferToBuffer for each chunk separately via allocateChunked.
 	return b.allocateChunked(size, data)
 }
 

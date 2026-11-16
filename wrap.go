@@ -6,6 +6,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pendingwrites"
 )
 
 // newDeviceFromHAL is the constructor behind the wgputest factory and the
@@ -37,7 +38,7 @@ func newDeviceFromHAL(
 	queue := &Queue{
 		hal:       halQueue,
 		halDevice: halDevice,
-		pending:   newPendingWrites(halDevice, halQueue, pool, coreDevice.Tracker()),
+		pending:   pendingwrites.New(halDevice, halQueue, pool, coreDevice.Tracker()),
 	}
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})

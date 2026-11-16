@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/pendingwrites"
 )
 
 // DeviceDescriptor configures device creation.
@@ -108,7 +109,7 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 	queue := &Queue{
 		hal:       openDevice.Queue,
 		halDevice: openDevice.Device,
-		pending:   newPendingWrites(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()),
+		pending:   pendingwrites.New(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()),
 	}
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})

@@ -1,31 +1,33 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package pendingwrites
 
 import (
 	"testing"
 
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
-	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/internal/staging"
 )
 
-// benchBatchingQueue is a zero-allocation mock for benchmarks.
-// Unlike mockBatchingQueue (which copies data for test assertions),
-// this just delegates to noop.Queue without tracking — pure overhead measurement.
-type benchBatchingQueue struct {
-	noop.Queue
+// benchQueue is the zero-allocation queue double for benchmarks: unlike
+// testQueue it records nothing, so the measured allocations are the
+// pending-writes path's own.
+type benchQueue struct {
+	hal.Queue
+	batching bool
 }
 
-func (q *benchBatchingQueue) SupportsCommandBufferCopies() bool { return true }
+func (q *benchQueue) SupportsCommandBufferCopies() bool { return q.batching }
+
+func (q *benchQueue) WriteBuffer(hal.Buffer, uint64, []byte) error { return nil }
 
 // BenchmarkPendingWrites_WriteBufferNonBatching measures the hot path for
 // GLES/Software backends where WriteBuffer delegates directly to HAL.
 func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
-	dev := &noop.Device{}
-	q := &noop.Queue{}
-	pw := newPendingWrites(dev, q, nil, nil)
+	dev := &testDevice{}
+	q := &benchQueue{}
+	pw := New(dev, q, nil, nil)
 	defer pw.Destroy()
 
 	buf, _ := dev.CreateBuffer(&hal.BufferDescriptor{Size: 1024})
@@ -34,7 +36,7 @@ func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 0, data)
+		_ = pw.WriteBuffer(nil, buf, track.InvalidTrackerIndex, 0, data)
 	}
 }
 
@@ -43,21 +45,21 @@ func BenchmarkPendingWrites_WriteBufferNonBatching(b *testing.B) {
 // Simulates the real frame loop: write → flush → submit → maintain(recall).
 // After warmup, steady-state should show 0 allocs (chunks recycled).
 //
-// Uses benchBatchingQueue (not mockBatchingQueue) to avoid mock overhead
-// from data copying that would pollute alloc measurements.
+// Uses benchQueue (not the recording test queue) to avoid mock overhead that
+// would pollute alloc measurements.
 func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
-	dev := &noop.Device{}
-	q := &benchBatchingQueue{Queue: noop.Queue{}}
-	pool := newEncoderPool(dev)
+	dev := &testDevice{}
+	q := &benchQueue{batching: true}
+	pool := &testEncoderPool{device: dev}
 	defer pool.destroy()
-	pw := newPendingWrites(dev, q, pool, nil)
+	pw := New(dev, q, pool, nil)
 	defer pw.Destroy()
 
 	buf, _ := dev.CreateBuffer(&hal.BufferDescriptor{Size: 1024})
 	data := make([]byte, 256)
 
 	// Warmup: create chunk, flush, recall — so steady-state has a free chunk.
-	_ = pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 0, data)
+	_ = pw.WriteBuffer(nil, buf, track.InvalidTrackerIndex, 0, data)
 	pw.mu.Lock()
 	pw.flush()
 	if pw.belt != nil {
@@ -70,7 +72,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 	b.ReportAllocs()
 	subIdx := uint64(2)
 	for i := 0; i < b.N; i++ {
-		_ = pw.writeBufferFor(nil, buf, track.InvalidTrackerIndex, 0, data)
+		_ = pw.WriteBuffer(nil, buf, track.InvalidTrackerIndex, 0, data)
 		// Simulate frame boundary: flush + maintain every 20 writes (typical frame).
 		if i%20 == 19 {
 			pw.mu.Lock()
@@ -78,7 +80,7 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 			if pw.belt != nil {
 				pw.belt.SetLastSubmissionIndex(subIdx)
 			}
-			pw.maintain(subIdx) // recall immediately (noop is synchronous)
+			pw.maintain(subIdx) // recall immediately (the doubles are synchronous)
 			subIdx++
 			pw.mu.Unlock()
 		}
@@ -87,11 +89,11 @@ func BenchmarkPendingWrites_WriteBufferBatching(b *testing.B) {
 
 // BenchmarkPendingWrites_FlushEmpty measures flush with no pending work.
 func BenchmarkPendingWrites_FlushEmpty(b *testing.B) {
-	dev := &noop.Device{}
-	q := &mockBatchingQueue{Queue: noop.Queue{}}
-	pool := newEncoderPool(dev)
+	dev := &testDevice{}
+	q := &benchQueue{batching: true}
+	pool := &testEncoderPool{device: dev}
 	defer pool.destroy()
-	pw := newPendingWrites(dev, q, pool, nil)
+	pw := New(dev, q, pool, nil)
 	defer pw.Destroy()
 
 	b.ResetTimer()
@@ -105,9 +107,9 @@ func BenchmarkPendingWrites_FlushEmpty(b *testing.B) {
 
 // BenchmarkPendingWrites_Maintain measures cleanup of completed submissions.
 func BenchmarkPendingWrites_Maintain(b *testing.B) {
-	dev := &noop.Device{}
-	q := &noop.Queue{}
-	pw := newPendingWrites(dev, q, nil, nil)
+	dev := &testDevice{}
+	q := &benchQueue{}
+	pw := New(dev, q, nil, nil)
 	defer pw.Destroy()
 
 	// Pre-populate inflight list
@@ -137,8 +139,8 @@ func BenchmarkAlignUp(b *testing.B) {
 // BenchmarkStagingBelt_AllocateSteadyState measures pure belt allocation
 // without mock overhead. After warmup, this is the true zero-alloc path.
 func BenchmarkStagingBelt_AllocateSteadyState(b *testing.B) {
-	dev := &noop.Device{}
-	q := &noop.Queue{}
+	dev := &testDevice{}
+	q := &benchQueue{}
 	belt := staging.New(dev, q, 0, 0, 0)
 	defer belt.Destroy()
 

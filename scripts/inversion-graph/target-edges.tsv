@@ -16,11 +16,11 @@ internal/instance	internal/surface	all	N	Instance.CreateSurface() (*Surface, err
 # --- the rest of the extraction graph (no cycle candidate, listed for completeness) ---
 internal/instance	internal/queue	native	N	adapter_native.go:108 queue := &Queue{...}
 internal/instance	internal/encoder	native	N	adapter_native.go:103-108 encoder pool construction for the new device
-internal/instance	internal/pendingwrites	native	N	adapter_native.go:111 newPendingWrites(openDevice.Device, openDevice.Queue, pool, ...)
+internal/instance	internal/pendingwrites	native	N	adapter_native.go:111 pendingwrites.New(openDevice.Device, openDevice.Queue, pool, ...)
 internal/instance	internal/hal	all	N	domain baseline (instance_native.go hal.Instance)
 internal/instance	internal/core	all	N	domain baseline (instance_native.go *core.Instance)
 internal/queue	internal/encoder	native	N	queue_native.go:237,249,688,731,886,895 cmdEncoderPool; *CommandBuffer
-internal/queue	internal/pendingwrites	native	N	queue_native.go:28 pending *pendingWrites
+internal/queue	internal/pendingwrites	native	N	queue_native.go:30 pending *pendingwrites.Writes
 internal/queue	internal/stencilblit	native	N	queue_native.go:427 stencil upload via stencilblit.NewUpload (payload; the queue records the commands)
 internal/queue	internal/hal	all	N	domain baseline (queue_native.go:25-26 hal.Queue, hal.Device)
 internal/queue	internal/core	native	N	queue_native.go:174 q.device.core; :529 DestroyQueueRef
@@ -37,10 +37,10 @@ internal/resource	internal/core	all	N	domain baseline (buffer.go ref *core.Resou
 internal/surface	internal/resource	native	N	surface_native.go:782 CreateView() (*TextureView, error), :811 &TextureView{...}
 internal/surface	internal/hal	all	N	domain baseline (surface hal.Surface, hal.Texture)
 internal/surface	internal/core	all	N	domain baseline (surface_native.go *core.Texture, s.core.Configure)
-internal/pendingwrites	internal/staging	native	N	pending_writes.go:45 belt *stagingBelt
-internal/pendingwrites	internal/encoder	native	N	pending_writes.go:30 pool *encoderPool
-internal/pendingwrites	internal/hal	all	N	domain baseline (pending_writes.go:33-36 hal.Device, hal.Queue)
-internal/pendingwrites	internal/core	native	N	pending_writes.go:111 coreDevice.Tracker()
+internal/pendingwrites	internal/staging	native	N	internal/pendingwrites/pending_writes.go:47 belt *staging.Belt
+internal/pendingwrites	internal/hal	all	N	domain baseline (internal/pendingwrites/pending_writes.go:35-38 hal.Device, hal.Queue)
+internal/pendingwrites	internal/core	native	N	internal/pendingwrites/pending_writes.go:70 tracker *core.DeviceTracker
+internal/pendingwrites	internal/resource	native	N	internal/pendingwrites/pending_writes.go:12 resource.Texture; :89 dstTextures, :255 CoreTexture
 internal/stencilblit	internal/hal	all	N	domain baseline (the payload holds hal handles; the encoder records the commands)
 internal/staging	internal/hal	all	N	staging_belt.go:34-35 halDevice, halQueue
 # --- the browser WebGPU path (wasm only): the extraction domains' _browser variants import internal/browser; the
@@ -55,7 +55,7 @@ internal/instance	internal/browser	wasm	N	adapter_browser.go:9, instance_browser
 # --- the core trackers (native): the resource, encoder, pendingwrites and queue code registers with core/track.
 internal/resource	internal/core/track	native	N	texture_native.go:8
 internal/encoder	internal/core/track	native	N	computepass_native.go:11, encoder_native.go:10, renderbundle_finish.go:11
-internal/pendingwrites	internal/core/track	native	N	pending_writes.go:10
+internal/pendingwrites	internal/core/track	native	N	internal/pendingwrites/pending_writes.go:10
 internal/queue	internal/core/track	native	N	queue_native.go:12
 # --- the indirect draw helpers the encoder's pass encoder declares state for.
 internal/encoder	internal/indirect	all	N	renderpass_native.go RangeFits + record sizes 16/20; renderpass_rust.go:121 RecordOffset; renderpass_browser.go:116 RecordOffset

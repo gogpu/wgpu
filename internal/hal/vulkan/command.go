@@ -56,7 +56,7 @@ const allocationGranularity = 16
 //   - Pool-managed (poolManaged=true): After EndEncoding, the encoder retains
 //     ownership of its VkCommandPool. After GPU completion, ResetAll resets the
 //     pool so the encoder can be reused via the wgpu-level encoder pool.
-//     Used by pendingWrites.
+//     Used by the queue's pending writes.
 //
 // Pooled via encoderPool to avoid per-frame heap allocation (VK-PERF-003).
 //

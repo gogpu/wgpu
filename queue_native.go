@@ -12,6 +12,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pendingwrites"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -27,7 +28,7 @@ type Queue struct {
 	hal       hal.Queue
 	halDevice hal.Device
 	device    *Device
-	pending   *pendingWrites
+	pending   *pendingwrites.Writes
 
 	// test, when non-nil, records the public calls for package wgputest.
 	test core.TestHooks
@@ -351,7 +352,7 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 		if td := coreBuf.TrackingData(); td != nil {
 			index = td.Index()
 		}
-		return q.pending.writeBufferFor(coreBuf.Ref, halBuffer, index, offset, data)
+		return q.pending.WriteBuffer(coreBuf.Ref, halBuffer, index, offset, data)
 	}
 
 	return q.hal.WriteBuffer(halBuffer, offset, data)
@@ -406,7 +407,7 @@ func (q *Queue) writeTextureLocked(dst *ImageCopyTexture, data []byte, layout *I
 	halSize := size.toHAL()
 
 	if q.pending != nil {
-		return q.pending.writeTextureFor(dst.Texture.impl, halDst, data, &halLayout, &halSize)
+		return q.pending.WriteTexture(dst.Texture.impl, halDst, data, &halLayout, &halSize)
 	}
 
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)

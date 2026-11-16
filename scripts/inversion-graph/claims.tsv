@@ -27,3 +27,8 @@ target	internal/encoder	internal/browser	wasm	S4
 target	internal/encoder	internal/core/track	native	S4
 target	internal/encoder	internal/indirect	all	S5
 target	internal/staging	internal/hal	all	S7
+target	internal/pendingwrites	internal/staging	native	S8
+target	internal/pendingwrites	internal/resource	native	S8
+target	internal/pendingwrites	internal/hal	all	S8
+target	internal/pendingwrites	internal/core	native	S8
+target	internal/pendingwrites	internal/core/track	native	S8

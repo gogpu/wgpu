@@ -3,7 +3,7 @@
 // Copyright 2025 The GoGPU Authors
 // SPDX-License-Identifier: MIT
 
-package wgpu
+package pendingwrites
 
 import (
 	"testing"
