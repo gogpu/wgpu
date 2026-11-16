@@ -6,16 +6,18 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // Public API sentinel errors.
 var (
 	// ErrReleased is returned when operating on a released resource. The value
-	// is the resource package's: this build has no internal/core, so the
-	// sentinel lives with the buffer code that returns it, and re-exporting the
-	// same value keeps errors.Is working through the public API (§15.1).
-	ErrReleased = resource.ErrReleased
+	// is internal/core's on every build: the extraction children return it too,
+	// and the same value on both sides is what keeps errors.Is working through
+	// the public API (§15.1). This build reaches it through the same untagged
+	// core declaration the native and rust builds use, and internal/resource's
+	// browser sentinel binds it, so one value serves the whole browser API.
+	ErrReleased = core.ErrReleased
 
 	// Adapter-selection sentinels (ADR-083 §2.2). internal/core has no files in
 	// the js/wasm build, and the browser's WebGPU reports its own errors, so they

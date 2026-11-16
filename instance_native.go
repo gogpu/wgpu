@@ -66,19 +66,6 @@ func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
 	return &Instance{core: coreInstance, display: display}, nil
 }
 
-// halDisplay converts the public handle to its HAL mirror at the root
-// boundary; no HAL type appears in the public API.
-func (h DisplayHandle) halDisplay() hal.DisplayHandle {
-	switch h.kind {
-	case displayKindXlib:
-		return hal.DisplayHandle{Kind: hal.DisplayKindXlib, Display: h.ptr}
-	case displayKindWayland:
-		return hal.DisplayHandle{Kind: hal.DisplayKindWayland, Display: h.ptr}
-	default:
-		return hal.DisplayHandle{}
-	}
-}
-
 // RequestAdapter requests a GPU adapter matching the options.
 // If opts is nil, the best available adapter is returned.
 //

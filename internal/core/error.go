@@ -41,12 +41,9 @@ var (
 	// ErrResourceDestroyed is returned when operating on a destroyed resource.
 	ErrResourceDestroyed = errors.New("resource destroyed")
 
-	// ErrReleased is returned when operating on a released resource. It lives
-	// in the shared leaf because every extraction child returns it (buffer,
-	// queue, encoder, pipeline all report a released handle) and the root
-	// re-exports the same value, so errors.Is keeps working through the public
-	// API (ADR-070 §15.1). The message is the public one, unchanged.
-	ErrReleased = errors.New("wgpu: resource already released")
+	// ErrReleased lives in error_released.go, without this file's build
+	// constraint: the browser build declares it too, because the browser
+	// extraction children return it. See that file for the contract.
 
 	// Queue.Submit validation sentinels (VAL-A6). They live here, next to
 	// ErrReleased, because the queue moved to internal/queue at S9 and its

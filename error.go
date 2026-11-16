@@ -39,9 +39,10 @@ var (
 // Public API sentinel errors.
 var (
 	// ErrReleased is returned when operating on a released resource. The value
-	// is internal/core's: the extraction children return it too, and the same
-	// value on both sides is what keeps errors.Is working through the public
-	// API (§15.1).
+	// is internal/core's on every build — the declaration carries no build
+	// constraint, so the browser build binds the same value — and the extraction
+	// children return it too. The same value on both sides is what keeps
+	// errors.Is working through the public API in all three contexts (§15.1).
 	ErrReleased = core.ErrReleased
 
 	// Adapter-selection sentinels (ADR-083 §2.2). The selection paths return them

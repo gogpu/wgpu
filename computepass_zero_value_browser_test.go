@@ -78,8 +78,9 @@ func TestBrowserComputePassEncoderZeroValueRealCallsPanic(t *testing.T) {
 
 // TestBrowserComputePassEncoderEndReleasesOnce pins the pre-move released
 // flag: the first End reaches the browser pass, the second reports ErrReleased
-// without touching it. The public ErrReleased is the resource value the
-// destination returns (error.go), so errors.Is matches across the boundary.
+// without touching it. The public ErrReleased is the shared core value, which
+// internal/resource's browser sentinel binds; the destination returns that
+// sentinel, so errors.Is matches across the boundary.
 func TestBrowserComputePassEncoderEndReleasesOnce(t *testing.T) {
 	ref := js.Global().Get("Object").New()
 	ref.Set("end", js.FuncOf(func(js.Value, []js.Value) any { return nil }))

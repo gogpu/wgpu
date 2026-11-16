@@ -14,11 +14,12 @@ internal/device	internal/core	all	N	domain baseline: device holds *core.Device (
 internal/instance	internal/device	all	N	adapter_native.go:46 RequestDevice() (*Device, error), :63 adoptDevice(device); every variant has an adapter
 internal/instance	internal/surface	all	N	Instance.CreateSurface() (*Surface, error) (surface_browser.go:60, native path same signature)
 # --- the rest of the extraction graph (no cycle candidate, listed for completeness) ---
-internal/instance	internal/queue	native	N	adapter_native.go:108 queue := &Queue{...}
+internal/instance	internal/queue	all	N	adapter_rust.go:10 and adapter_browser.go:11 import internal/queue today; native reaches it through the moving requestDeviceHAL (the root newQueue at queue.go:32 becomes queue.New in the destination, and impl.SetDevice takes the value)
 internal/instance	internal/encoder	native	N	adapter_native.go:103-108 encoder pool construction for the new device
 internal/instance	internal/pendingwrites	native	N	adapter_native.go:112 pendingwrites.New(openDevice.Device, openDevice.Queue, pool, ...)
 internal/instance	internal/hal	all	N	domain baseline (instance_native.go hal.Instance)
 internal/instance	internal/core	all	N	domain baseline (instance_native.go *core.Instance)
+internal/instance	hal	all	N	hal_interop.go:17,41 Instance.HAL/Adapter.HAL return the public hal.Handles (bodies hal_interop_native.go:8,16, hal_interop_rust.go:8,19, hal_interop_browser.go:8,16); methods of the moving types cannot stay behind them, so every context imports the thin leaf (R5 as amended, S10 ruling 5)
 internal/queue	internal/encoder	native+rust	N	queue_native.go:237,249,688,731,886,895 cmdEncoderPool; *CommandBuffer (queue_rust.go Submit: *encoder.CommandBuffer, MarkSubmitted, R())
 internal/queue	internal/pendingwrites	native	N	queue_native.go:31 pending *pendingwrites.Writes
 internal/queue	internal/stencilblit	native	N	queue_native.go:427 stencil upload via stencilblit.NewUpload (payload; the queue records the commands)

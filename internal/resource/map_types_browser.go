@@ -2,7 +2,11 @@
 
 package resource
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/gogpu/wgpu/internal/core"
+)
 
 // MapMode selects the type of access requested for a buffer mapping.
 type MapMode uint32
@@ -27,11 +31,13 @@ const (
 
 // Typed buffer mapping errors.
 var (
-	// ErrReleased is returned when operating on a released resource. This build
-	// has no internal/core, so the sentinel is declared with the buffer code it
-	// belongs to and the root re-exports the same value after the move, keeping
-	// errors.Is working through the public API.
-	ErrReleased = errors.New("wgpu: resource already released")
+	// ErrReleased is returned when operating on a released resource. It is the
+	// shared core sentinel — the same value the root package exports and every
+	// other browser extraction child returns — so errors.Is keeps working
+	// through the public API in this build too (ADR-070 §15.1). The resource
+	// package keeps the name because the buffer, map and range code returns it
+	// unqualified.
+	ErrReleased = core.ErrReleased
 
 	ErrMapAlreadyPending = errors.New("wgpu: buffer map already pending")
 	ErrMapAlreadyMapped  = errors.New("wgpu: buffer is already mapped")

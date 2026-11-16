@@ -148,6 +148,18 @@ func (d *Device) Core() *core.Device {
 	return d.core
 }
 
+// Queue returns the implementation queue the device submits through, or nil
+// for a device built without one (the core-only path). The root declaration
+// layer builds its public Queue wrapper over this value at construction, so the
+// queue the device holds and the queue the caller submits through are the same
+// object.
+func (d *Device) Queue() *queue.Queue {
+	if d == nil {
+		return nil
+	}
+	return d.queue
+}
+
 // IsReleased reports whether the device has been released.
 func (d *Device) IsReleased() bool {
 	return d != nil && d.released.Load()

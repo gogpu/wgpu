@@ -116,8 +116,9 @@ func importsPath(f *ast.File, path string) bool {
 	return false
 }
 
-// checkChildren enforces the child rules: no package-scope `var _`, no child→device import, and no
-// white-box child test importing device (§15.6, §15.10).
+// checkChildren enforces the child rules: no package-scope `var _`, no
+// device-child→device import, and no white-box child test importing device
+// (§15.6, §15.10).
 func checkChildren(rep *Report, root string) {
 	for _, dir := range childDirectories {
 		abs := filepath.Join(root, filepath.FromSlash(dir))
@@ -174,9 +175,23 @@ func checkValueSpecAssertion(rep *Report, dir, rel string, spec ast.Spec, fset *
 	}
 }
 
-// checkChildDeviceImport enforces §15.3: a child never imports internal/device; the seam is declared in
-// the child and typed by core.
+// checkChildDeviceImport enforces §15.3 for a child of the device: the seam is
+// declared in the child and typed by core, so a child never imports
+// internal/device.
+//
+// The instance is the device's parent, not its child (ADR-070 §15.10, amended
+// 2026-11-16): it constructs the device (device.New, SetInstance) and releases
+// it before its own core instance, and the golden's internal/instance →
+// internal/device (all) row declares that edge as designed. The rule therefore
+// names the direction — a child of the device never imports it — instead of
+// exempting a package: the parent/child distinction is the rule's own purpose,
+// and it cannot be joined by another child. The both-directions test
+// (TestInstanceIsParentOfDevice) keeps the teeth: internal/resource or any other
+// child importing internal/device still fails.
 func checkChildDeviceImport(rep *Report, dir, rel string, f *ast.File, fset *token.FileSet) {
+	if dir == dirInternalInstance {
+		return
+	}
 	if !importsPath(f, modulePath+"/"+dirInternalDevice) {
 		return
 	}

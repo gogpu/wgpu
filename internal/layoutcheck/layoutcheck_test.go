@@ -599,6 +599,36 @@ func TestStencilblitChildRules(t *testing.T) {
 	}
 }
 
+// TestInstanceIsParentOfDevice pins the amended child→device rule in both
+// directions (ADR-070 §15.10, amended 2026-11-16): the instance is the device's
+// parent — it constructs and releases the device, and the golden's
+// internal/instance → internal/device (all) row declares that edge — so a
+// planted instance→device import produces no finding. Every other child is
+// still a child: the same import in internal/resource reds with
+// child-imports-device. The negative control is the point; an exemption without
+// it is a hole.
+func TestInstanceIsParentOfDevice(t *testing.T) {
+	childSource := func(pkg string) string {
+		return "//go:build !(js && wasm)\n\npackage " + pkg + "\n\nimport _ \"" + modulePath + "/" + dirInternalDevice + "\"\n"
+	}
+	root := writeTree(t, map[string]string{
+		"internal/instance/zz_probe.go": childSource("instance"),
+		"internal/resource/zz_probe.go": childSource("resource"),
+	})
+	rep := &Report{Summary: map[string]int{}}
+	checkChildren(rep, root)
+
+	if failureContains(rep.Failures, "internal/instance/zz_probe.go") {
+		t.Fatalf("the device's parent was reported for importing internal/device: %v", rep.Failures)
+	}
+	if !failureContains(rep.Failures, "internal/resource/zz_probe.go") {
+		t.Fatalf("a device child importing internal/device produced no finding: %v", rep.Failures)
+	}
+	if len(rep.Failures) != 1 {
+		t.Fatalf("checkChildren produced %d failures, want the one device-child finding: %v", len(rep.Failures), rep.Failures)
+	}
+}
+
 // TestCoversEmptyMask proves the vacuous pass is gone: the old predicate `row.mask&0 == 0` matched every
 // row, so covers(...,0) was true for any pair. An empty mask now covers nothing.
 func TestCoversEmptyMask(t *testing.T) {

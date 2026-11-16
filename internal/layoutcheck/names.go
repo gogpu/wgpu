@@ -42,6 +42,7 @@ const (
 	dirCmd              = "cmd"
 	dirExamples         = "examples"
 	dirInternalCore     = "internal/core"
+	dirInternalInstance = "internal/instance"
 	dirInternalDevice   = "internal/device"
 	dirInternalHal      = "internal/hal"
 	dirInternalDesc     = "internal/desc"
