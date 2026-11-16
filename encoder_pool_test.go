@@ -237,31 +237,3 @@ func TestCommandBufferReleaseDropsUsedSets(t *testing.T) {
 			cb.impl.UsedBuffers(), cb.impl.UsedTextures(), cb.impl.UsedBindGroups())
 	}
 }
-
-// TestPostSubmitDropsSetsWithoutDestroyQueue verifies that a command buffer is
-// marked submitted and has its validation sets dropped even when the device has
-// no DestroyQueue. postSubmit returns early in that case; the bookkeeping must
-// happen before the early return, since the HAL submit has already succeeded.
-func TestPostSubmitDropsSetsWithoutDestroyQueue(t *testing.T) {
-	q := &Queue{} // nil device — destroyQueue() returns nil
-	if q.destroyQueue() != nil {
-		t.Fatal("test precondition: expected nil destroy queue")
-	}
-
-	cb := &CommandBuffer{impl: &encoder.CommandBuffer{}}
-	cb.impl.SetUsedSetsForTest(
-		map[*resource.Buffer]struct{}{{}: {}},
-		map[*resource.Texture]struct{}{{}: {}},
-		map[*resource.BindGroup]struct{}{{}: {}},
-	)
-
-	q.postSubmit(1, []*encoder.CommandBuffer{cb.impl})
-
-	if !cb.impl.IsSubmitted() {
-		t.Error("postSubmit left cb.submitted false — a double submit would not be caught")
-	}
-	if cb.impl.UsedBuffers() != nil || cb.impl.UsedTextures() != nil || cb.impl.UsedBindGroups() != nil {
-		t.Errorf("postSubmit left validation sets populated: buffers=%v textures=%v bindGroups=%v",
-			cb.impl.UsedBuffers(), cb.impl.UsedTextures(), cb.impl.UsedBindGroups())
-	}
-}

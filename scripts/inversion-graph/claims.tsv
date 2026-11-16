@@ -32,3 +32,13 @@ target	internal/pendingwrites	internal/resource	native	S8
 target	internal/pendingwrites	internal/hal	all	S8
 target	internal/pendingwrites	internal/core	native	S8
 target	internal/pendingwrites	internal/core/track	native	S8
+target	internal/queue	internal/core	native+rust	S9
+target	internal/queue	internal/core/track	native	S9
+target	internal/queue	internal/encoder	native+rust	S9
+target	internal/queue	internal/hal	all	S9
+target	internal/queue	internal/pendingwrites	native	S9
+target	internal/queue	internal/resource	all	S9
+target	internal/queue	internal/browser	wasm	S9
+target	internal/queue	internal/stencilblit	native	S9
+target	internal/encoder	internal/stencilblit	native	S9
+target	internal/stencilblit	internal/hal	all	S9

@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package queue
 
 import (
 	"errors"
@@ -8,19 +8,36 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
-	"github.com/gogpu/wgpu/internal/hal"
-	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
-// writeTextureRecordingQueue counts the uploads that reach the backend.
-type writeTextureRecordingQueue struct {
-	noop.Queue
-	writes int
-}
-
-func (q *writeTextureRecordingQueue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal.ImageDataLayout, size *hal.Extent3D) error {
-	q.writes++
-	return q.Queue.WriteTexture(dst, data, layout, size)
+// newTestUploadTexture builds the upload target of one table row: an RGBA8Unorm
+// texture of 4x4 with two array layers (one for a multisampled texture), the
+// state the core upload validation reads. The fixtures build the core texture
+// directly: the destination cannot call the public CreateTexture.
+func newTestUploadTexture(t *testing.T, device *core.Device, host *testHost, usage gputypes.TextureUsage, mips, samples uint32) *resource.Texture {
+	t.Helper()
+	layers := uint32(2)
+	if samples > 1 {
+		layers = 1 // a multisampled texture has one layer
+	}
+	coreTex := core.NewTexture(
+		testHALTexture{}, device,
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureDimension2D,
+		usage,
+		gputypes.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: layers},
+		mips, samples, "upload",
+	)
+	t.Cleanup(coreTex.Destroy)
+	tex := resource.NewTexture(testHALTexture{}, host, gputypes.TextureFormatRGBA8Unorm, nil, coreTex)
+	// The root package's version created its textures through the public
+	// device and reported a creation failure; the destination builds the core
+	// texture directly, so the same precondition is checked here.
+	if tex.CoreTexture() == nil || !tex.CoreTexture().TrackingData().Index().IsValid() {
+		t.Fatalf("upload texture has no tracked core texture")
+	}
+	return tex
 }
 
 // TestQueueWriteTextureValidation: WriteTexture validates the upload as Rust
@@ -28,38 +45,22 @@ func (q *writeTextureRecordingQueue) WriteTexture(dst *hal.ImageCopyTexture, dat
 // sample count, data layout against the data length) and reports a
 // *core.TransferError before the backend sees the data; a valid upload of size
 // zero is dropped after validation.
+//
+// It moved here with the queue (ADR-070 S9) and keeps its own fixtures: the
+// root package's copy-zero-size fixture set stays there, because the encoder's
+// copy paths still test against it.
 func TestQueueWriteTextureValidation(t *testing.T) {
-	raw := &copyRecordingDevice{}
-	coreDevice := core.NewDevice(raw, nil, 0, gputypes.DefaultLimits(), "write-texture-test")
-	halQueue := &writeTextureRecordingQueue{}
-	queue := &Queue{hal: halQueue}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = newQueueDeviceHost(device)
-	defer device.Release()
+	host, device := newTestHost(t, false)
+	halQueue := &testHALQueue{}
+	q := New(halQueue, nil)
+	q.SetDevice(host)
 
-	newTexture := func(format gputypes.TextureFormat, usage gputypes.TextureUsage, mips, samples uint32) *Texture {
-		layers := uint32(2)
-		if samples > 1 {
-			layers = 1 // a multisampled texture has one layer
-		}
-		t.Helper()
-		tex, err := device.CreateTexture(&TextureDescriptor{
-			Size:          Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: layers},
-			MipLevelCount: mips,
-			SampleCount:   samples,
-			Dimension:     TextureDimension2D,
-			Format:        format,
-			Usage:         usage,
-		})
-		if err != nil {
-			t.Fatalf("CreateTexture(%v): %v", format, err)
-		}
-		t.Cleanup(tex.Release)
-		return tex
+	newTexture := func(usage gputypes.TextureUsage, mips, samples uint32) *resource.Texture {
+		return newTestUploadTexture(t, device, host, usage, mips, samples)
 	}
-	color := newTexture(gputypes.TextureFormatRGBA8Unorm, TextureUsageCopyDst, 2, 1)
-	noCopyDst := newTexture(gputypes.TextureFormatRGBA8Unorm, TextureUsageCopySrc, 1, 1)
-	multisampled := newTexture(gputypes.TextureFormatRGBA8Unorm, TextureUsageCopyDst|TextureUsageRenderAttachment, 1, 4)
+	color := newTexture(gputypes.TextureUsageCopyDst, 2, 1)
+	noCopyDst := newTexture(gputypes.TextureUsageCopySrc, 1, 1)
+	multisampled := newTexture(gputypes.TextureUsageCopyDst|gputypes.TextureUsageRenderAttachment, 1, 4)
 
 	extent := func(w, h, d uint32) *Extent3D { return &Extent3D{Width: w, Height: h, DepthOrArrayLayers: d} }
 	rows := func(bytesPerRow, rowsPerImage uint32) *ImageDataLayout {
@@ -120,8 +121,8 @@ func TestQueueWriteTextureValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			before := halQueue.writes
-			err := queue.WriteTexture(tt.dst, make([]byte, tt.dataLen), tt.layout, tt.size)
+			before := halQueue.writeTextures
+			err := q.WriteTexture(tt.dst, make([]byte, tt.dataLen), tt.layout, tt.size)
 			if tt.wantErr {
 				var te *core.TransferError
 				if !errors.As(err, &te) || te.Kind != tt.wantKind {
@@ -130,7 +131,7 @@ func TestQueueWriteTextureValidation(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("WriteTexture: %v", err)
 			}
-			if got := halQueue.writes - before; got != tt.wantWrites {
+			if got := halQueue.writeTextures - before; got != tt.wantWrites {
 				t.Errorf("backend writes = %d, want %d", got, tt.wantWrites)
 			}
 		})

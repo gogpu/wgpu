@@ -1626,16 +1626,14 @@ func (d *Device) waitIdle() error {
 // on the GPU — DestroyQueue entries scheduled before the wait are not processed
 // until the next Submit, keeping old textures alive across resize boundaries.
 func (d *Device) maintainAfterIdle() {
-	if d.queue == nil || d.queue.hal == nil {
+	if d.queue == nil || d.queue.impl.HALQueue() == nil {
 		return
 	}
-	completed := d.queue.hal.PollCompleted()
+	completed := d.queue.impl.HALQueue().PollCompleted()
 	if dq := d.destroyQueue(); dq != nil {
 		dq.Triage(completed)
 	}
-	if d.queue.pending != nil {
-		d.queue.pending.Maintain(completed)
-	}
+	d.queue.impl.Maintain(completed)
 }
 
 // Release releases the device and all associated resources.
@@ -1708,7 +1706,7 @@ func (d *Device) Release() {
 	// Step 2: Pending writes that were never submitted can now be discarded;
 	// completed inflight batches were recycled by maintainAfterIdle above.
 	if d.queue != nil {
-		d.queue.release()
+		d.queue.impl.Release()
 	}
 
 	// Step 3: Flush deferred destructions. WaitIdle above ensures PollCompleted()
@@ -1717,8 +1715,8 @@ func (d *Device) Release() {
 	if d.core != nil && d.core.DestroyQueueRef() != nil {
 		dq := d.core.DestroyQueueRef()
 		// Triage with latest completion index (GPU is idle, all done).
-		if d.queue != nil && d.queue.hal != nil {
-			dq.Triage(d.queue.hal.PollCompleted())
+		if d.queue != nil && d.queue.impl.HALQueue() != nil {
+			dq.Triage(d.queue.impl.HALQueue().PollCompleted())
 		}
 		dq.FlushAll()
 	}
@@ -1777,8 +1775,8 @@ func (d *Device) Poll(pollType PollType) bool {
 		return d.core.PollMaps(^uint64(0))
 	default:
 		completed := uint64(0)
-		if d.queue != nil && d.queue.hal != nil {
-			completed = d.queue.hal.PollCompleted()
+		if d.queue != nil && d.queue.impl.HALQueue() != nil {
+			completed = d.queue.impl.HALQueue().PollCompleted()
 		}
 		return d.core.PollMaps(completed)
 	}

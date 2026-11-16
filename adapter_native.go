@@ -106,19 +106,16 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 	// one device.command_allocator for both (queue.rs:1373).
 	pool := newEncoderPool(openDevice.Device)
 
-	queue := &Queue{
-		hal:     openDevice.Queue,
-		pending: pendingwrites.New(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()),
-	}
+	q := newQueue(openDevice.Queue, pendingwrites.New(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()))
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
 
 	device := &Device{
 		core:           coreDevice,
-		queue:          queue,
+		queue:          q,
 		cmdEncoderPool: pool,
 	}
-	queue.device = newQueueDeviceHost(device)
+	q.impl.SetDevice(newQueueDeviceHost(device))
 
 	return device, nil
 }

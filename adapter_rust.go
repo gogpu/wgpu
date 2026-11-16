@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/queue"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 )
@@ -75,7 +76,7 @@ func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
 	return &Device{
 		r:        rd,
 		instance: a.instance,
-		queue:    &Queue{r: rq},
+		queue:    &Queue{impl: queue.New(rq)},
 		features: deviceFeatures,
 		limits:   deviceLimits,
 	}, nil

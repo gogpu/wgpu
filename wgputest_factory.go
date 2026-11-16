@@ -52,7 +52,7 @@ func newTestDeviceFactory() wgputestbridge.Factory {
 		hooks := wgputestbridge.NewHooks(opts.Observer, opts.Faults)
 		device := newDeviceFromHAL(halDevice, halQueue, opts.Features, opts.Limits, opts.Label)
 		device.test = hooks
-		device.queue.test = hooks
+		device.queue.impl.SetTestHooks(hooks)
 		return device, device.queue, func() { device.Release() }, nil
 	}
 }

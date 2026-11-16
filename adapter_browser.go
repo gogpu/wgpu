@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/queue"
 )
 
 // DeviceDescriptor configures device creation.
@@ -65,13 +66,11 @@ func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
 	deviceFeatures := browser.ExtractFeatures(bd.Features())
 	deviceLimits := browser.ExtractLimits(bd.Limits())
 
-	queue := &Queue{
-		browser: bd.Queue(),
-	}
+	q := &Queue{impl: queue.New(bd.Queue())}
 
 	return &Device{
 		browser:  bd,
-		queue:    queue,
+		queue:    q,
 		features: deviceFeatures,
 		limits:   deviceLimits,
 	}, nil

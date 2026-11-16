@@ -165,26 +165,30 @@ var (
 // Returned when Submit detects that a command buffer references resources in
 // an invalid state. These match Rust wgpu-core QueueSubmitError variants
 // (device/queue.rs:484-516).
+//
+// The values are internal/core's: Submit validation moved with the queue to
+// internal/queue (ADR-070 S9), and binding the same values here keeps
+// errors.Is working through the public API (§15.1).
 var (
 	// ErrSubmitBufferDestroyed is returned when a submitted command buffer
 	// references a buffer whose GPU memory is gone. Release() after recording
 	// is not that: the command buffer keeps the buffer alive until its work
 	// completes, as a dropped Arc<Buffer> stays alive in Rust wgpu-core.
 	// Matches Rust QueueSubmitError::DestroyedResource for buffers.
-	ErrSubmitBufferDestroyed = errors.New("wgpu: Submit: command buffer references destroyed buffer")
+	ErrSubmitBufferDestroyed = core.ErrSubmitBufferDestroyed
 
 	// ErrSubmitBufferMapped is returned when a submitted command buffer
 	// references a buffer that is currently mapped. Submitting GPU commands
 	// that read/write a mapped buffer is a data race.
 	// Matches Rust QueueSubmitError::BufferStillMapped.
-	ErrSubmitBufferMapped = errors.New("wgpu: Submit: command buffer references mapped buffer")
+	ErrSubmitBufferMapped = core.ErrSubmitBufferMapped
 
 	// ErrSubmitTextureDestroyed is returned when a submitted command buffer
 	// references a texture whose work can no longer run: its device is gone,
 	// or a surface texture's acquisition has ended. Release() after recording
 	// is not that: the command buffer keeps the texture alive until its work
 	// completes. Matches Rust QueueSubmitError::DestroyedResource for textures.
-	ErrSubmitTextureDestroyed = errors.New("wgpu: Submit: command buffer references destroyed texture")
+	ErrSubmitTextureDestroyed = core.ErrSubmitTextureDestroyed
 
 	// ErrSubmitBindGroupDestroyed reports a submitted command buffer that
 	// references a destroyed bind group. The native backends no longer return
@@ -192,7 +196,8 @@ var (
 	// bind group until its work completes, and Submit checks the resources the
 	// group binds instead, with the buffer and texture errors above (Rust
 	// bind_group.try_raw, device/queue.rs:2171-2180). It is kept so code that
-	// matches it still compiles.
+	// matches it still compiles. No internal package returns it, so it stays
+	// declared here.
 	ErrSubmitBindGroupDestroyed = errors.New("wgpu: Submit: command buffer references destroyed bind group")
 
 	// ErrSubmitQuerySetDestroyed reports a submitted command buffer that
@@ -200,12 +205,12 @@ var (
 	// recording is not that: the command buffer keeps the set alive until its
 	// work completes. Matches Rust QueueSubmitError::DestroyedResource for
 	// query sets (query_set.try_raw, device/queue.rs:2167-2168).
-	ErrSubmitQuerySetDestroyed = errors.New("wgpu: Submit: command buffer references destroyed query set")
+	ErrSubmitQuerySetDestroyed = core.ErrSubmitQuerySetDestroyed
 
 	// ErrSubmitCommandBufferInvalid is returned when a command buffer has
 	// already been submitted or was never properly finished.
 	// Matches Rust QueueSubmitError::CommandEncoder for invalid command buffers.
-	ErrSubmitCommandBufferInvalid = errors.New("wgpu: Submit: command buffer is invalid (already submitted or encoding error)")
+	ErrSubmitCommandBufferInvalid = core.ErrSubmitCommandBufferInvalid
 )
 
 // GPUError represents a captured GPU error from an error scope.

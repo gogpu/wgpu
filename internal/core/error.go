@@ -47,6 +47,35 @@ var (
 	// re-exports the same value, so errors.Is keeps working through the public
 	// API (ADR-070 §15.1). The message is the public one, unchanged.
 	ErrReleased = errors.New("wgpu: resource already released")
+
+	// Queue.Submit validation sentinels (VAL-A6). They live here, next to
+	// ErrReleased, because the queue moved to internal/queue at S9 and its
+	// submit validation returns them; the root package binds the same values,
+	// so errors.Is keeps working through the public API (§15.1). The messages
+	// are the public ones, unchanged. Each matches a Rust wgpu-core
+	// QueueSubmitError variant (device/queue.rs:484-516).
+	ErrSubmitBufferDestroyed = errors.New("wgpu: Submit: command buffer references destroyed buffer")
+
+	// ErrSubmitBufferMapped reports a submitted command buffer that references
+	// a mapped buffer: submitting GPU commands that read or write a mapped
+	// buffer is a data race (Rust QueueSubmitError::BufferStillMapped).
+	ErrSubmitBufferMapped = errors.New("wgpu: Submit: command buffer references mapped buffer")
+
+	// ErrSubmitTextureDestroyed reports a submitted command buffer that
+	// references a texture whose work can no longer run: its device is gone, or
+	// a surface texture's acquisition has ended (Rust
+	// QueueSubmitError::DestroyedResource for textures).
+	ErrSubmitTextureDestroyed = errors.New("wgpu: Submit: command buffer references destroyed texture")
+
+	// ErrSubmitQuerySetDestroyed reports a submitted command buffer that
+	// references a query set whose HAL query set is gone (Rust
+	// QueueSubmitError::DestroyedResource for query sets).
+	ErrSubmitQuerySetDestroyed = errors.New("wgpu: Submit: command buffer references destroyed query set")
+
+	// ErrSubmitCommandBufferInvalid reports a command buffer that has already
+	// been submitted or was never properly finished (Rust
+	// QueueSubmitError::CommandEncoder).
+	ErrSubmitCommandBufferInvalid = errors.New("wgpu: Submit: command buffer is invalid (already submitted or encoding error)")
 )
 
 // ValidationError represents a validation failure with context.

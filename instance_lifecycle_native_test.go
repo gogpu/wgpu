@@ -106,12 +106,7 @@ func TestInstanceReleaseDestroysDevicesBeforeSurfaces(t *testing.T) {
 	events := []string{}
 	instance := &Instance{core: core.NewInstanceWithMock(nil)}
 	rawDevice := &instanceLifecycleDevice{events: &events}
-	queue := &Queue{hal: &noop.Queue{}}
-	device := &Device{
-		core:  core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "lifecycle-test"),
-		queue: queue,
-	}
-	queue.device = newQueueDeviceHost(device)
+	device := newTestDeviceWithQueue(core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "lifecycle-test"), nil, &noop.Queue{}, nil)
 	if err := instance.adoptDevice(device); err != nil {
 		t.Fatalf("adopt device: %v", err)
 	}
@@ -141,12 +136,7 @@ func TestInstanceReleaseRetiresAcquisitionBeforeDeviceAndPlatformSurface(t *test
 	events := []string{}
 	instance := &Instance{core: core.NewInstanceWithMock(nil)}
 	rawDevice := &instanceLifecycleDevice{events: &events}
-	queue := &Queue{hal: &noop.Queue{}}
-	device := &Device{
-		core:  core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "configured-lifecycle-test"),
-		queue: queue,
-	}
-	queue.device = newQueueDeviceHost(device)
+	device := newTestDeviceWithQueue(core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "configured-lifecycle-test"), nil, &noop.Queue{}, nil)
 	if err := instance.adoptDevice(device); err != nil {
 		t.Fatalf("adopt device: %v", err)
 	}
@@ -191,12 +181,7 @@ func TestSurfaceConfigureRejectsDeviceFromAnotherInstance(t *testing.T) {
 	defer second.Release()
 
 	rawDevice := &noop.Device{}
-	queue := &Queue{hal: &noop.Queue{}}
-	device := &Device{
-		core:  core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "cross-instance-test"),
-		queue: queue,
-	}
-	queue.device = newQueueDeviceHost(device)
+	device := newTestDeviceWithQueue(core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "cross-instance-test"), nil, &noop.Queue{}, nil)
 	if err := first.adoptDevice(device); err != nil {
 		t.Fatalf("adopt device: %v", err)
 	}
@@ -239,12 +224,7 @@ func TestReleasedInstanceRejectsLateOwnership(t *testing.T) {
 	}
 
 	rawDevice := &noop.Device{}
-	queue := &Queue{hal: &noop.Queue{}}
-	device := &Device{
-		core:  core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "late-device"),
-		queue: queue,
-	}
-	queue.device = newQueueDeviceHost(device)
+	device := newTestDeviceWithQueue(core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "late-device"), nil, &noop.Queue{}, nil)
 	if err := instance.adoptDevice(device); !errors.Is(err, ErrReleased) {
 		t.Fatalf("adoptDevice after release = %v, want ErrReleased", err)
 	}

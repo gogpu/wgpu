@@ -416,7 +416,7 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 	if s.device == nil {
 		return fmt.Errorf("wgpu: surface not configured")
 	}
-	if s.device.queue == nil || s.device.queue.hal == nil {
+	if s.device.queue == nil || s.device.queue.impl.HALQueue() == nil {
 		return fmt.Errorf("wgpu: queue not available")
 	}
 
@@ -427,7 +427,7 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 		return ErrReleased
 	}
 
-	return s.core.PresentWithDamage(s.device.queue.hal, damageRects)
+	return s.core.PresentWithDamage(s.device.queue.impl.HALQueue(), damageRects)
 }
 
 // SetPresentsWithTransaction toggles Core Animation transaction-based present

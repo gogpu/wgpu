@@ -90,7 +90,7 @@ func TestEncoderDeviceHostPoolIsUntypedNil(t *testing.T) {
 // submit path accepts and spends it instead of reporting a nil element. A nil
 // *CommandBuffer stays a nil element and is reported.
 func TestQueueSubmitAcceptsZeroValueCommandBuffer(t *testing.T) {
-	queue := &Queue{hal: &noop.Queue{}}
+	queue := newQueue(&noop.Queue{}, nil)
 
 	var zero CommandBuffer
 	if _, err := queue.Submit(&zero); err != nil {

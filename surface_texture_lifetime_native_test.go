@@ -54,9 +54,7 @@ func newAcquiredSurfaceForLifetimeTest(t *testing.T) (*Surface, *SurfaceTexture,
 
 	rawDevice := &surfaceTextureLifetimeDevice{}
 	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "surface-texture-lifetime-test")
-	queue := &Queue{hal: &noop.Queue{}}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = newQueueDeviceHost(device)
+	device := newTestDeviceWithQueue(coreDevice, nil, &noop.Queue{}, nil)
 
 	rawSurface := &noop.Surface{}
 	surface := &Surface{
@@ -143,9 +141,7 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	// valid when recorded, then its acquisition retires before Submit.
 	rawQueue := &mockBatchingQueue{}
 	pool := newEncoderPool(rawDevice)
-	device.cmdEncoderPool = pool
-	device.queue.hal = rawQueue
-	device.queue.pending = pendingwrites.New(rawDevice, rawQueue, pool, nil)
+	replaceTestQueue(device, pool, rawQueue, pendingwrites.New(rawDevice, rawQueue, pool, nil))
 
 	texture := surfaceTexture.AsTexture()
 	err := device.Queue().WriteTexture(
@@ -157,7 +153,7 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteTexture while acquired: %v", err)
 	}
-	if !device.queue.pending.HasPendingWork() {
+	if !device.queue.impl.Pending().HasPendingWork() {
 		t.Fatal("WriteTexture did not create pending work")
 	}
 
@@ -168,10 +164,10 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	if rawQueue.submitCalls != 0 {
 		t.Fatalf("HAL Submit calls = %d, want 0", rawQueue.submitCalls)
 	}
-	if device.queue.pending.HasPendingWork() {
+	if device.queue.impl.Pending().HasPendingWork() {
 		t.Fatal("rejected pending batch remained active")
 	}
-	stats := device.queue.pending.BeltStats()
+	stats := device.queue.impl.Pending().BeltStats()
 	if stats.ActiveChunks != 0 || stats.FreeChunks != 1 || stats.ClosedSubs != 0 {
 		t.Fatalf("staging belt after rejection = %+v, want one recycled free chunk", stats)
 	}
@@ -185,9 +181,7 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 	submitErr := errors.New("submit rejected")
 	rawQueue := &mockBatchingQueue{submitErr: submitErr}
 	pool := newEncoderPool(rawDevice)
-	device.cmdEncoderPool = pool
-	device.queue.hal = rawQueue
-	device.queue.pending = pendingwrites.New(rawDevice, rawQueue, pool, nil)
+	replaceTestQueue(device, pool, rawQueue, pendingwrites.New(rawDevice, rawQueue, pool, nil))
 
 	err := device.Queue().WriteTexture(
 		&ImageCopyTexture{Texture: surfaceTexture.AsTexture()},
@@ -204,10 +198,10 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 	if rawQueue.submitCalls != 1 {
 		t.Fatalf("HAL Submit calls = %d, want 1", rawQueue.submitCalls)
 	}
-	if device.queue.pending.HasPendingWork() {
+	if device.queue.impl.Pending().HasPendingWork() {
 		t.Fatal("failed submitted batch remained active")
 	}
-	stats := device.queue.pending.BeltStats()
+	stats := device.queue.impl.Pending().BeltStats()
 	if stats.ActiveChunks != 0 || stats.FreeChunks != 1 || stats.ClosedSubs != 0 {
 		t.Fatalf("staging belt after failed submit = %+v, want one recycled free chunk", stats)
 	}
@@ -329,7 +323,7 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		defer commandBuffer.Release()
 
 		rawQueue := &mockBatchingQueue{}
-		device.queue.hal = rawQueue
+		replaceTestQueue(device, device.cmdEncoderPool, rawQueue, nil)
 		surface.DiscardTexture()
 		if _, err := device.Queue().Submit(commandBuffer); !errors.Is(err, ErrSubmitTextureDestroyed) {
 			t.Fatalf("Submit with retired attachment = %v, want ErrSubmitTextureDestroyed", err)
@@ -584,9 +578,7 @@ func TestSurfaceSwapchainTextureCaching(t *testing.T) {
 
 	rawDevice := &surfaceTextureLifetimeDevice{}
 	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "cache-test")
-	queue := &Queue{hal: &noop.Queue{}}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = newQueueDeviceHost(device)
+	device := newTestDeviceWithQueue(coreDevice, nil, &noop.Queue{}, nil)
 	defer device.Release()
 
 	rawSurface := &noop.Surface{}

@@ -58,9 +58,7 @@ func newCopyRecordingDevice(t *testing.T) (*Device, *copyRecordingDevice) {
 	raw := &copyRecordingDevice{}
 	adapter := &core.Adapter{DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities()}
 	coreDevice := core.NewDevice(raw, adapter, 0, gputypes.DefaultLimits(), "copy-recording-test")
-	queue := &Queue{hal: &noop.Queue{}}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = newQueueDeviceHost(device)
+	device := newTestDeviceWithQueue(coreDevice, nil, &noop.Queue{}, nil)
 	t.Cleanup(device.Release)
 	return device, raw
 }

@@ -41,8 +41,8 @@ func (d *Device) halHandles() hal.Handles {
 	if d.instance != nil && d.instance.r != nil {
 		h.Instance = d.instance.r.Handle()
 	}
-	if d.queue != nil && d.queue.r != nil {
-		h.Queue = d.queue.r.Handle()
+	if d.queue != nil && d.queue.impl.R() != nil {
+		h.Queue = d.queue.impl.R().Handle()
 	}
 	return hal.Handles{Kind: hal.KindWebGPU, WebGPU: h}
 }

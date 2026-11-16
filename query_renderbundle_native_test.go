@@ -275,7 +275,7 @@ func TestBeginComputePassTimestampWritesNeedsFeature(t *testing.T) {
 
 // TestQueueGetTimestampPeriod checks that the queue reports the HAL period.
 func TestQueueGetTimestampPeriod(t *testing.T) {
-	if got := (&Queue{hal: &periodQueue{period: 83.333}}).GetTimestampPeriod(); got != 83.333 {
+	if got := newQueue(&periodQueue{period: 83.333}, nil).GetTimestampPeriod(); got != 83.333 {
 		t.Errorf("GetTimestampPeriod() = %v, want 83.333", got)
 	}
 	if got := (&Queue{}).GetTimestampPeriod(); got != 1 {

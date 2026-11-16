@@ -19,18 +19,17 @@ internal/instance	internal/encoder	native	N	adapter_native.go:103-108 encoder po
 internal/instance	internal/pendingwrites	native	N	adapter_native.go:112 pendingwrites.New(openDevice.Device, openDevice.Queue, pool, ...)
 internal/instance	internal/hal	all	N	domain baseline (instance_native.go hal.Instance)
 internal/instance	internal/core	all	N	domain baseline (instance_native.go *core.Instance)
-internal/queue	internal/encoder	native	N	queue_native.go:237,249,688,731,886,895 cmdEncoderPool; *CommandBuffer
+internal/queue	internal/encoder	native+rust	N	queue_native.go:237,249,688,731,886,895 cmdEncoderPool; *CommandBuffer (queue_rust.go Submit: *encoder.CommandBuffer, MarkSubmitted, R())
 internal/queue	internal/pendingwrites	native	N	queue_native.go:31 pending *pendingwrites.Writes
 internal/queue	internal/stencilblit	native	N	queue_native.go:427 stencil upload via stencilblit.NewUpload (payload; the queue records the commands)
 internal/queue	internal/hal	all	N	domain baseline (queue_native.go:25-26 hal.Queue, hal.Device)
-internal/queue	internal/core	native	N	queue_native.go:174 q.device.core; :529 DestroyQueueRef
-internal/queue	internal/resource	native	N	seams.go NewStencilUpload (dst *resource.Texture); queue_native.go validateSubmitBuffer/validateSubmitTexture
-internal/queue	internal/resource	wasm	N	at the Move: queue_browser.go ErrReleased == resource.ErrReleased (the golden has no native+wasm token; the pair is declared per context so no row claims an import the tree lacks)
+internal/queue	internal/core	native+rust	N	queue_native.go:174 q.device.Core(); :529 DestroyQueueRef (queue_rust.go ErrReleased == core.ErrReleased)
+internal/queue	internal/resource	all	N	descriptor.go ImageCopyTexture carries *resource.Texture in every context; seams.go NewStencilUpload; queue_native.go validateSubmitBuffer/validateSubmitTexture, queue_rust.go WriteBuffer/WriteTexture, queue_browser.go ErrReleased == resource.ErrReleased
 internal/encoder	internal/resource	all	N	encoder_browser.go:49 CopyBufferToBuffer(*Buffer); encoder_native.go copy paths
 internal/encoder	internal/pipeline	all	N	renderpass_native.go:74 SetPipeline(*RenderPipeline); computepass_native.go:53 (*ComputePipeline)
 internal/encoder	internal/hal	all	N	domain baseline (encoder_native.go hal.CommandEncoder)
 internal/encoder	internal/core	all	N	domain baseline (encoder_native.go *core.CoreCommandEncoder)
-internal/encoder	internal/stencilblit	native	N	encoder_native.go:704 stencil upload via stencilblit.NewUpload (payload; the encoder records the commands)
+internal/encoder	internal/stencilblit	native	N	stencil_recorder.go BlitRecorder returns stencilblit.Recorder; seams.go NewStencilUpload returns stencilblit.Upload (payload; the encoder records the commands)
 internal/pipeline	internal/resource	all	N	pipeline_native.go:70 bindGroupLayouts []*BindGroupLayout
 internal/pipeline	internal/hal	all	N	domain baseline (pipeline_native.go hal.RenderPipeline)
 internal/pipeline	internal/core	all	N	domain baseline (pipeline_native.go ref *core.ResourceRef)
@@ -43,7 +42,7 @@ internal/pendingwrites	internal/staging	native	N	internal/pendingwrites/pending_
 internal/pendingwrites	internal/hal	all	N	domain baseline (internal/pendingwrites/pending_writes.go:35-38 hal.Device, hal.Queue)
 internal/pendingwrites	internal/core	native	N	internal/pendingwrites/pending_writes.go:70 tracker *core.DeviceTracker
 internal/pendingwrites	internal/resource	native	N	internal/pendingwrites/pending_writes.go:12 resource.Texture; :89 dstTextures, :256 CoreTexture
-internal/stencilblit	internal/hal	all	N	domain baseline (the payload holds hal handles; the encoder records the commands)
+internal/stencilblit	internal/hal	all	N	upload.go stencilUploadPassDescriptor (hal.Texture of the destination); the encoder records the commands
 internal/staging	internal/hal	all	N	staging_belt.go:34-35 halDevice, halQueue
 # --- the browser WebGPU path (wasm only): the extraction domains' _browser variants import internal/browser; the
 # --- golden was built from pre-A root paths, where these were root files, so the class had zero rows (2026-11-15).

@@ -145,12 +145,14 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, device := newTestDeviceWithTracker(t)
+			var delayed *delayedCompletionQueue
+			device := newTestDeviceWithHALQueue(t, func(q hal.Queue) hal.Queue {
+				delayed = &delayedCompletionQueue{Queue: q}
+				return delayed
+			})
 			defer device.Release()
 
 			queue := device.Queue()
-			delayed := &delayedCompletionQueue{Queue: queue.hal}
-			queue.hal = delayed
 
 			buffer, err := device.CreateBuffer(&BufferDescriptor{
 				Label: "texture-copy-lifetime-buffer",

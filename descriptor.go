@@ -30,14 +30,14 @@ func (o Origin3D) toHAL() hal.Origin3D {
 }
 
 // ImageDataLayout describes the layout of image data in a buffer.
+//
+// Its HAL conversion lived here until the queue moved to internal/queue (ADR-070
+// S9): the queue was its only caller, and it now converts into the destination's
+// own mirror, so the method went with the implementation.
 type ImageDataLayout struct {
 	Offset       uint64
 	BytesPerRow  uint32
 	RowsPerImage uint32
-}
-
-func (l ImageDataLayout) toHAL() hal.ImageDataLayout {
-	return hal.ImageDataLayout{Offset: l.Offset, BytesPerRow: l.BytesPerRow, RowsPerImage: l.RowsPerImage}
 }
 
 // BufferDescriptor describes buffer creation parameters.

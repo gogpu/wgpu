@@ -1,6 +1,6 @@
 //go:build !rust && !(js && wasm)
 
-package wgpu
+package queue
 
 import (
 	"fmt"
@@ -13,7 +13,6 @@ import (
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
-	"github.com/gogpu/wgpu/internal/queue"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -23,17 +22,21 @@ import (
 // operations (Submit, WriteBuffer, WriteTexture) are serialized via an
 // internal mutex, matching Rust wgpu-core which uses RwLock::write() on
 // device.fence + device.command_indices during submit (queue.rs:1171-1173).
+//
+// It is the domain's implementation (ADR-070 S9): the root package keeps the
+// public Queue as a declaration layer over it, and every method here takes
+// internal handles, so the root converts at its boundary.
 type Queue struct {
 	mu sync.Mutex // serializes Submit, WriteBuffer, WriteTexture (Rust wgpu parity)
 
 	hal hal.Queue
 
-	// device is the seam view of the device the queue submits through (ADR-070
-	// S9): its core state, encoder pool, user command encoders and the stencil
-	// upload. A seam value, not *Device: the root adapter adapts at the call
-	// boundary (queue_host_native.go), and a nil value keeps meaning "no
-	// device" for the nil checks below.
-	device queue.DeviceHost
+	// device is the seam view of the device the queue submits through: its
+	// core state, encoder pool, user command encoders and the stencil upload.
+	// A seam value, not the device itself, because the device stays in the
+	// root package until S11; a nil value keeps meaning "no device" for the
+	// nil checks below.
+	device DeviceHost
 
 	pending *pendingwrites.Writes
 
@@ -62,16 +65,43 @@ type transitRecording struct {
 	cmdBuf  hal.CommandBuffer
 }
 
+// New returns a queue that submits through halQ and batches writes in pending.
+// A nil pending is a queue that writes through the HAL directly (GLES and the
+// software backend). The device the queue records against is attached with
+// SetDevice once the device exists, because the device holds the queue.
+func New(halQ hal.Queue, pending *pendingwrites.Writes) *Queue {
+	return &Queue{hal: halQ, pending: pending}
+}
+
+// SetDevice attaches the device the queue submits through. The root package
+// calls it once, right after both the device and its queue exist.
+func (q *Queue) SetDevice(h DeviceHost) {
+	if q != nil {
+		q.device = h
+	}
+}
+
+// SetTestHooks attaches the wgputest recorder to the queue. A nil hook is the
+// plain production queue.
+func (q *Queue) SetTestHooks(hooks core.TestHooks) {
+	if q != nil {
+		q.test = hooks
+	}
+}
+
 // Submit submits command buffers for execution. Non-blocking.
 // Returns a submission index that can be used with Poll() to track completion.
 // Command buffers are owned by the caller — free them after Poll confirms completion.
 //
 // If there are pending WriteBuffer/WriteTexture operations, they are flushed
 // and prepended before the user command buffers in a single HAL submit.
-func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
+func (q *Queue) Submit(commandBuffers []*encoder.CommandBuffer) (uint64, error) {
+	if q == nil || q.hal == nil {
+		return 0, fmt.Errorf("wgpu: queue not available")
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	index, err := q.submitLocked(submitCommandBuffers(commandBuffers))
+	index, err := q.submitLocked(commandBuffers)
 	if err != nil {
 		return index, err
 	}
@@ -79,26 +109,6 @@ func (q *Queue) Submit(commandBuffers ...*CommandBuffer) (uint64, error) {
 		q.test.Submitted(index, len(commandBuffers))
 	}
 	return index, nil
-}
-
-// submitCommandBuffers unwraps the public command buffer handles for the
-// submit path. A nil *CommandBuffer is a nil element (Submit reports it); a
-// zero-value one stays a zero implementation, which the submit path accepts
-// and spends exactly as the pre-move zero value was: it records no commands
-// and holds nothing to validate or recycle.
-func submitCommandBuffers(commandBuffers []*CommandBuffer) []*encoder.CommandBuffer {
-	impls := make([]*encoder.CommandBuffer, len(commandBuffers))
-	for i, cb := range commandBuffers {
-		switch {
-		case cb == nil:
-			impls[i] = nil
-		case cb.impl == nil:
-			impls[i] = &encoder.CommandBuffer{}
-		default:
-			impls[i] = cb.impl
-		}
-	}
-	return impls
 }
 
 // submitLocked is Submit with q.mu held. Queue.WriteTexture calls it for the
@@ -269,7 +279,7 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*encoder.CommandBuffe
 // Poll returns the last completed submission index. Non-blocking.
 // All submissions with index <= the returned value have been completed by the GPU.
 func (q *Queue) Poll() uint64 {
-	if q.hal == nil {
+	if q == nil || q.hal == nil {
 		return 0
 	}
 	return q.hal.PollCompleted()
@@ -293,7 +303,10 @@ func (q *Queue) Poll() uint64 {
 //   - offset + data size must not exceed buffer size
 //
 // Matches Rust wgpu-core queue.rs:647-672 (validate_write_buffer_impl).
-func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
+func (q *Queue) WriteBuffer(buffer *resource.Buffer, offset uint64, data []byte) error {
+	if q == nil {
+		return fmt.Errorf("wgpu: WriteBuffer: queue or buffer is nil")
+	}
 	if q.test != nil {
 		if err := q.test.FaultWriteBuffer(); err != nil {
 			return err
@@ -310,13 +323,13 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 
 	// 1. Buffer must not be mapped (write to mapped buffer = data race).
 	// Rust: !matches!(&*buffer.map_state.lock(), BufferMapState::Idle)
-	if buffer.MapState() != MapStateUnmapped {
+	if buffer.MapState() != resource.MapStateUnmapped {
 		return fmt.Errorf("wgpu: WriteBuffer: buffer is currently mapped")
 	}
 
 	// 2. Buffer must have COPY_DST usage.
 	// Rust: buffer.check_usage(wgt::BufferUsages::COPY_DST)
-	if buffer.Usage()&BufferUsageCopyDst == 0 {
+	if buffer.Usage()&gputypes.BufferUsageCopyDst == 0 {
 		return fmt.Errorf("wgpu: WriteBuffer: buffer missing CopyDst usage")
 	}
 
@@ -341,7 +354,7 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 
 	// --- end VAL-A1 ---
 
-	halBuffer := buffer.impl.HALBuffer()
+	halBuffer := buffer.HALBuffer()
 	if halBuffer == nil {
 		return fmt.Errorf("wgpu: WriteBuffer: no HAL buffer")
 	}
@@ -355,7 +368,7 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 	// state (matching Rust suballocation.rs:437), allowing CopyBufferRegion as dst.
 	if q.pending != nil {
 		index := track.InvalidTrackerIndex
-		coreBuf := buffer.impl.CoreBuffer()
+		coreBuf := buffer.CoreBuffer()
 		if td := coreBuf.TrackingData(); td != nil {
 			index = td.Index()
 		}
@@ -371,14 +384,17 @@ func (q *Queue) WriteBuffer(buffer *Buffer, offset uint64, data []byte) error {
 // Resource barriers are computed from the texture's tracked CurrentUsage().
 // For GLES/Software backends, the write is performed immediately via HAL.
 func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
+	if q == nil {
+		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if q.hal == nil || dst == nil {
 		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
 	}
-	if dst.Texture != nil && dst.Texture.impl.ResolveHAL() == nil {
-		return ErrReleased
+	if dst.Texture != nil && dst.Texture.ResolveHAL() == nil {
+		return core.ErrReleased
 	}
 	if dst.Texture == nil {
 		return fmt.Errorf("wgpu: WriteTexture: destination texture is invalid")
@@ -397,9 +413,9 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if skip {
 		return nil
 	}
-	if dst.Texture.impl.NeedsStencilBlit(dst.Aspect) {
+	if dst.Texture.NeedsStencilBlit(dst.Aspect) {
 		if err := q.writeStencilLocked(dst, data, layout, size); err != nil {
-			return fmt.Errorf("wgpu: WriteTexture: %w", core.StencilCopyNeedsBlitError(dst.Texture.impl.Format(), err))
+			return fmt.Errorf("wgpu: WriteTexture: %w", core.StencilCopyNeedsBlitError(dst.Texture.Format(), err))
 		}
 		return nil
 	}
@@ -414,7 +430,7 @@ func (q *Queue) writeTextureLocked(dst *ImageCopyTexture, data []byte, layout *I
 	halSize := size.toHAL()
 
 	if q.pending != nil {
-		return q.pending.WriteTexture(dst.Texture.impl, halDst, data, &halLayout, &halSize)
+		return q.pending.WriteTexture(dst.Texture, halDst, data, &halLayout, &halSize)
 	}
 
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
@@ -428,16 +444,16 @@ const stencilUploadLabel = "stencil upload"
 // writeStencilLocked writes a validated upload into the stencil of a
 // combined depth-stencil format the backend cannot write, with q.mu held: the
 // data goes into a staging R8Uint texture like any upload, and the blit that
-// draws it into the stencil (stencilUpload) is submitted at once, after the
-// writes before it, as Dawn's OpenGL queue does
+// draws it into the stencil (stencilblit.Upload) is submitted at once, after
+// the writes before it, as Dawn's OpenGL queue does
 // (src/dawn/native/opengl/QueueGL.cpp WriteTextureImpl: WriteTextureImpl into
 // an R8Uint texture, BlitR8ToStencil into a new encoder, APISubmit).
 func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
 	d := q.device
 	if d == nil {
-		return ErrReleased
+		return core.ErrReleased
 	}
-	u, err := d.NewStencilUpload(dst.Texture.impl, dst.MipLevel, gputypes.Origin3D(dst.Origin), gputypes.Extent3D(*size))
+	u, err := d.NewStencilUpload(dst.Texture, dst.MipLevel, gputypes.Origin3D(dst.Origin), gputypes.Extent3D(*size))
 	if err != nil {
 		return err
 	}
@@ -449,7 +465,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 	// The encoder owns the staging texture from here on: every exit below
 	// discards, releases or submits it.
 	enc.Own(u.Staging())
-	temp := ImageCopyTexture{Texture: texturePub(u.Staging()), Aspect: gputypes.TextureAspectAll}
+	temp := ImageCopyTexture{Texture: u.Staging(), Aspect: gputypes.TextureAspectAll}
 	if err := q.writeTextureLocked(&temp, data, layout, size); err != nil {
 		enc.DiscardEncoding()
 		return fmt.Errorf("staging upload: %w", err)
@@ -478,7 +494,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 // a valid upload of size zero, which Rust drops before any side effect. A
 // texture without a core texture (test stubs) is not validated.
 func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) (skip bool, err error) {
-	if view, ok := dst.Texture.impl.CoreTexture().CopyView(dst.MipLevel, gputypes.Origin3D(dst.Origin), dst.Aspect); ok {
+	if view, ok := dst.Texture.CoreTexture().CopyView(dst.MipLevel, gputypes.Origin3D(dst.Origin), dst.Aspect); ok {
 		texelLayout := core.TexelCopyBufferLayout{
 			Offset:       layout.Offset,
 			BytesPerRow:  layout.BytesPerRow,
@@ -487,7 +503,7 @@ func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataL
 		if err := core.ValidateTextureWrite(view, texelLayout, uint64(len(data)), gputypes.Extent3D(*size)); err != nil {
 			return false, err
 		}
-		if err := dst.Texture.impl.CoreTexture().Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
+		if err := dst.Texture.CoreTexture().Device().RequireDepthTextureAndBufferCopies(view.Format); err != nil {
 			return false, err
 		}
 	}
@@ -512,7 +528,7 @@ func validateTextureWrite(dst *ImageCopyTexture, data []byte, layout *ImageDataL
 //
 // Only meaningful on Vulkan — other backends are no-ops.
 func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
-	if q.hal != nil {
+	if q != nil && q.hal != nil {
 		q.hal.SetSwapchainSuppressed(suppressed)
 	}
 }
@@ -522,6 +538,9 @@ func (q *Queue) SetSwapchainSuppressed(suppressed bool) {
 // Lock-free via atomic — safe to call from onZero callbacks during Triage
 // while Queue.mu is held by Submit. ADR-056 deadlock fix.
 func (q *Queue) LastSubmissionIndex() uint64 {
+	if q == nil {
+		return 0
+	}
 	return q.lastSubmissionIndex.Load()
 }
 
@@ -534,6 +553,45 @@ func (q *Queue) GetTimestampPeriod() float32 {
 		return 1.0
 	}
 	return q.hal.GetTimestampPeriod()
+}
+
+// HALQueue returns the queue's HAL queue, or nil when it has none. The root
+// package reads it for the device's maintenance and present paths.
+func (q *Queue) HALQueue() hal.Queue {
+	if q == nil {
+		return nil
+	}
+	return q.hal
+}
+
+// Pending returns the queue's pending-write batch, or nil when the backend
+// writes through the HAL directly.
+func (q *Queue) Pending() *pendingwrites.Writes {
+	if q == nil {
+		return nil
+	}
+	return q.pending
+}
+
+// Maintain recycles the staging buffers of completed submissions up to
+// completed. It is what the root device calls after a WaitIdle, so retired
+// batches do not outlive the wait.
+func (q *Queue) Maintain(completed uint64) {
+	if q == nil || q.pending == nil {
+		return
+	}
+	q.pending.Maintain(completed)
+}
+
+// Release releases the queue's resources: the pending-write batch and the
+// encoders it holds. It is a drop, not a destroy: the HAL queue belongs to
+// the device.
+func (q *Queue) Release() {
+	if q == nil || q.pending == nil {
+		return
+	}
+	q.pending.Destroy()
+	q.pending = nil
 }
 
 // destroyQueue returns the device's DestroyQueue, or nil if unavailable.
@@ -564,7 +622,7 @@ func validateCommandBufferForSubmit(cb *encoder.CommandBuffer, index int) error 
 	// 1. Check double-submit.
 	if cb.IsSubmitted() {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d: %w",
-			index, ErrSubmitCommandBufferInvalid)
+			index, core.ErrSubmitCommandBufferInvalid)
 	}
 
 	// 2. Check referenced buffers (matches Rust queue.rs:1780-1787).
@@ -611,7 +669,7 @@ func validateCommandBufferForSubmit(cb *encoder.CommandBuffer, index int) error 
 	for qs := range cb.UsedQuerySets() {
 		if qs.Core() == nil || qs.Core().IsDestroyed() {
 			return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed query set: %w",
-				index, ErrSubmitQuerySetDestroyed)
+				index, core.ErrSubmitQuerySetDestroyed)
 		}
 	}
 
@@ -637,13 +695,13 @@ func validateSubmitBufferCore(buf *resource.Buffer, index int) error {
 	if buf.IsReleased() &&
 		(coreBuf == nil || coreBuf.Ref == nil || coreBuf.IsDestroyed()) {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed buffer %q: %w",
-			index, buf.Label(), ErrSubmitBufferDestroyed)
+			index, buf.Label(), core.ErrSubmitBufferDestroyed)
 	}
 	// Check mapped state.
 	// Rust: BufferMapState::Idle is the only valid state for submit.
 	if buf.MapState() != resource.MapStateUnmapped {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references mapped buffer %q: %w",
-			index, buf.Label(), ErrSubmitBufferMapped)
+			index, buf.Label(), core.ErrSubmitBufferMapped)
 	}
 	return nil
 }
@@ -657,7 +715,7 @@ func validateSubmitBufferCore(buf *resource.Buffer, index int) error {
 func validateSubmitTexture(tex *resource.Texture, index int) error {
 	if tex.RecordedHAL() == nil {
 		return fmt.Errorf("wgpu: Submit: command buffer at index %d references destroyed texture: %w",
-			index, ErrSubmitTextureDestroyed)
+			index, core.ErrSubmitTextureDestroyed)
 	}
 	return nil
 }
@@ -936,21 +994,12 @@ func (q *Queue) recordAndTrackAllBarriers(
 	return barrierCB, nil
 }
 
-// release cleans up queue resources.
-func (q *Queue) release() {
-	if q.pending != nil {
-		q.pending.Destroy()
-		q.pending = nil
-	}
-}
-
 // releaseSubmittedInternal releases the frontend's own resources of every
 // submitted command buffer, once the submission holds their references.
 //
 // It lives here, next to its only caller, rather than with the command buffer
-// implementation: the buffers move to internal/encoder (ADR-070 S4) while the
-// queue stays in the root package until S9, and a free function over the public
-// wrapper cannot be called from, or live in, the destination.
+// implementation: a free function over the implementation handle cannot live
+// in the root package, which reaches the queue through this domain.
 func releaseSubmittedInternal(commandBuffers []*encoder.CommandBuffer) {
 	for _, cb := range commandBuffers {
 		if cb != nil {
