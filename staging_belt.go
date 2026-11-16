@@ -297,6 +297,20 @@ func (b *stagingBelt) allocateChunked(totalSize uint64, data []byte) (stagingAll
 	return stagingAllocation{buffer: first.buffer, offset: first.offset}, nil
 }
 
+// takeChunkedAllocations hands the chunk allocations of the last allocate
+// call to the caller when the write was split across staging buffers, and
+// resets the belt's bookkeeping. The caller issues one CopyBufferToBuffer per
+// entry. Returns an empty slice on the normal (single-buffer) path.
+//
+// The returned slice aliases the belt's own storage: it stays valid only until
+// the next allocate call, which is the same lifetime the caller had when it
+// read the field directly.
+func (b *stagingBelt) takeChunkedAllocations() []stagingChunkedAllocation {
+	chunks := b.chunkedAllocs
+	b.chunkedAllocs = b.chunkedAllocs[:0]
+	return chunks
+}
+
 // finish moves all active chunks and oversized buffers to closed state.
 // Called at flush() time when the command encoder is about to be submitted.
 // The submission index is not yet known — call setLastSubmissionIndex()

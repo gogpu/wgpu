@@ -208,9 +208,9 @@ func (pw *pendingWrites) writeBufferFor(ref *core.ResourceRef, buffer hal.Buffer
 	// Check if the allocation was chunked (BUG-VK-001).
 	// For chunked writes, we issue one CopyBufferToBuffer per chunk at
 	// the correct destination offset. Each chunk has its own staging buffer.
-	if len(pw.belt.chunkedAllocs) > 1 {
+	if chunks := pw.belt.takeChunkedAllocations(); len(chunks) > 1 {
 		dstOffset := offset
-		for _, chunk := range pw.belt.chunkedAllocs {
+		for _, chunk := range chunks {
 			copyRegion := [1]hal.BufferCopy{{
 				SrcOffset: chunk.offset,
 				DstOffset: dstOffset,
@@ -219,7 +219,6 @@ func (pw *pendingWrites) writeBufferFor(ref *core.ResourceRef, buffer hal.Buffer
 			enc.CopyBufferToBuffer(chunk.buffer, buffer, copyRegion[:])
 			dstOffset += chunk.size
 		}
-		pw.belt.chunkedAllocs = pw.belt.chunkedAllocs[:0]
 	} else {
 		// Normal (non-chunked) path: single CopyBufferToBuffer.
 		// Use pre-allocated pw.copyRegion to avoid heap escape through interface call.
