@@ -14,8 +14,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // publicPackages are the directories of the three public packages.
@@ -68,10 +70,11 @@ func goFiles(dir string, includeTests bool) []string {
 	return out
 }
 
-// parseFile parses one file.
+// parseFile parses one file. Comments are kept because the public-layer skip reads the standard generated
+// marker with ast.IsGenerated.
 func parseFile(path string) (*ast.File, *token.FileSet, error) {
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution|parser.ParseComments)
 	return f, fset, err
 }
 
@@ -209,21 +212,74 @@ func checkWhiteBoxChildTest(rep *Report, dir, rel string, f *ast.File, fset *tok
 		"a white-box test of %s imports internal/device; drive the seam with a fake (§15.10)", dir)
 }
 
-// allowlistFile is the explicit public-layer allowlist, relative to internal/layoutcheck.
+// allowlistFile is the explicit public-layer waiver file, relative to internal/layoutcheck.
 const allowlistFile = "publiclayer_allow.txt"
 
-// allowlistRel is the allowlist's module-relative path, used in every error message so a reader chasing a
+// allowlistRel is the waiver file's module-relative path, used in every error message so a reader chasing a
 // CI annotation opens the file that exists.
 const allowlistRel = dirInternal + "/layoutcheck/" + allowlistFile
 
-// loadAllowlist reads the explicit public-layer allowlist: `path:line<TAB>reason` lines. The rule is
-// exact-site, so an entry exempts the one finding at that file and line and nothing else; the retired
-// file-wide form (`path<TAB>reason`) is a format error, never an exemption. A missing file is an empty
-// allowlist: the list is optional, and its absence fails closed (more findings, never fewer). A malformed
-// line is returned as an error while the well-formed entries stay in the map, so a typo neither exempts
-// anything by accident nor costs the entries that are right.
-func loadAllowlist(root string) (map[string]string, error) {
-	out := map[string]string{}
+// allowEntry is one parsed waiver row. The key is path + symbol + construct; the other columns carry the
+// review evidence the gate prints and the CI audit reads (owner, card, expires).
+type allowEntry struct {
+	path      string
+	symbol    string
+	construct string
+	reason    string
+	owner     string
+	card      string
+	expires   string
+}
+
+// allowlist is the parsed waiver file: the entries by key and the recorded count limit.
+type allowlist struct {
+	entries  map[string]allowEntry
+	limit    int
+	hasLimit bool
+}
+
+// allowKey builds the waiver key: path + symbol + construct. The LINE is deliberately not part of it: an edit
+// above a flagged construct shifts its line, and a line-keyed entry would then either go stale undetected or
+// exempt whatever lands on the old line (PRACTICES-CONSENSUS O1; eco-architect F2). The checker prints the
+// live file:line as evidence in its report instead.
+func allowKey(path, symbol, construct string) string {
+	return path + "\t" + symbol + "\t" + construct
+}
+
+// lookup reports whether the waiver file names key. A nil or empty list exempts nothing.
+func (a *allowlist) lookup(key string) bool {
+	if a == nil {
+		return false
+	}
+	_, ok := a.entries[key]
+	return ok
+}
+
+// allowlistColumns is the data-row column count: path, symbol, construct, reason, owner, card, expires.
+const allowlistColumns = 7
+
+// constructKinds are the construct identifiers a waiver key may carry. They mirror the rule's construct ban.
+// `for` is a plain loop (ForStmt); it is its own kind so a plain loop is never exempted by a range entry.
+var constructKinds = map[string]bool{
+	"for":        true,
+	"range":      true,
+	"switch":     true,
+	"typeswitch": true,
+	"select":     true,
+	"defer":      true,
+	"go":         true,
+	"closure":    true,
+	"mapliteral": true,
+	"packagemap": true,
+}
+
+// loadAllowlist reads and validates the waiver file. A missing file is an empty list that exempts nothing and
+// is not an error (the rule then fails closed: more findings, never fewer). A present file must carry one
+// `limit: N` header and well-formed data rows. A malformed row, a duplicate key, an empty reason or a bad
+// expires field is a format error that fails in every phase, while the well-formed rows still apply, so a typo
+// never exempts more than a reviewed entry and never costs the entries that are right.
+func loadAllowlist(root string) (*allowlist, error) {
+	out := &allowlist{entries: map[string]allowEntry{}}
 	data, err := readTreeFile(filepath.Join(root, dirInternal, "layoutcheck", allowlistFile))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -231,53 +287,149 @@ func loadAllowlist(root string) (map[string]string, error) {
 		}
 		return out, fmt.Errorf("%s: %w", allowlistRel, err)
 	}
+	var errs []error
 	for i, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		key, reason, err := parseAllowEntry(line)
-		if err != nil {
-			return out, fmt.Errorf("%s:%d: %w", allowlistRel, i+1, err)
+		if err := loadAllowline(out, line); err != nil {
+			errs = append(errs, fmt.Errorf("%s:%d: %w", allowlistRel, i+1, err))
 		}
-		out[key] = reason
+	}
+	if !out.hasLimit {
+		errs = append(errs, fmt.Errorf("%s: missing the `limit: N` header; the count is gated, not implied", allowlistRel))
+	}
+	if len(errs) > 0 {
+		return out, errors.Join(errs...)
 	}
 	return out, nil
 }
 
-// parseAllowEntry splits one allowlist line into its exact-site key and its reason.
-func parseAllowEntry(line string) (key, reason string, err error) {
-	fields := strings.SplitN(line, "\t", 2)
-	key = strings.TrimSpace(fields[0])
-	if len(fields) < 2 || strings.TrimSpace(fields[1]) == "" {
-		return "", "", fmt.Errorf("%q: want `path:line<TAB>reason`", key)
+// loadAllowline parses one non-comment line: the single `limit:` header or one data row.
+func loadAllowline(out *allowlist, line string) error {
+	if strings.HasPrefix(strings.TrimSpace(line), "limit:") {
+		return loadLimitLine(out, line)
 	}
-	colon := strings.LastIndexByte(key, ':')
-	if colon <= 0 {
-		return "", "", fmt.Errorf("%q: want `path:line<TAB>reason`; a file-wide entry exempts nothing", key)
+	entry, err := parseAllowEntry(line)
+	if err != nil {
+		return err
 	}
-	n, convErr := strconv.Atoi(key[colon+1:])
-	if convErr != nil || n < 1 {
-		return "", "", fmt.Errorf("%q: %q is not a 1-based line number", key, key[colon+1:])
+	key := allowKey(entry.path, entry.symbol, entry.construct)
+	if _, dup := out.entries[key]; dup {
+		return fmt.Errorf("duplicate key %q; one key, one reviewed entry", key)
 	}
-	return key, strings.TrimSpace(fields[1]), nil
+	out.entries[key] = entry
+	return nil
+}
+
+// loadLimitLine parses the single `limit: N` header.
+func loadLimitLine(out *allowlist, line string) error {
+	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "limit:"))
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 0 {
+		return fmt.Errorf("limit: %q is not a non-negative integer", rest)
+	}
+	if out.hasLimit {
+		return fmt.Errorf("duplicate `limit:` header")
+	}
+	out.limit = n
+	out.hasLimit = true
+	return nil
+}
+
+// parseAllowEntry splits one data row into its seven columns and validates them.
+func parseAllowEntry(line string) (allowEntry, error) {
+	fields := strings.Split(line, "\t")
+	if len(fields) != allowlistColumns {
+		return allowEntry{}, fmt.Errorf("want %d tab-separated columns (path, symbol, construct, reason, owner, card, expires); got %d", allowlistColumns, len(fields))
+	}
+	e := allowEntry{
+		path:      strings.TrimSpace(fields[0]),
+		symbol:    strings.TrimSpace(fields[1]),
+		construct: strings.TrimSpace(fields[2]),
+		reason:    strings.TrimSpace(fields[3]),
+		owner:     strings.TrimSpace(fields[4]),
+		card:      strings.TrimSpace(fields[5]),
+		expires:   strings.TrimSpace(fields[6]),
+	}
+	switch {
+	case e.path == "":
+		return allowEntry{}, fmt.Errorf("empty path")
+	case e.symbol == "":
+		return allowEntry{}, fmt.Errorf("empty symbol; init and package-scope names are symbols too")
+	case !validConstruct(e.construct):
+		return allowEntry{}, fmt.Errorf("construct %q is not a kind or kind#N with N >= 2", e.construct)
+	case e.reason == "":
+		return allowEntry{}, fmt.Errorf("empty reason; a waiver states why the construct belongs where it is")
+	case e.owner == "":
+		return allowEntry{}, fmt.Errorf("empty owner")
+	case e.card == "":
+		return allowEntry{}, fmt.Errorf("empty card; name the card or the ADR section")
+	case !validExpires(e.expires):
+		return allowEntry{}, fmt.Errorf("expires %q is neither YYYY-MM-DD nor permanent", e.expires)
+	}
+	return e, nil
+}
+
+// validConstruct accepts a construct kind, or kind#N with N >= 2 (the first occurrence carries no ordinal).
+func validConstruct(s string) bool {
+	base := s
+	if i := strings.LastIndexByte(s, '#'); i >= 0 {
+		n, err := strconv.Atoi(s[i+1:])
+		if err != nil || n < 2 {
+			return false
+		}
+		base = s[:i]
+	}
+	return constructKinds[base]
+}
+
+// validExpires checks the FORMAT only: `YYYY-MM-DD` or `permanent`. The clock lives in the CI audit step
+// (tools/waiveraudit), never here: a date-based unit failure would red the tree overnight with no push behind
+// it, and this checker must answer the same on this tree next month (PRACTICES-CONSENSUS Amendment 2.2).
+func validExpires(s string) bool {
+	if s == "permanent" {
+		return true
+	}
+	if len(s) != len("2006-01-02") {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if i == 4 || i == 7 {
+			if s[i] != '-' {
+				return false
+			}
+			continue
+		}
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
 }
 
 // checkPublicLayer applies the public-layer rule of the layout report §2: a public package holds
 // declarations and pure projections only. The conservative first form fails on the constructs that can
-// never be a projection — a loop, a switch, defer/go, a closure, a map literal — and on a package-scope
-// map. Generated files (*_gen.go) are projections by construction and are skipped. The rule is a note
-// until the claims phase turns final, when it fails (§15.2).
+// never be a projection — a loop, a range, a switch, defer/go, a closure, a map literal — and on a
+// package-scope map. A file is skipped only when ast.IsGenerated reports true (the standard
+// `^// Code generated .* DO NOT EDIT\.$` marker before the first non-comment text, parsed with
+// parser.ParseComments); the `*_gen.go` suffix is never a skip, so a hand-written *_gen.go is checked like
+// any other file and the suffix stays reserved for generator output (PRACTICES-CONSENSUS O5; eco-architect
+// F3). The rule is a note until the claims phase turns final, when it fails (§15.2).
 //
-// An allowlist entry is one exact site, `path:line<TAB>reason`: it exempts the finding reported at that
-// file and that line, and no other. A second finding in the same file still fails at phase final, and a
-// new site — even on another line of a listed file — reds the gate, which is the point of the form: the
-// exemption names a line somebody reviewed, never a file that becomes a no-go area.
+// A waiver names one construct, never a site or a file. Its key is `path<TAB>symbol<TAB>construct[#n]`: the
+// enclosing declaration plus the construct kind, with an ordinal when one symbol carries several constructs
+// of the same kind. The line is not the key, so an unrelated edit above a construct does not invalidate the
+// review, and a different construct landing on the old line is not exempted (PRACTICES-CONSENSUS O1;
+// eco-architect F2).
 //
-// The six current entries all name wgputest/wgputest.go, and they exist for one reason: Option is
-// func(*config). The facade's With* must build closures over config, and Trace/Counts must guard their
-// mutex (the clone deep-copies the variable-length records). Those sites predate this window; the
-// API-level cleanup that removes them from the facade is carded before v1.0.
+// The waiver list is a reviewed set, not a no-go area. An entry whose key matches no finding is a failure in
+// every phase — the "consumed set" F1 asked for and F4's "every entry fires" in one mechanism — and the list
+// count may not exceed the `limit:` header. The CI audit (tools/waiveraudit) forbids growth against the PR
+// base and expires dated entries; content swaps are caught here by "every entry fires" and in review by the
+// owner/reason diff. A missing waiver file is an empty list and fails closed.
 //
 // The rule is a construct ban, not a proof that a public package's code is thin. Its known bypass is logic
 // written with none of the flagged constructs: a Lock/append/Unlock helper, or a method value where a
@@ -290,44 +442,108 @@ func parseAllowEntry(line string) (key, reason string, err error) {
 func checkPublicLayer(rep *Report, root string, final bool) {
 	allow, err := loadAllowlist(root)
 	if err != nil {
-		// The allowlist is part of the gate's configuration, so a malformed entry fails in every phase.
-		// The well-formed entries still apply: the list never exempts more than it says.
-		rep.addFailf(publicLayerAllowCheck, "", "", 0, "%v", err)
+		// The waiver list is part of the gate's configuration, so a malformed row fails in every phase.
+		// The well-formed rows still apply: the list never exempts more than it says.
+		rep.addFailf(publicLayerAllowCheck, "", allowlistRel, 0, "%v", err)
 	}
-	for _, dir := range publicPackages {
-		for _, path := range goFiles(filepath.Join(root, dir), false) {
-			checkPublicLayerFile(rep, root, allow, final, path)
+	if allow.hasLimit && len(allow.entries) > allow.limit {
+		rep.addFailf(publicLayerAllowCheck, "", allowlistRel, 0,
+			"%d entries exceed the recorded limit %d; a lead-approved change is a dated amendment, never a silent edit",
+			len(allow.entries), allow.limit)
+	}
+	consumed := map[string]bool{}
+	for _, f := range collectPublicLayerFindings(rep, root, final) {
+		if allow.lookup(f.key) {
+			consumed[f.key] = true
+			continue
 		}
+		reportLayerf(rep, final, publicLayerCheck, f.rel, f.line, "%s", f.message)
+	}
+	if rep.Summary != nil {
+		// The counters make "every entry fires" visible in the gate summary: the two numbers are equal
+		// exactly when every reviewed waiver matched a live construct.
+		rep.Summary["public-layer-waivers"] = len(allow.entries)
+		rep.Summary["public-layer-waivers-consumed"] = len(consumed)
+	}
+	reportUnusedWaivers(rep, allow, consumed)
+}
+
+// reportUnusedWaivers fails on every waiver whose key matched no finding. This is the consumed-set failure
+// eco-architect F1 found missing: without it a renamed or moved construct leaves a waiver that exempts
+// nothing, and the ADR would record a guarantee the checker does not make. It fails in every phase.
+func reportUnusedWaivers(rep *Report, allow *allowlist, consumed map[string]bool) {
+	if allow == nil {
+		return
+	}
+	stale := make([]string, 0, len(allow.entries))
+	for key := range allow.entries {
+		if !consumed[key] {
+			stale = append(stale, key)
+		}
+	}
+	sort.Strings(stale)
+	for _, key := range stale {
+		e := allow.entries[key]
+		rep.addFailf(publicLayerUnusedCheck, "", e.path, 0,
+			"waiver %q matches no finding: stale or unused (owner %s, reason: %s)", key, e.owner, e.reason)
 	}
 }
 
-// checkPublicLayerFile applies the rule to one file of a public package.
-func checkPublicLayerFile(rep *Report, root string, allow map[string]string, final bool, path string) {
-	rel := relPath(root, path)
-	if strings.HasSuffix(path, "_gen.go") {
-		return
+// layerFinding is one construct the public-layer rule flags, with its symbol-keyed waiver key.
+type layerFinding struct {
+	rel     string
+	line    int
+	key     string
+	message string
+}
+
+// collectPublicLayerFindings walks the three public packages and returns every flagged construct, unwaived
+// or not. The caller does the waiver matching so the consumed set is known in one place.
+func collectPublicLayerFindings(rep *Report, root string, final bool) []layerFinding {
+	var out []layerFinding
+	for _, dir := range publicPackages {
+		for _, path := range goFiles(filepath.Join(root, dir), false) {
+			out = append(out, collectPublicLayerFile(rep, root, final, path)...)
+		}
 	}
+	return out
+}
+
+// checkPublicLayerFile reports the unwaived findings of one file: the entry point the unit tests use.
+func checkPublicLayerFile(rep *Report, root string, allow *allowlist, final bool, path string) {
+	for _, f := range collectPublicLayerFile(rep, root, final, path) {
+		if allow.lookup(f.key) {
+			continue
+		}
+		reportLayerf(rep, final, publicLayerCheck, f.rel, f.line, "%s", f.message)
+	}
+}
+
+// collectPublicLayerFile applies the rule to one file of a public package. A generated file — one carrying
+// the standard `^// Code generated .* DO NOT EDIT\.$` marker before the first non-comment text — is skipped
+// via ast.IsGenerated. The suffix is not consulted: a hand-written *_gen.go is checked like any other file
+// (eco-architect F3).
+func collectPublicLayerFile(rep *Report, root string, final bool, path string) []layerFinding {
+	rel := relPath(root, path)
 	f, fset, err := parseFile(path)
 	if err != nil {
 		reportLayerf(rep, final, "ast-parse", rel, 0, "%v", err)
-		return
+		return nil
 	}
+	if ast.IsGenerated(f) {
+		return nil
+	}
+	counters := map[string]int{}
+	var out []layerFinding
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
-			checkLayerGenDecl(rep, allow, final, rel, d, fset)
+			out = append(out, collectLayerGenDecl(rel, d, fset, counters)...)
 		case *ast.FuncDecl:
-			checkLayerFunc(rep, allow, final, rel, d, fset)
+			out = append(out, collectLayerFunc(rel, d, fset, counters)...)
 		}
 	}
-}
-
-// reportLayerSitef records one public-layer finding unless the allowlist names this exact file and line.
-func reportLayerSitef(rep *Report, allow map[string]string, final bool, rel string, line int, format string, args ...any) {
-	if allow[fmt.Sprintf("%s:%d", rel, line)] != "" {
-		return
-	}
-	reportLayerf(rep, final, publicLayerCheck, rel, line, format, args...)
+	return out
 }
 
 // reportLayerf records one public-layer finding: a note while the phase is open, a failure at final.
@@ -339,67 +555,107 @@ func reportLayerf(rep *Report, final bool, check, file string, line int, format 
 	rep.addNotef(check, file, line, format, args...)
 }
 
-// checkLayerGenDecl reports a package-scope map, which a public package never holds.
-func checkLayerGenDecl(rep *Report, allow map[string]string, final bool, rel string, d *ast.GenDecl, fset *token.FileSet) {
+// collectLayerGenDecl collects a package-scope map, which a public package never holds. The variable name is
+// the symbol-less construct's defined identifier.
+func collectLayerGenDecl(rel string, d *ast.GenDecl, fset *token.FileSet, counters map[string]int) []layerFinding {
 	if d.Tok != token.VAR {
-		return
+		return nil
 	}
+	var out []layerFinding
 	for _, spec := range d.Specs {
 		vs, ok := spec.(*ast.ValueSpec)
 		if !ok {
 			continue
 		}
-		if _, isMap := vs.Type.(*ast.MapType); isMap {
-			reportLayerSitef(rep, allow, final, rel, fset.Position(vs.Pos()).Line,
-				"package-scope map in a public package; maps and registries belong to internal/**")
+		if _, isMap := vs.Type.(*ast.MapType); !isMap {
+			continue
 		}
+		out = append(out, layerFinding{
+			rel:     rel,
+			line:    fset.Position(vs.Pos()).Line,
+			key:     countingKey(counters, rel, packageMapSymbol(vs), "packagemap"),
+			message: "package-scope map in a public package; maps and registries belong to internal/**",
+		})
 	}
+	return out
 }
 
-// checkLayerFunc reports every construct of a public method that is logic rather than a projection.
-func checkLayerFunc(rep *Report, allow map[string]string, final bool, rel string, d *ast.FuncDecl, fset *token.FileSet) {
-	if d.Body == nil {
-		return
+// packageMapSymbol names the declaration a package-scope map belongs to: its first variable name.
+func packageMapSymbol(vs *ast.ValueSpec) string {
+	if len(vs.Names) > 0 {
+		return vs.Names[0].Name
 	}
+	return ""
+}
+
+// collectLayerFunc collects every construct of a public method that is logic rather than a projection.
+func collectLayerFunc(rel string, d *ast.FuncDecl, fset *token.FileSet, counters map[string]int) []layerFinding {
+	if d.Body == nil {
+		return nil
+	}
+	var out []layerFinding
 	ast.Inspect(d.Body, func(n ast.Node) bool {
-		if msg := layerViolation(n, d.Name.Name); msg != "" {
-			reportLayerSitef(rep, allow, final, rel, fset.Position(n.Pos()).Line, "%s", msg)
+		kind, msg := layerViolation(n, d.Name.Name)
+		if kind == "" {
+			return true
 		}
+		out = append(out, layerFinding{
+			rel:     rel,
+			line:    fset.Position(n.Pos()).Line,
+			key:     countingKey(counters, rel, d.Name.Name, kind),
+			message: msg,
+		})
 		return true
 	})
+	return out
+}
+
+// countingKey assigns the waiver key: path + symbol + construct, with `#2`, `#3`… when the same symbol
+// carries several flagged constructs of the same kind, numbered in AST order.
+func countingKey(counters map[string]int, path, symbol, construct string) string {
+	id := allowKey(path, symbol, construct)
+	counters[id]++
+	if n := counters[id]; n > 1 {
+		return id + "#" + strconv.Itoa(n)
+	}
+	return id
 }
 
 // publicLayerCheck is the check name of the public-layer rule.
 const publicLayerCheck = "public-layer"
 
-// publicLayerAllowCheck is the check name of the allowlist format rule.
+// publicLayerAllowCheck is the check name of the waiver-format and limit rules.
 const publicLayerAllowCheck = "public-layer-allow"
 
-// layerViolation describes the construct if it may not appear in a public method, and "" otherwise.
-func layerViolation(n ast.Node, funcName string) string {
+// publicLayerUnusedCheck is the check name of the stale/unused-waiver rule (eco-architect F1/F4).
+const publicLayerUnusedCheck = "public-layer-unused"
+
+// layerViolation describes the construct if it may not appear in a public method, and returns the empty kind
+// otherwise. The kind is the waiver construct identifier; the second return is the finding text.
+func layerViolation(n ast.Node, funcName string) (kind, msg string) {
 	switch node := n.(type) {
 	case *ast.ForStmt:
-		return fmt.Sprintf("loop in %s; a public method is one delegation, no logic", funcName)
+		return "for", fmt.Sprintf("loop in %s; a public method is one delegation, no logic", funcName)
 	case *ast.RangeStmt:
-		return fmt.Sprintf("range loop in %s; a public method is one delegation, no logic", funcName)
+		return "range", fmt.Sprintf("range loop in %s; a public method is one delegation, no logic", funcName)
 	case *ast.SwitchStmt:
-		return fmt.Sprintf("switch in %s; a public method is one delegation, no logic", funcName)
+		return "switch", fmt.Sprintf("switch in %s; a public method is one delegation, no logic", funcName)
 	case *ast.TypeSwitchStmt:
-		return fmt.Sprintf("type switch in %s; a public method is one delegation, no logic", funcName)
+		return "typeswitch", fmt.Sprintf("type switch in %s; a public method is one delegation, no logic", funcName)
 	case *ast.SelectStmt:
-		return fmt.Sprintf("select in %s; a public method is one delegation, no logic", funcName)
+		return "select", fmt.Sprintf("select in %s; a public method is one delegation, no logic", funcName)
 	case *ast.DeferStmt:
-		return fmt.Sprintf("defer in %s; cleanup registration belongs to internal/**", funcName)
+		return "defer", fmt.Sprintf("defer in %s; cleanup registration belongs to internal/**", funcName)
 	case *ast.GoStmt:
-		return fmt.Sprintf("go statement in %s; concurrency belongs to internal/**", funcName)
+		return "go", fmt.Sprintf("go statement in %s; concurrency belongs to internal/**", funcName)
 	case *ast.FuncLit:
-		return fmt.Sprintf("closure in %s; a public method is one delegation, no logic", funcName)
+		return "closure", fmt.Sprintf("closure in %s; a public method is one delegation, no logic", funcName)
 	case *ast.CompositeLit:
 		if _, isMap := node.Type.(*ast.MapType); isMap {
-			return fmt.Sprintf("map literal in %s; maps and registries belong to internal/**", funcName)
+			return "mapliteral", fmt.Sprintf("map literal in %s; maps and registries belong to internal/**", funcName)
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // checkPublicGoldens re-reads the signature-level API goldens: a public signature that names an internal

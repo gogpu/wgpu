@@ -1,16 +1,62 @@
-# Public-layer allowlist. One exact site per line: `path:line<TAB>reason`.
+# Public-layer waiver file. Reviewed exemptions from the construct ban of the public-layer rule
+# (internal/layoutcheck/astcheck.go). One data row per exempt construct, tab-separated:
 #
-# Exact means exact. An entry exempts the finding reported at that file and line and nothing else: a second
-# finding in the same file still fails at phase final, and a new site, even on another line of a listed
-# file, reds the gate. The retired file-wide form (`path<TAB>reason`) is a format error, never an exemption.
+#   path <TAB> symbol <TAB> construct[#n] <TAB> reason <TAB> owner <TAB> card <TAB> expires
 #
-# The six entries are the wgputest facade sites that predate this window; all six carry the same cause.
-# Option is func(*config): the facade's With* must build closures over config, and Trace/Counts must guard
-# their mutex. The clone deep-copies the variable-length records. The API-level cleanup that removes these
-# from the facade is carded before v1.0.
-wgputest/wgputest.go:74	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
-wgputest/wgputest.go:79	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
-wgputest/wgputest.go:95	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
-wgputest/wgputest.go:119	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
-wgputest/wgputest.go:281	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
-wgputest/wgputest.go:286	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0
+# The key is path + symbol + construct: the enclosing declaration (function/method name, `init`, or a
+# package-scope name) and the construct kind, with #2, #3... when one symbol carries several constructs of
+# the same kind. The line is NOT part of the key, so an edit above a construct does not invalidate the
+# review and a different construct on the old line is not exempted; the checker prints the live file:line
+# as evidence.
+#
+# An entry whose key matches no finding is a failure in every phase (a stale or unused waiver). A duplicate
+# key, an empty reason/owner/card or a bad `expires` is a format error in every phase. The entry count may
+# not exceed `limit:`, and the list grows only through a dated amendment (the CI audit forbids growth
+# against the PR base). `expires` is `YYYY-MM-DD` or `permanent`; the format is checked here, the clock in
+# tools/waiveraudit (a date-based unit failure would red the tree overnight with no push behind it).
+#
+# Groups: six wgputest facade rows (P2-API-032); 31 boundary conversions that cannot move into internal
+# because internal cannot import root (R5), carded for the generated-projection route (P2-API-034) or the
+# internal-mirror route (P2-API-035); four factory closures that are design, not debt (ADR-070 §15.10).
+limit: 41
+wgputest/wgputest.go	WithRecorder	closure	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0	wgpu	P2-API-032	permanent
+wgputest/wgputest.go	WithFaults	closure	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0	wgpu	P2-API-032	permanent
+wgputest/wgputest.go	Trace	defer	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0	wgpu	P2-API-032	permanent
+wgputest/wgputest.go	Counts	defer	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0	wgpu	P2-API-032	permanent
+wgputest/wgputest.go	clone	range	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0	wgpu	P2-API-032	permanent
+wgputest/wgputest.go	clone	range#2	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; API-level cleanup carded before v1.0	wgpu	P2-API-032	permanent
+descriptor.go	toHAL	range	(*RenderPassDescriptor).toHAL walks ColorAttachments and unwraps each view's HAL handle into a hal.RenderPassDescriptor; the public descriptor is root-defined and internal cannot import it, so the projection stays beside the type (P2-API-034/P2-API-035)	wgpu	P2-API-034/P2-API-035	permanent
+device_browser.go	CreatePipelineLayout	range	(*Device).CreatePipelineLayout collects each public BindGroupLayout's browser ref into the js.Value slice browser.BuildPipelineLayoutDescriptor takes; the JS binding types are root's boundary	wgpu	P2-API-034/P2-API-035	permanent
+device_browser.go	convertBindGroupLayoutEntries	range	maps []gputypes.BindGroupLayoutEntry to []browser.BindGroupLayoutEntryJS, including the buffer/sampler/texture/storage layouts; a browser-descriptor projection only the public boundary performs	wgpu	P2-API-034/P2-API-035	permanent
+device_browser.go	convertBindGroupEntries	range	maps []BindGroupEntry to []browser.BindGroupEntryJS, unwrapping each public Buffer/Sampler/TextureView to its browser ref; the wrapper's unexported impl is root-only	wgpu	P2-API-034/P2-API-035	permanent
+device_browser.go	convertVertexBufferLayouts	range	outer loop maps each gputypes.VertexBufferLayout to browser.VertexBufferLayoutJS (stride, step mode); a browser-descriptor projection at the public boundary	wgpu	P2-API-034/P2-API-035	permanent
+device_browser.go	convertVertexBufferLayouts	range#2	inner loop maps each VertexAttribute to browser.VertexAttributeJS (format, offset, shader location); same browser-descriptor projection	wgpu	P2-API-034/P2-API-035	permanent
+device_browser.go	stencilOpToJS	switch	maps gputypes.StencilOperation constants to the WebGPU JS operation strings; a switch over the public enum with no internal counterpart	wgpu	P2-API-034/P2-API-035	permanent
+device_browser.go	convertFragmentState	range	maps each public ColorTargetState to browser.ColorTargetStateJS, including its BlendState; a browser-descriptor projection	wgpu	P2-API-034/P2-API-035	permanent
+device_native.go	CreatePipelineLayout	range	(*Device).CreatePipelineLayout unwraps each public BindGroupLayout's resource impl into the []*resource.BindGroupLayout the internal device call takes; root owns the impl field	wgpu	P2-API-034/P2-API-035	permanent
+device_native.go	CreateBindGroup	range	(*Device).CreateBindGroup converts each public BindGroupEntry through bindGroupEntry into the internal device entry; the public wrapper's impl is root-only	wgpu	P2-API-034/P2-API-035	permanent
+device_rust.go	CreateBindGroupLayout	range	maps each public BindGroupLayoutEntry through convertBindGroupLayoutEntry to the wgpu-native rwgpu entry; the rust binding types are the public boundary	wgpu	P2-API-034/P2-API-035	permanent
+device_rust.go	CreatePipelineLayout	range	collects each public BindGroupLayout's Rust ref into the []*rwgpu.BindGroupLayout the wgpu-native call takes	wgpu	P2-API-034/P2-API-035	permanent
+device_rust.go	CreateBindGroup	range	maps each public BindGroupEntry through convertBindGroupEntry to the wgpu-native rwgpu entry	wgpu	P2-API-034/P2-API-035	permanent
+device_rust.go	convertVertexBufferLayouts	range	outer loop maps each gputypes.VertexBufferLayout to rwgpu.VertexBufferLayout (stride, step mode, attribute count); the C-style pointer layout is the wgpu-native boundary	wgpu	P2-API-034/P2-API-035	permanent
+device_rust.go	convertVertexBufferLayouts	range#2	inner loop copies each VertexAttribute into a Go slice whose backing array crosses to C by unsafe.Pointer; same wgpu-native boundary	wgpu	P2-API-034/P2-API-035	permanent
+device_rust.go	convertFragmentState	range	maps each public ColorTargetState to rwgpu.ColorTargetState, including its BlendState; a wgpu-native descriptor projection	wgpu	P2-API-034/P2-API-035	permanent
+encoder.go	encoderRenderPassDescriptor	range	builds the encoder's mirror descriptor by walking public ColorAttachments and unwrapping each view through encoderTextureView; root owns the wrapper's impl	wgpu	P2-API-034/P2-API-035	permanent
+encoder_browser.go	encoderRenderPassDescriptor	range	the same mirror conversion on the browser context: public ColorAttachments to encoder.RenderPassColorAttachment with browser refs	wgpu	P2-API-034/P2-API-035	permanent
+encoder_convert.go	encoderBufferTextureCopies	range	maps []BufferTextureCopy to []encoder.BufferTextureCopy (buffer layout, texture base, size); a public-to-internal copy-region projection	wgpu	P2-API-034/P2-API-035	permanent
+encoder_convert.go	encoderTextureCopies	range	maps []TextureCopy to []encoder.TextureCopy (source, destination, size); a public-to-internal copy-region projection	wgpu	P2-API-034/P2-API-035	permanent
+encoder_convert.go	encoderTextureBarriers	range	maps []TextureBarrier to []encoder.TextureBarrier (texture, range, usage transition); a public-to-internal projection	wgpu	P2-API-034/P2-API-035	permanent
+encoder_rust.go	encoderRenderPassDescriptor	range	the same mirror conversion on the rust context: public ColorAttachments to encoder.RenderPassColorAttachment	wgpu	P2-API-034/P2-API-035	permanent
+pipeline_defaults.go	normalizeColorTargets	range	copies each public ColorTargetState, normalizing a non-nil BlendState through normalizeBlendComponent and leaving a nil blend nil; the zero-value contract is public	wgpu	P2-API-034/P2-API-035	permanent
+queue.go	submitCommandBuffers	range	unwraps []*CommandBuffer into []*encoder.CommandBuffer for the submit path, mapping a nil and a zero-value wrapper to the exact pre-move destinations	wgpu	P2-API-034/P2-API-035	permanent
+queue.go	submitCommandBuffers	switch	distinguishes a nil *CommandBuffer, a zero-value wrapper (empty implementation) and a live wrapper; the zero-value semantics are the public API's	wgpu	P2-API-034/P2-API-035	permanent
+queue_browser.go	Submit	range	(*Queue).Submit collects live browser command-buffer refs into the js.Value array the browser submit takes, skipping nil, zero-value and released buffers	wgpu	P2-API-034/P2-API-035	permanent
+queue_rust.go	Submit	range	(*Queue).Submit unwraps each non-nil public CommandBuffer into the []*encoder.CommandBuffer the wgpu-native submit takes	wgpu	P2-API-034/P2-API-035	permanent
+renderbundle_execute.go	ExecuteBundles	range	(*RenderPassEncoder).ExecuteBundles unwraps []*RenderBundle into []*encoder.RenderBundle, preserving the zero-value bundle's documented message	wgpu	P2-API-034/P2-API-035	permanent
+surface_native.go	createHALSurfaces	range	calls each enabled backend's Instance.CreateSurface for the target and collects the created hal.Surface per backend; the HAL surface map is the public boundary	wgpu	P2-API-034/P2-API-035	permanent
+surface_native.go	halTarget	switch	maps the public SurfaceTargetUnsafe kind to hal.SurfaceTargetKind; internal cannot name the public target type, so the projection stays beside it	wgpu	P2-API-034/P2-API-035	permanent
+surface_rust_linux.go	createPlatformSurfaceTarget	switch	maps the public Xlib/Wayland target kind to the wgpu-native CreateSurfaceFromXlibWindow/CreateSurfaceFromWaylandSurface call; the rust binding is the public boundary	wgpu	P2-API-034/P2-API-035	permanent
+wgputest_factory.go	init	closure	The bridge contract (internal/wgputestbridge/bridge.go:4-9): "Go does not let a package construct a type with unexported fields from another package ... The root package registers a Factory ... here at init." This init closure registers the HAL accessor; root-side by construction (ADR-070 §15.10)	wgpu	ADR-070 §15.10	permanent
+wgputest_factory.go	init	closure#2	Same bridge contract (bridge.go:4-9): this second init closure registers the device-from-HAL factory, type-asserts the HAL device/queue and calls the root newDeviceFromHAL, which internal cannot reach (ADR-070 §15.10)	wgpu	ADR-070 §15.10	permanent
+wgputest_factory.go	newTestDeviceFactory	closure	The factory closure asserts the bridge's opaque device/queue to hal.Device/hal.Queue, builds the hooks, wraps through the root newDeviceFromHAL and returns root *wgpu.Device/*wgpu.Queue: the bridge returns root types (bridge.go:4-9), so the factory is root-side (ADR-070 §15.10)	wgpu	ADR-070 §15.10	permanent
+wgputest_factory.go	newTestDeviceFactory	closure#2	The returned cleanup closure is the second literal; it calls device.Release() on the root wrapper, which internal cannot name (ADR-070 §15.10)	wgpu	ADR-070 §15.10	permanent

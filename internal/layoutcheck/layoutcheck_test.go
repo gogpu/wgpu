@@ -937,146 +937,299 @@ func linesWith(t *testing.T, src, marker string) []int {
 	return lines
 }
 
-// fixtureSites names the six allowlist entries of the fixture, in source order.
-func fixtureSites(t *testing.T, src string) []string {
-	t.Helper()
-	var sites []string
-	add := func(markers ...string) {
-		for _, marker := range markers {
-			for _, line := range linesWith(t, src, marker) {
-				sites = append(sites, publicLayerFixturePath+":"+strconv.Itoa(line))
-			}
-		}
-	}
-	add("return func(c *config) { c.recorder = r }", "return func(c *config) { c.faults = f }",
-		"defer r.mu.Unlock()", "for i := range")
-	return sites
+// waiverRow renders one waiver data row: path, symbol, construct, reason, owner, card, expires.
+func waiverRow(path, symbol, construct, reason, owner, card, expires string) string {
+	return strings.Join([]string{path, symbol, construct, reason, owner, card, expires}, "\t")
 }
 
-// allowlistBody renders exact-site entries, one per line.
-func allowlistBody(sites []string) string {
+// waiverFile renders a waiver file: a limit header and the given rows.
+func waiverFile(limit int, rows ...string) string {
 	var b strings.Builder
-	for _, site := range sites {
-		b.WriteString(site)
-		b.WriteString("\t")
-		b.WriteString(publicLayerAllowReason)
+	b.WriteString("limit: " + strconv.Itoa(limit) + "\n")
+	for _, row := range rows {
+		b.WriteString(row)
 		b.WriteString("\n")
 	}
 	return b.String()
 }
 
-// TestPublicLayerAllowlistExactSites proves the rule both ways on the fixture: without a list the file
-// reports the six constructs, and with the exact-site list they all pass at phase final.
-func TestPublicLayerAllowlistExactSites(t *testing.T) {
-	src := publicLayerFixture()
-	sites := fixtureSites(t, src)
-	if len(sites) != 6 {
-		t.Fatalf("the fixture yields %d sites, want the six the allowlist covers: %v", len(sites), sites)
+// fixtureWaiverRows names the six constructs of the fixture, in source order: the two Option closures, the
+// two mutex defers and the two ranges in clone.
+func fixtureWaiverRows() []string {
+	return []string{
+		waiverRow(publicLayerFixturePath, "WithRecorder", "closure", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "WithFaults", "closure", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "Trace", "defer", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "Counts", "defer", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "clone", "range", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "clone", "range#2", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
 	}
+}
+
+// TestPublicLayerWaiverExactSites proves the rule both ways on the fixture: without a list the file reports
+// the six constructs, and with the six symbol-keyed waivers they all pass at phase final, every one consumed.
+func TestPublicLayerWaiverExactSites(t *testing.T) {
+	src := publicLayerFixture()
+	rows := fixtureWaiverRows()
 	root := writeTree(t, map[string]string{
 		publicLayerFixturePath:                  src,
-		"internal/layoutcheck/" + allowlistFile: allowlistBody(sites),
+		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
 	})
 
 	rep := &Report{Summary: map[string]int{}}
 	checkPublicLayer(rep, root, true)
 	if len(rep.Failures) != 0 {
-		t.Fatalf("phase final reports listed sites: %v", rep.Failures)
+		t.Fatalf("phase final reports waived sites or a stale waiver: %v", rep.Failures)
 	}
 
 	empty := writeTree(t, map[string]string{publicLayerFixturePath: src})
 	rep = &Report{Summary: map[string]int{}}
 	checkPublicLayer(rep, empty, true)
-	if len(rep.Failures) != len(sites) {
-		t.Fatalf("without a list the fixture reports %d findings, want the %d listed sites", len(rep.Failures), len(sites))
+	if len(rep.Failures) != len(rows) {
+		t.Fatalf("without a list the fixture reports %d findings, want the %d waived sites", len(rep.Failures), len(rows))
 	}
 }
 
-// TestPublicLayerAllowlistExactSiteOnly proves an entry exempts its line only: a seventh finding on
-// another line of the same listed file still fails at phase final.
-func TestPublicLayerAllowlistExactSiteOnly(t *testing.T) {
+// TestPublicLayerWaiverExactSiteOnly proves a waiver exempts its key only: a seventh construct (the Extra
+// range) in the same file still fails at phase final, and the checker names its live line as evidence.
+func TestPublicLayerWaiverExactSiteOnly(t *testing.T) {
 	src := publicLayerFixture() + publicLayerExtra()
-	seventh := linesWith(t, src, "for range t.Passes")[0]
+	extra := linesWith(t, src, "for range t.Passes")[0]
+	rows := fixtureWaiverRows()
 	root := writeTree(t, map[string]string{
 		publicLayerFixturePath:                  src,
-		"internal/layoutcheck/" + allowlistFile: allowlistBody(fixtureSites(t, src)),
+		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
 	})
 	rep := &Report{Summary: map[string]int{}}
 	checkPublicLayer(rep, root, true)
 	if len(rep.Failures) != 1 {
-		t.Fatalf("phase final reports %d findings, want the one unlisted site: %v", len(rep.Failures), rep.Failures)
+		t.Fatalf("phase final reports %d findings, want the one unwaived construct: %v", len(rep.Failures), rep.Failures)
 	}
-	if got := rep.Failures[0]; got.Line != seventh || got.File != publicLayerFixturePath {
-		t.Fatalf("the failure names %s:%d, want %s:%d", got.File, got.Line, publicLayerFixturePath, seventh)
+	if got := rep.Failures[0]; got.Line != extra || got.File != publicLayerFixturePath {
+		t.Fatalf("the failure names %s:%d, want %s:%d", got.File, got.Line, publicLayerFixturePath, extra)
 	}
 }
 
-// TestPublicLayerAllowlistRejectsFileWideEntry proves a file-wide entry is a format error, in every phase,
-// and that it exempts nothing: the six constructs are still reported at phase final.
-func TestPublicLayerAllowlistRejectsFileWideEntry(t *testing.T) {
-	for _, entry := range []string{
-		publicLayerFixturePath + "\tfile-wide, the retired form",
-		publicLayerFixturePath + ":0\tzero is not a line",
-		publicLayerFixturePath + ":x\tnot a number",
-		publicLayerFixturePath + ":12",
-	} {
-		root := writeTree(t, map[string]string{"internal/layoutcheck/" + allowlistFile: entry + "\n"})
-		if _, err := loadAllowlist(root); err == nil {
-			t.Fatalf("loadAllowlist accepted %q", entry)
-		}
+// malformedWaiverCases are rows that must be format errors in every phase.
+func malformedWaiverCases() []struct{ name, row string } {
+	return []struct{ name, row string }{
+		{"too few columns", publicLayerFixturePath + "\tclone\trange\ttoo few"},
+		{"empty reason", waiverRow(publicLayerFixturePath, "clone", "range", "", "wgpu", "P2-API-032", "permanent")},
+		{"empty owner", waiverRow(publicLayerFixturePath, "clone", "range", "r", "", "P2-API-032", "permanent")},
+		{"empty card", waiverRow(publicLayerFixturePath, "clone", "range", "r", "wgpu", "", "permanent")},
+		{"bad construct", waiverRow(publicLayerFixturePath, "clone", "loop", "r", "wgpu", "P2-API-032", "permanent")},
+		{"bad ordinal", waiverRow(publicLayerFixturePath, "clone", "range#1", "r", "wgpu", "P2-API-032", "permanent")},
+		{"bad expires", waiverRow(publicLayerFixturePath, "clone", "range", "r", "wgpu", "P2-API-032", "2026-13-40")},
+		{"missing expires", waiverRow(publicLayerFixturePath, "clone", "range", "r", "wgpu", "P2-API-032", "")},
 	}
+}
 
-	src := publicLayerFixture()
+// TestPublicLayerWaiverFormatErrorsRed proves every malformed-row class is a format failure in both phases:
+// a bad column count, an empty reason/owner/card, an unknown construct, a bad ordinal, and a bad or missing
+// expires.
+func TestPublicLayerWaiverFormatErrorsRed(t *testing.T) {
+	for _, tc := range malformedWaiverCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeTree(t, map[string]string{"internal/layoutcheck/" + allowlistFile: waiverFile(1, tc.row)})
+			if _, err := loadAllowlist(root); err == nil {
+				t.Fatalf("loadAllowlist accepted %q", tc.row)
+			}
+			for _, final := range []bool{false, true} {
+				rep := &Report{Summary: map[string]int{}}
+				checkPublicLayer(rep, root, final)
+				if !failureContains(rep.Failures, publicLayerAllowCheck) {
+					t.Fatalf("phase final=%v did not red the format rule: %v", final, rep.Failures)
+				}
+			}
+		})
+	}
+}
+
+// TestPublicLayerWaiverMalformedExemptsNothing proves a malformed row exempts nothing: a row that would
+// name a live construct but carries six columns is a format error and the constructs are all still reported.
+func TestPublicLayerWaiverMalformedExemptsNothing(t *testing.T) {
+	bad := strings.Join([]string{publicLayerFixturePath, "clone", "range", "reason", "wgpu", "P2-API-032"}, "\t")
 	root := writeTree(t, map[string]string{
-		publicLayerFixturePath:                  src,
-		"internal/layoutcheck/" + allowlistFile: publicLayerFixturePath + "\tfile-wide, the retired form\n",
+		publicLayerFixturePath:                  publicLayerFixture(),
+		"internal/layoutcheck/" + allowlistFile: waiverFile(1, bad),
 	})
 	rep := &Report{Summary: map[string]int{}}
 	checkPublicLayer(rep, root, true)
-	format, sites := 0, 0
+	sites := 0
 	for _, f := range rep.Failures {
-		switch f.Check {
-		case publicLayerAllowCheck:
-			format++
-		case publicLayerCheck:
+		if f.Check == publicLayerCheck {
 			sites++
 		}
 	}
-	if format != 1 {
-		t.Fatalf("a file-wide entry produced %d format failures, want one: %v", format, rep.Failures)
+	if sites != len(fixtureWaiverRows()) {
+		t.Fatalf("a malformed row exempted something: %d site findings, want all %d", sites, len(fixtureWaiverRows()))
 	}
-	if sites != len(fixtureSites(t, src)) {
-		t.Fatalf("a file-wide entry exempted something: %d site findings, want all %d", sites, len(fixtureSites(t, src)))
+}
+
+// TestPublicLayerWaiverDuplicateKeyReds proves a duplicate key is a format error in both phases.
+func TestPublicLayerWaiverDuplicateKeyReds(t *testing.T) {
+	row := waiverRow(publicLayerFixturePath, "clone", "range", "r", "wgpu", "P2-API-032", "permanent")
+	root := writeTree(t, map[string]string{
+		publicLayerFixturePath:                  publicLayerFixture(),
+		"internal/layoutcheck/" + allowlistFile: waiverFile(2, row, row),
+	})
+	if _, err := loadAllowlist(root); err == nil {
+		t.Fatalf("loadAllowlist accepted a duplicate key")
+	}
+	for _, final := range []bool{false, true} {
+		rep := &Report{Summary: map[string]int{}}
+		checkPublicLayer(rep, root, final)
+		if !failureContains(rep.Failures, publicLayerAllowCheck) {
+			t.Fatalf("phase final=%v did not red the duplicate key: %v", final, rep.Failures)
+		}
+	}
+}
+
+// TestPublicLayerWaiverUnusedEntryReds proves a waiver whose key matches no finding is a failure in every
+// phase: F1's consumed set and F4's "every entry fires" in one mechanism.
+func TestPublicLayerWaiverUnusedEntryReds(t *testing.T) {
+	rows := fixtureWaiverRows()
+	rows = append(rows, waiverRow(publicLayerFixturePath, "NoSuchSymbol", "range", "not a live construct", "wgpu", "P2-API-032", "permanent"))
+	root := writeTree(t, map[string]string{
+		publicLayerFixturePath:                  publicLayerFixture(),
+		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
+	})
+	for _, final := range []bool{false, true} {
+		rep := &Report{Summary: map[string]int{}}
+		checkPublicLayer(rep, root, final)
+		if !failureContains(rep.Failures, publicLayerUnusedCheck) {
+			t.Fatalf("phase final=%v did not red the unused waiver: %v", final, rep.Failures)
+		}
+	}
+}
+
+// TestPublicLayerWaiverOverLimitReds proves an entry count above the `limit:` header fails in both phases.
+func TestPublicLayerWaiverOverLimitReds(t *testing.T) {
+	rows := fixtureWaiverRows()
+	root := writeTree(t, map[string]string{
+		publicLayerFixturePath:                  publicLayerFixture(),
+		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows)-1, rows...),
+	})
+	for _, final := range []bool{false, true} {
+		rep := &Report{Summary: map[string]int{}}
+		checkPublicLayer(rep, root, final)
+		if !failureContains(rep.Failures, "exceed the recorded limit") {
+			t.Fatalf("phase final=%v did not red the over-limit list: %v", final, rep.Failures)
+		}
+	}
+}
+
+// TestPublicLayerWaiverLineShiftKeepsEntry is the F2 fix: an edit above a construct shifts its line, and a
+// symbol-keyed waiver still exempts it. A line-keyed entry would have gone stale here.
+func TestPublicLayerWaiverLineShiftKeepsEntry(t *testing.T) {
+	src := publicLayerFixture()
+	before := linesWith(t, src, "return func(c *config) { c.recorder = r }")[0]
+	shifted := strings.Replace(src, "package wgputest\n", "package wgputest\n\n// an edit above every construct\n\nvar shiftPad = 0\n", 1)
+	after := linesWith(t, shifted, "return func(c *config) { c.recorder = r }")[0]
+	if after <= before {
+		t.Fatalf("the fixture did not shift a construct line (%d -> %d)", before, after)
+	}
+	rows := fixtureWaiverRows()
+	root := writeTree(t, map[string]string{
+		publicLayerFixturePath:                  shifted,
+		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
+	})
+	rep := &Report{Summary: map[string]int{}}
+	checkPublicLayer(rep, root, true)
+	if len(rep.Failures) != 0 {
+		t.Fatalf("a waiver went stale after a line shift: %v", rep.Failures)
+	}
+}
+
+// TestPublicLayerWaiverDifferentConstructNotExempted proves the key carries the construct kind: a switch
+// waiver does not exempt a range on the same symbol, and is itself reported unused.
+func TestPublicLayerWaiverDifferentConstructNotExempted(t *testing.T) {
+	rows := fixtureWaiverRows()
+	rows = append(rows, waiverRow(publicLayerFixturePath, "Extra", "switch", "wrong kind", "wgpu", "P2-API-032", "permanent"))
+	root := writeTree(t, map[string]string{
+		publicLayerFixturePath:                  publicLayerFixture() + publicLayerExtra(),
+		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
+	})
+	rep := &Report{Summary: map[string]int{}}
+	checkPublicLayer(rep, root, true)
+	if !failureContains(rep.Failures, "range loop in Extra") {
+		t.Fatalf("a switch waiver exempted a range: %v", rep.Failures)
+	}
+	if !failureContains(rep.Failures, publicLayerUnusedCheck) {
+		t.Fatalf("the wrong-kind waiver was not reported unused: %v", rep.Failures)
+	}
+}
+
+// TestPublicLayerGeneratedMarker covers F3: the skip is ast.IsGenerated (the standard generated marker
+// before the first non-comment text), never the *_gen.go suffix. A hand-written x_gen.go is checked; a
+// marked file is skipped; a marker placed after code does not exempt.
+func TestPublicLayerGeneratedMarker(t *testing.T) {
+	const banned = "func Gen() int {\n\tfor range []int{1} {\n\t\treturn 1\n\t}\n\treturn 0\n}\n"
+	cases := []struct {
+		name      string
+		file      string
+		wantFails int
+	}{
+		{
+			name:      "hand-written x_gen.go is checked",
+			file:      "package wgpu\n\n" + banned,
+			wantFails: 1,
+		},
+		{
+			name:      "marker before the package skips",
+			file:      "// Code generated by test. DO NOT EDIT.\n\npackage wgpu\n\n" + banned,
+			wantFails: 0,
+		},
+		{
+			name:      "marker after code does not exempt",
+			file:      "package wgpu\n\n// Code generated by test. DO NOT EDIT.\n\n" + banned,
+			wantFails: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeTree(t, map[string]string{"x_gen.go": tc.file})
+			rep := &Report{Summary: map[string]int{}}
+			checkPublicLayer(rep, root, true)
+			sites := 0
+			for _, f := range rep.Failures {
+				if f.Check == publicLayerCheck {
+					sites++
+				}
+			}
+			if sites != tc.wantFails {
+				t.Fatalf("%s: %d public-layer findings, want %d: %v", tc.name, sites, tc.wantFails, rep.Failures)
+			}
+		})
 	}
 }
 
 // TestPublicLayerWGpuTestSites is the phase-final simulation on the real facade: the file holds exactly the
-// six reviewed sites, every one of them is listed, and with the committed list the file is clean at final.
+// six reviewed constructs, every one is waived, and with the committed file the file is clean at final.
 func TestPublicLayerWGpuTestSites(t *testing.T) {
 	root := filepath.Join("..", "..")
 	path := filepath.Join(root, publicLayerFixturePath)
-	rep := &Report{Summary: map[string]int{}}
-	checkPublicLayerFile(rep, root, map[string]string{}, true, path)
-	if len(rep.Failures) != 6 {
-		lines := make([]string, 0, len(rep.Failures))
-		for _, f := range rep.Failures {
-			lines = append(lines, f.String())
+	findings := collectPublicLayerFile(&Report{Summary: map[string]int{}}, root, true, path)
+	if len(findings) != 6 {
+		lines := make([]string, 0, len(findings))
+		for _, f := range findings {
+			lines = append(lines, f.key)
 		}
-		t.Fatalf("the facade reports %d unexempted sites, want the six reviewed ones:\n%s", len(rep.Failures), strings.Join(lines, "\n"))
+		t.Fatalf("the facade holds %d constructs, want the six waived ones:\n%s", len(findings), strings.Join(lines, "\n"))
 	}
 	listed, err := loadAllowlist(root)
 	if err != nil {
 		t.Fatalf("loadAllowlist: %v", err)
 	}
-	for _, f := range rep.Failures {
-		if listed[f.File+":"+strconv.Itoa(f.Line)] == "" {
-			t.Errorf("site %s:%d is not in the allowlist", f.File, f.Line)
+	for _, f := range findings {
+		if !listed.lookup(f.key) {
+			t.Errorf("construct %q at %s:%d is not in the waiver file", f.key, f.rel, f.line)
 		}
 	}
-	rep = &Report{Summary: map[string]int{}}
+	rep := &Report{Summary: map[string]int{}}
 	checkPublicLayerFile(rep, root, listed, true, path)
 	if len(rep.Failures) != 0 {
-		t.Fatalf("phase final still reports listed sites: %v", rep.Failures)
+		t.Fatalf("phase final still reports waived constructs: %v", rep.Failures)
 	}
 }
 
@@ -1122,22 +1275,31 @@ func (t *Trace) each(f func(Pass)) {
 	}
 }
 
-// TestPublicLayerAllowlistFile pins the committed list's shape: six entries, all the facade file, one
-// shared reason. A seventh entry is a reviewed decision, not a drive-by exemption.
-func TestPublicLayerAllowlistFile(t *testing.T) {
+// TestPublicLayerWaiverFile pins the committed waiver file's shape: the recorded limit, the entry count, and
+// the card groups the review approved (6 wgputest P2-API-032, 31 conversion P2-API-034/P2-API-035, 4 factory
+// ADR-070 §15.10). A changed count is a reviewed decision, not a drive-by edit.
+func TestPublicLayerWaiverFile(t *testing.T) {
 	listed, err := loadAllowlist(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("loadAllowlist: %v", err)
 	}
-	if len(listed) != 6 {
-		t.Fatalf("the allowlist holds %d entries, want the six reviewed sites", len(listed))
+	if !listed.hasLimit || listed.limit != 41 {
+		t.Fatalf("the waiver file records limit %d (present=%v), want 41", listed.limit, listed.hasLimit)
 	}
-	for site, reason := range listed {
-		if !strings.HasPrefix(site, publicLayerFixturePath+":") {
-			t.Errorf("entry %q is outside %s; the list covers only the reviewed facade sites", site, publicLayerFixturePath)
+	if len(listed.entries) != listed.limit {
+		t.Fatalf("the waiver file holds %d entries, want the recorded limit %d", len(listed.entries), listed.limit)
+	}
+	groups := map[string]int{}
+	for _, e := range listed.entries {
+		groups[e.card]++
+		if e.owner != "wgpu" {
+			t.Errorf("entry %q has owner %q, want wgpu", allowKey(e.path, e.symbol, e.construct), e.owner)
 		}
-		if reason != publicLayerAllowReason {
-			t.Errorf("entry %q carries a different reason", site)
+	}
+	want := map[string]int{"P2-API-032": 6, "P2-API-034/P2-API-035": 31, "ADR-070 §15.10": 4}
+	for card, n := range want {
+		if groups[card] != n {
+			t.Errorf("card %q carries %d entries, want %d (groups: %v)", card, groups[card], n, groups)
 		}
 	}
 }
