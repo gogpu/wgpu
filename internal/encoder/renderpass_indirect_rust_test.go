@@ -3,8 +3,11 @@
 package encoder
 
 import (
+	"errors"
 	"slices"
 	"testing"
+
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // The rust lowering's white-box test moved here with the function (S5's Move).
@@ -44,5 +47,17 @@ func TestLowerRustIndexedIndirectValidSpanEmitsEveryRecordInOrder(t *testing.T) 
 
 	if want := []uint64{4, 24, 44}; !slices.Equal(offsets, want) {
 		t.Fatalf("underlying offsets = %v, want %v", offsets, want)
+	}
+}
+
+// TestRustRenderPassEndAfterRelease pins the released flag of the rust pass
+// (ADR-070 S5's zero-value contract table): once End has released the pass, a
+// second End returns ErrReleased without touching the go-webgpu pass. The
+// first End needs a real wgpu-native pass, which a hermetic test cannot
+// construct; its success path ends at the adapter call.
+func TestRustRenderPassEndAfterRelease(t *testing.T) {
+	pass := &RenderPassEncoder{released: true}
+	if err := pass.End(); !errors.Is(err, core.ErrReleased) {
+		t.Fatalf("End() on a released pass: error = %v, want ErrReleased", err)
 	}
 }

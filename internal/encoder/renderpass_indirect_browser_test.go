@@ -3,6 +3,7 @@
 package encoder
 
 import (
+	"errors"
 	"slices"
 	"syscall/js"
 	"testing"
@@ -57,5 +58,31 @@ func TestBrowserDrawIndexedIndirectInvalidSpanDelegatesOneFailingCall(t *testing
 				t.Fatalf("underlying offsets = %v, want %v", offsets, test.want)
 			}
 		})
+	}
+}
+
+// TestBrowserRenderPassEndReleasesOnce pins the released flag of the browser
+// pass (ADR-070 S5's zero-value contract table): the first End reaches the
+// browser object, the second returns ErrReleased without calling it.
+func TestBrowserRenderPassEndReleasesOnce(t *testing.T) {
+	ends := 0
+	end := js.FuncOf(func(js.Value, []js.Value) any {
+		ends++
+		return nil
+	})
+	defer end.Release()
+
+	rawPass := js.Global().Get("Object").New()
+	rawPass.Set("end", end)
+	pass := &RenderPassEncoder{browser: browser.NewRenderPassEncoder(rawPass)}
+
+	if err := pass.End(); err != nil {
+		t.Fatalf("first End() error = %v, want nil", err)
+	}
+	if err := pass.End(); !errors.Is(err, resource.ErrReleased) {
+		t.Fatalf("second End() error = %v, want ErrReleased", err)
+	}
+	if ends != 1 {
+		t.Fatalf("browser end() called %d times, want 1", ends)
 	}
 }

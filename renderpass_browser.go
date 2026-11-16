@@ -11,43 +11,33 @@ import (
 // On browser, this wraps a GPURenderPassEncoder via internal/encoder.
 //
 // The implementation lives in internal/encoder (ADR-070 S5); this declaration
-// is the public surface. The nil-argument guards keep the pre-move contract of
-// a zero-value pass: a nil pipeline, bind group, buffer or blend constant
-// returns before the nil implementation is touched.
+// is the public surface, one delegation per method. The implementation's
+// payload checks carry the pre-move contract of a zero-value pass: a nil (or
+// nil-implementation) pipeline, bind group, buffer or blend constant returns
+// before the browser pass is touched, on a zero-value receiver too, because
+// the checks read the argument and not the receiver.
 type RenderPassEncoder struct {
 	impl *encoder.RenderPassEncoder
 }
 
 // SetPipeline sets the active render pipeline.
 func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
-	if pipeline == nil {
-		return
-	}
 	p.impl.SetPipeline(encoderPipeline(pipeline))
 }
 
 // SetBindGroup sets a bind group for the given index.
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	if group == nil {
-		return
-	}
 	p.impl.SetBindGroup(index, encoderBindGroup(group), offsets)
 }
 
 // SetVertexBuffer sets a vertex buffer for the given slot.
 // Offset is in bytes. Pass 0 for size to use the rest of the buffer.
 func (p *RenderPassEncoder) SetVertexBuffer(slot uint32, buffer *Buffer, offset uint64) {
-	if buffer == nil {
-		return
-	}
 	p.impl.SetVertexBuffer(slot, encoderBuffer(buffer), offset)
 }
 
 // SetIndexBuffer sets the index buffer.
 func (p *RenderPassEncoder) SetIndexBuffer(buffer *Buffer, format gputypes.IndexFormat, offset uint64) {
-	if buffer == nil {
-		return
-	}
 	p.impl.SetIndexBuffer(encoderBuffer(buffer), format, offset)
 }
 
@@ -63,9 +53,6 @@ func (p *RenderPassEncoder) SetScissorRect(rect gputypes.ScissorRect) {
 
 // SetBlendConstant sets the blend constant color.
 func (p *RenderPassEncoder) SetBlendConstant(color *gputypes.Color) {
-	if color == nil {
-		return
-	}
 	p.impl.SetBlendConstant(color)
 }
 

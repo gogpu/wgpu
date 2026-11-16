@@ -18,10 +18,10 @@ import (
 //
 // The type lived in the root package until ADR-070 S5; its signatures name
 // the domain's handle types, and the root declaration layer converts at the
-// call boundary. The nil-argument guards here serve this package's own
-// callers; the public wrapper repeats them for its part, because a zero-value
-// public pass (nil implementation) must still answer a nil argument by
-// returning, as the pre-move zero value did.
+// call boundary. The nil-argument guards here carry the contract alone: the
+// public wrapper delegates unconditionally, and a zero-value public pass
+// (nil implementation) is answered by these guards returning — the same shape
+// the pre-move zero value had (one check, one place).
 type RenderPassEncoder struct {
 	r        *rwgpu.RenderPassEncoder
 	released bool
