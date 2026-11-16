@@ -162,6 +162,12 @@ func TestInstanceRequestAdapter(t *testing.T) {
 
 	adapter, err := inst.RequestAdapter(nil)
 	if err != nil {
+		// ADR-083 §2.3: a zero mask admits hardware backends only; on a machine
+		// without one the dedicated sentinel is the contract under test.
+		if errors.Is(err, wgpu.ErrNoHardwareAdapter) {
+			t.Logf("no hardware adapter on this machine: %v (the sentinel path holds)", err)
+			return
+		}
 		t.Fatalf("RequestAdapter: %v", err)
 	}
 	if adapter == nil {
@@ -1174,7 +1180,9 @@ func TestReleasedInstanceRequestAdapterFails(t *testing.T) {
 // --- Full lifecycle tests (require HAL) ---
 
 func TestFullLifecycleCreateAndRelease(t *testing.T) {
-	inst, err := wgpu.CreateInstance(nil)
+	// Pin the instance to the Pure Go software backend: after ADR-083 §2.3 the
+	// default mask is hardware-only, and this test needs any adapter, not a GPU.
+	inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}

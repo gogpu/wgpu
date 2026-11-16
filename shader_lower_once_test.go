@@ -3,6 +3,7 @@
 package wgpu_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -37,6 +38,12 @@ func TestCreateShaderModuleLowersOnce(t *testing.T) {
 			defer inst.Release()
 			adapter, err := inst.RequestAdapter(nil)
 			if err != nil {
+				if adapterCase.backends == 0 && errors.Is(err, wgpu.ErrNoHardwareAdapter) {
+					// ADR-083 §2.3: a zero mask admits hardware backends only, and
+					// this machine has none; the software case below covers the
+					// lowering count.
+					t.Skipf("no hardware adapter on this machine: %v", err)
+				}
 				t.Fatalf("RequestAdapter: %v", err)
 			}
 			defer adapter.Release()

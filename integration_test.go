@@ -73,7 +73,9 @@ func TestIntegrationCreateInstance(t *testing.T) {
 
 // TestIntegrationRequestAdapter verifies the adapter has a non-empty name and driver.
 func TestIntegrationRequestAdapter(t *testing.T) {
-	instance, err := wgpu.CreateInstance(nil)
+	// Pin the instance to the Pure Go software backend: after ADR-083 §2.3 the
+	// default mask is hardware-only, and this test needs any adapter, not a GPU.
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}

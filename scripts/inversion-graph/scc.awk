@@ -54,6 +54,19 @@ function strongconnect(v,   w, key, p, n, i, out) {
 
 BEGIN { FS = "\t" }
 
+# Bit helpers in POSIX awk: gawk's or()/and() do not exist in the BWK awk that
+# macOS ships, and the gate runs on every CI leg.
+function orb(a, b,   r, p) {
+  r = 0; p = 1
+  while (a > 0 || b > 0) { if (a % 2 || b % 2) r += p; a = int(a / 2); b = int(b / 2); p *= 2 }
+  return r
+}
+function andb(a, b,   r, p) {
+  r = 0; p = 1
+  while (a > 0 && b > 0) { if (a % 2 && b % 2) r += p; a = int(a / 2); b = int(b / 2); p *= 2 }
+  return r
+}
+
 {
   if ($1 == "" || $2 == "" || $1 == $2) next
   if ($4 !~ /(^|\+)N(\+|$)/ && $4 !~ /(^|\+)INT(\+|$)/) next   # EXT-only edge
@@ -70,8 +83,8 @@ END {
       split(k, p, SUBSEP)
       mask = 0
       m = split(e[k], mm, " ")
-      for (i = 1; i <= m; i++) mask = or(mask, mm[i])
-      if (!and(mask, bit)) continue
+      for (i = 1; i <= m; i++) mask = orb(mask, mm[i])
+      if (!andb(mask, bit)) continue
       adj[p[1] SUBSEP p[2]] = 1
       edges++
     }
