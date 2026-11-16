@@ -310,30 +310,6 @@ func TestTextureTracker_AppendSingleSubresources(t *testing.T) {
 	}
 }
 
-// TestTextureTracker_DeprecatedSetSingle checks the whole-texture form: it
-// answers the one transition of a whole texture, and only the first of a
-// texture whose subresources differ.
-func TestTextureTracker_DeprecatedSetSingle(t *testing.T) {
-	t.Parallel()
-	device := NewTextureTracker()
-	transition, needed := device.SetSingle(1, TextureUsesCopyDst)
-	if !needed || transition.Usage.From != TextureUsesUninitialized || !transition.Selector.SelectsAll() {
-		t.Fatalf("first write = %+v, %v; want Uninitialized -> CopyDst over the whole texture", transition, needed)
-	}
-	device.InsertSingle(2, TextureUsesResource)
-	if _, needed := device.SetSingle(2, TextureUsesResource); needed {
-		t.Error("Resource -> Resource is ordered, no transition expected")
-	}
-	device.AppendSingle(nil, 1, selectMipLevel(1), TextureUsesResource)
-	transition, needed = device.SetSingle(1, TextureUsesCopySrc)
-	if !needed || transition.Selector.BaseMipLevel != 0 || transition.Usage.From != TextureUsesCopyDst {
-		t.Errorf("levels that differ = %+v, %v; want the first, level 0 from CopyDst", transition, needed)
-	}
-	if usage := (TextureState{}).Usage(); usage != TextureUsesNone {
-		t.Errorf("TextureState{}.Usage() = %v, want None", usage)
-	}
-}
-
 // TestTextureTracker_MergeEncoderInsertsSplitEnd checks a texture the device
 // does not track yet: a command buffer that first used it whole and left its
 // levels in different states hands the device those states, with no

@@ -1059,9 +1059,9 @@ func TestBuffer_NoConflict_ReadOnly(t *testing.T) {
 	}
 }
 
-// TestDeviceTracker_AppendSingleTexture checks a queue write of some
-// subresources through the device tracker, and the deprecated whole-texture
-// form, which answers only the first of several barriers.
+// TestDeviceTracker_AppendSingleTexture checks queue writes through the
+// device tracker: a write of one level moves that level alone, and a later
+// write of the whole texture moves each level from its own state.
 func TestDeviceTracker_AppendSingleTexture(t *testing.T) {
 	t.Parallel()
 	dt := NewDeviceTracker()
@@ -1076,11 +1076,11 @@ func TestDeviceTracker_AppendSingleTexture(t *testing.T) {
 		t.Errorf("TextureUsage = %v, want None while the levels differ", usage)
 	}
 
-	transition, needed := dt.SetSingleTexture(1, track.TextureUsesCopySrc)
-	if !needed || transition.Usage.From != track.TextureUsesUninitialized || transition.Selector.BaseMipLevel != 0 {
-		t.Errorf("SetSingleTexture = %+v, %v; want the first barrier, level 0 from Uninitialized", transition, needed)
+	got = dt.AppendSingleTexture(nil, 1, track.TextureSelector{}, track.TextureUsesCopySrc)
+	if len(got) != 2 || got[0].Usage.From != track.TextureUsesUninitialized || got[1].Usage.From != track.TextureUsesCopyDst {
+		t.Errorf("whole write = %+v, want levels 0 and 1 from Uninitialized and CopyDst", got)
 	}
-	if _, needed := dt.SetSingleTexture(1, track.TextureUsesCopySrc); needed {
-		t.Error("CopySrc -> CopySrc is ordered, no barrier expected")
+	if got := dt.AppendSingleTexture(nil, 1, track.TextureSelector{}, track.TextureUsesCopySrc); len(got) != 0 {
+		t.Errorf("CopySrc -> CopySrc = %+v, ordered, no barrier expected", got)
 	}
 }
