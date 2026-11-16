@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 A seam patch before the internal-layout change (v0.35.0): the test seam gains constant-time counters and
-metadata-only textures — the last `NewTextureFromHAL` replacement — and naga reaches v0.22.3.
+metadata-only textures — the last `NewTextureFromHAL` replacement — and naga reaches v0.22.4.
 
 ### Added
 
@@ -58,6 +58,17 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   `VK_LAYER_KHRONOS_validation` 685 PASS / 0 FAIL / 5 SKIP with 0 validation messages, `internal/hal/allbackends`
   under VVL ok, and the writer diff v0.22.2 → v0.22.3 of **0/69 shaders in SPIR-V and in MSL** — the zero-diff
   expectation was stated before the run.
+- **naga v0.22.4** (from v0.22.3). A PATCH: subgroup elect and all-equal across the stack — additive IR forms
+  (`ir.StmtSubgroupElect`, `ir.SubgroupOperationAllEqual`, no renumbering), both frontends and all five writers.
+  One WGSL-visible change: `subgroupElect` now lowers instead of falling through as an unknown function, so WGSL
+  modules using `enable subgroups;` with it compile; output for every existing shader is unchanged by construction.
+  Gate: the v0.22.4 downstream gate on the candidate `c7f160d7` (tag v0.22.4 → `7ea4de2f`, docs-only delta
+  verified) — full suite through a private gate workspace (36 packages ok; the `internal/layoutcheck` snapshot
+  artifact as before, green on the real tree), the readback corpus under `VK_LAYER_KHRONOS_validation` 685 PASS /
+  0 FAIL / 5 SKIP with 0 validation messages, `internal/hal/allbackends` under VVL ok (337.913 s), and the writer
+  diff v0.22.3 → v0.22.4 of **0/69 shaders in SPIR-V and in MSL** — the zero-diff expectation was stated before
+  the run and held; gg's leg of the gate PASS (25/25 byte-identical) with a positive control proving the gate sees
+  the `subgroupElect` change class.
 
 ### Removed
 
