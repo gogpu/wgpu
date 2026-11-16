@@ -64,12 +64,11 @@ func (h queueDeviceHost) CreateCommandEncoder(label string) (*encoder.CommandEnc
 }
 
 // NewStencilUpload creates the staging upload of size into the stencil of dst
-// at mipLevel and origin. dst is an implementation handle; the payload still
-// works on the public Texture wrapper (it stays in this package through S9),
-// so the adapter maps the handle back to the wrapper the texture's Pub cache
-// holds — the same handle keeps the same owner.
-func (h queueDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (stencilblit.Upload, error) {
-	return h.d.newStencilUpload(texturePub(dst), mipLevel, Origin3D(origin), Extent3D(size))
+// at mipLevel and origin: the payload moved to internal/stencilblit at S9, so
+// the host hands it the seam's implementation handle and the stencil host —
+// the only place the payload meets the device's creation paths.
+func (h queueDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (*stencilblit.Upload, error) {
+	return stencilblit.NewUpload(newStencilDeviceHost(h.d), dst, mipLevel, origin, size)
 }
 
 // texturePub returns the public wrapper of t: the one the creating device

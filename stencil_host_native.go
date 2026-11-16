@@ -23,6 +23,11 @@ type stencilDeviceHost struct{ d *Device }
 
 var _ stencilblit.Device = stencilDeviceHost{}
 
+// newStencilDeviceHost returns the payload's view of d. Both device hosts in
+// this package (the encoder's and the queue's) hand the payload the same
+// adapter, so the construction lives here.
+func newStencilDeviceHost(d *Device) stencilDeviceHost { return stencilDeviceHost{d: d} }
+
 // Pipelines returns the blit pipelines of key and the layout of their bind
 // groups from the device's cache, building them on first use.
 func (h stencilDeviceHost) Pipelines(key stencilblit.Key) (stencilblit.Blit, error) {

@@ -5,25 +5,37 @@
 
 package stencilblit
 
-// This file declares the stencil upload payload's contract with its callers.
-// The interfaces are the payload's own, so they live with it: this package
-// owns the rule and the payload, the queue and the encoder record the commands
-// through these views (ADR-070 §15.1 — the payload only; golden rows
-// queue/encoder -> stencilblit, no edge back).
+// This file is the upload payload: one prepared upload into the stencil aspect
+// of a combined depth-stencil texture, the one call that creates it, and the
+// seam and contract types it is built and recorded through.
 //
-// The placement was other way round from the S4 Move until S9: the interfaces
-// were declared here because internal/encoder did not exist before its Move,
-// and the Move relocated them there. S9's hand-back returns them — the
-// encoder imports this package for its recorder adapter (stencil_recorder.go),
-// which is the already-golden encoder -> stencilblit row, and this package
-// imports neither the root package nor internal/encoder.
+// The payload arrived here from the root package at S9 (ADR-070 §15.1: this
+// package holds the upload payload only; the queue and the encoder record the
+// commands). Its contracts were declared here from the S4 Move and are back
+// with it: the encoder imports this package for its recorder adapter
+// (internal/encoder/stencil_recorder.go), and this package imports neither the
+// root package nor internal/encoder. The pipeline cache stays in the root
+// package: it is device-owned state and holds the public wrappers that own the
+// pipelines' references, so the seam below hands the payload only the internal
+// handles (Device, Blit).
 
 import (
+	"fmt"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
 )
+
+// paramsStride is the distance between the Params of two layers in the blit's
+// uniform buffer: 256, the largest minUniformBufferOffsetAlignment the WebGPU
+// spec allows, so a multiple of every device's limit.
+const paramsStride = 256
+
+// uploadLabel is the debug label of the payload's objects.
+const uploadLabel = "stencil upload"
 
 // Device is the upload payload's creation seam: the pipelines of a Key and the
 // four resource creations the blit's commands need. The pipeline cache and the
@@ -112,17 +124,6 @@ type BindGroupEntry struct {
 	TextureView *resource.TextureView
 }
 
-// Upload is one prepared upload into the stencil aspect of a combined
-// depth-stencil texture: the staging texture the caller fills, and the blit
-// that draws it into the destination.
-type Upload interface {
-	// Staging returns the R8Uint texture of the copy extent that holds the
-	// stencil bytes before the blit.
-	Staging() *resource.Texture
-	// Record records the blit's render passes into recorder's command stream.
-	Record(recorder Recorder) error
-}
-
 // Recorder is the command encoder the blit records into, as the blit needs it.
 type Recorder interface {
 	// Own hands a resource the blit created to the encoder, which releases it
@@ -156,4 +157,183 @@ type PassRecorder interface {
 // payload that produces most of them.
 type Releasable interface {
 	Release()
+}
+
+// Upload is one upload into the stencil aspect of a combined depth-stencil
+// texture, lowered as this package describes: the caller writes the stencil
+// bytes into temp (an R8Uint texture of the copy extent), then Record draws
+// them into dst.
+//
+// The device is captured at creation rather than read off the encoder: the
+// payload records through seam values, and a device pointer is not something
+// the caller's command encoder may hand it (the pre-move payload captured the
+// root Device for the same reason).
+type Upload struct {
+	device   Device
+	dst      *resource.Texture
+	mipLevel uint32
+	origin   gputypes.Origin3D
+	size     gputypes.Extent3D
+	temp     *resource.Texture
+}
+
+// NewUpload creates the R8Uint texture an upload of size into the stencil of
+// dst at mipLevel and origin goes through, and returns the payload that
+// records the blit from it.
+func NewUpload(d Device, dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (*Upload, error) {
+	temp, err := d.CreateTexture(TextureDescriptor{
+		Label:         uploadLabel,
+		Size:          size,
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatR8Uint,
+		Usage:         gputypes.TextureUsageCopyDst | gputypes.TextureUsageTextureBinding,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("staging texture: %w", err)
+	}
+	return &Upload{device: d, dst: dst, mipLevel: mipLevel, origin: origin, size: size, temp: temp}, nil
+}
+
+// Staging returns the R8Uint texture the caller writes the stencil bytes into.
+func (u *Upload) Staging() *resource.Texture { return u.temp }
+
+// Record records into r, for each destination layer, the render pass that
+// writes the layer's stencil from temp. Every pass it opens is ended. The
+// resources it creates are handed to r (Recorder.Own); the caller hands it
+// temp.
+func (u *Upload) Record(r Recorder) error {
+	d := u.device
+	layers := u.size.DepthOrArrayLayers
+	key := KeyFor(u.dst.Format(), layers)
+	blit, err := d.Pipelines(key)
+	if err != nil {
+		return err
+	}
+	srcView, err := d.CreateTextureView(u.temp, TextureViewDescriptor{
+		Label:           uploadLabel + " source",
+		Format:          gputypes.TextureFormatR8Uint,
+		Dimension:       key.ViewDimension,
+		Aspect:          gputypes.TextureAspectAll,
+		MipLevelCount:   1,
+		ArrayLayerCount: layers,
+	})
+	if err != nil {
+		return fmt.Errorf("source view: %w", err)
+	}
+	r.Own(srcView)
+	params, err := u.paramsBuffer(layers)
+	if err != nil {
+		return err
+	}
+	r.Own(params)
+	for layer := range layers {
+		if err := u.recordLayer(r, &blit, srcView, params, layer); err != nil {
+			return fmt.Errorf("layer %d: %w", u.origin.Z+layer, err)
+		}
+	}
+	return nil
+}
+
+// paramsBuffer returns a uniform buffer with the Params of each layer at
+// paramsStride. It is written through a mapping at creation, so no queue write
+// is involved (Queue.WriteTexture records the blit with the queue lock held).
+func (u *Upload) paramsBuffer(layers uint32) (*resource.Buffer, error) {
+	size := uint64(layers-1)*paramsStride + ParamsSize
+	buf, err := u.device.CreateBuffer(BufferDescriptor{
+		Label:            uploadLabel + " params",
+		Size:             size,
+		Usage:            gputypes.BufferUsageUniform,
+		MappedAtCreation: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("params buffer: %w", err)
+	}
+	rng, err := buf.MappedRange(0, size)
+	if err != nil {
+		buf.Release()
+		return nil, fmt.Errorf("params buffer: %w", err)
+	}
+	data := rng.BytesMut()
+	for layer := range layers {
+		p := Params{OriginX: u.origin.X, OriginY: u.origin.Y, Layer: layer}.Bytes()
+		copy(data[uint64(layer)*paramsStride:], p[:])
+	}
+	rng.Release()
+	if err := buf.Unmap(); err != nil {
+		buf.Release()
+		return nil, fmt.Errorf("params buffer: %w", err)
+	}
+	return buf, nil
+}
+
+func (u *Upload) recordLayer(r Recorder, blit *Blit, srcView *resource.TextureView, params *resource.Buffer, layer uint32) error {
+	group, err := u.device.CreateBindGroup(BindGroupDescriptor{
+		Label:  uploadLabel,
+		Layout: blit.Layout,
+		Entries: []BindGroupEntry{
+			{Binding: SourceBinding, TextureView: srcView},
+			{
+				Binding: ParamsBinding, Buffer: params,
+				Offset: uint64(layer) * paramsStride, Size: ParamsSize,
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("bind group: %w", err)
+	}
+	r.Own(group)
+	dstView, err := u.device.CreateTextureView(u.dst, TextureViewDescriptor{
+		Label:           uploadLabel + " destination",
+		Format:          u.dst.Format(),
+		Dimension:       gputypes.TextureViewDimension2D,
+		Aspect:          gputypes.TextureAspectAll,
+		BaseMipLevel:    u.mipLevel,
+		MipLevelCount:   1,
+		BaseArrayLayer:  u.origin.Z + layer,
+		ArrayLayerCount: 1,
+	})
+	if err != nil {
+		return fmt.Errorf("destination view: %w", err)
+	}
+	r.Own(dstView)
+	// The destination needs only COPY_DST: rendering into it is the
+	// frontend's own use (Dawn's internal usages). Every depth/stencil texture
+	// is created render-attachable in the backend (Device.CreateTexture).
+	dstView.SetInternalUsage(gputypes.TextureUsageRenderAttachment)
+
+	// Depth is loaded and stored as it is; the pipelines neither test nor
+	// write it. Stencil outside the scissor keeps its contents.
+	pass, err := r.BeginLayerPass(uploadPassDescriptor(u.dst, dstView), group)
+	if err != nil {
+		return fmt.Errorf("render pass: %w", err)
+	}
+	RecordLayer[*pipeline.RenderPipeline](pass, &blit.Pipelines,
+		u.origin.X, u.origin.Y, u.size.Width, u.size.Height)
+	if err := pass.End(); err != nil {
+		return fmt.Errorf("render pass: %w", err)
+	}
+	return nil
+}
+
+// uploadPassDescriptor builds the core descriptor of one blit layer's render
+// pass: the layer's view of the destination, loading and storing depth and
+// stencil. The destination texture is the authority for the attachment's HAL
+// handle, like the public render pass conversion (a borrowed surface texture
+// shares one core texture across swapchain images).
+func uploadPassDescriptor(dst *resource.Texture, dstView *resource.TextureView) *core.RenderPassDescriptor {
+	return &core.RenderPassDescriptor{
+		Label: uploadLabel,
+		ResolveAttachmentTexture: func(*core.TextureView) hal.Texture {
+			return dst.ResolveHAL()
+		},
+		DepthStencilAttachment: &core.RenderPassDepthStencilAttachment{
+			View:           resource.CoreTextureViewFrom(dstView),
+			DepthLoadOp:    gputypes.LoadOpLoad,
+			DepthStoreOp:   gputypes.StoreOpStore,
+			StencilLoadOp:  gputypes.LoadOpLoad,
+			StencilStoreOp: gputypes.StoreOpStore,
+		},
+	}
 }

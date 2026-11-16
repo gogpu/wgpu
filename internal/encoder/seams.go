@@ -39,9 +39,9 @@ type DeviceHost interface {
 	// untyped nil when the device has none.
 	EncoderPool() core.HalEncoderPool
 	// NewStencilUpload creates the staging texture an upload of size into the
-	// stencil of dst at mipLevel and origin goes through. The payload contract
-	// is internal/stencilblit's: it owns the type and the blit it records.
-	NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (stencilblit.Upload, error)
+	// stencil of dst at mipLevel and origin goes through. The payload lives in
+	// internal/stencilblit: it owns the type and the blit it records.
+	NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (*stencilblit.Upload, error)
 	// Features returns the device's enabled features. The render pass reads
 	// them for the draw feature gates (MultiDrawIndirect and
 	// MultiDrawIndirectCount) exactly as the pre-move pass read them from the

@@ -66,8 +66,6 @@ type DeviceHost interface {
 	// NewStencilUpload creates the staging R8Uint texture an upload of size
 	// into the stencil of dst at mipLevel and origin goes through, and returns
 	// the payload the queue records the blit from. dst is an implementation
-	// handle; the host maps it back to whatever its own payload works on. The
-	// payload interface is internal/stencilblit's (S9's hand-back moved it
-	// there): the payload itself stays in the root package through this step.
-	NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (stencilblit.Upload, error)
+	// handle; the payload itself lives in internal/stencilblit.
+	NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (*stencilblit.Upload, error)
 }

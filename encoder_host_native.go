@@ -35,17 +35,12 @@ func (h encoderDeviceHost) EncoderPool() core.HalEncoderPool {
 	return h.d.cmdEncoderPool
 }
 
-// NewStencilUpload creates the staging upload of size into the stencil of dst.
-// The payload still works on the public Texture wrapper (it stays in this
-// package through S9); the wrapper is the one the texture's Pub cache holds,
-// so the same handle keeps the same owner. The payload contract itself is
-// internal/stencilblit's (S9's hand-back moved the interfaces there).
-func (h encoderDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (stencilblit.Upload, error) {
-	pub, _ := dst.Pub.(*Texture)
-	if pub == nil {
-		pub = &Texture{impl: dst}
-	}
-	return h.d.newStencilUpload(pub, mipLevel, Origin3D(origin), Extent3D(size))
+// NewStencilUpload creates the staging upload of size into the stencil of dst
+// at mipLevel and origin: the payload moved to internal/stencilblit at S9, so
+// the host hands it the seam's implementation handle and the stencil host —
+// the only place the payload meets the device's creation paths.
+func (h encoderDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (*stencilblit.Upload, error) {
+	return stencilblit.NewUpload(newStencilDeviceHost(h.d), dst, mipLevel, origin, size)
 }
 
 // Features returns the device's enabled features: the render pass reads them

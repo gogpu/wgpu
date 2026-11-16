@@ -420,6 +420,11 @@ func (q *Queue) writeTextureLocked(dst *ImageCopyTexture, data []byte, layout *I
 	return q.hal.WriteTexture(halDst, data, &halLayout, &halSize)
 }
 
+// stencilUploadLabel is the debug label of the encoder the queue records the
+// stencil blit in. The payload creates its own objects under the same label
+// (internal/stencilblit's), so the debug view of an upload reads as one unit.
+const stencilUploadLabel = "stencil upload"
+
 // writeStencilLocked writes a validated upload into the stencil of a
 // combined depth-stencil format the backend cannot write, with q.mu held: the
 // data goes into a staging R8Uint texture like any upload, and the blit that
@@ -449,7 +454,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 		enc.DiscardEncoding()
 		return fmt.Errorf("staging upload: %w", err)
 	}
-	if err := u.Record(stencilRecorder{enc}); err != nil {
+	if err := u.Record(enc.BlitRecorder()); err != nil {
 		enc.DiscardEncoding()
 		return err
 	}
