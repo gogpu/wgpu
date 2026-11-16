@@ -227,11 +227,6 @@ func (d *Device) newStencilUpload(dst *Texture, mipLevel uint32, origin Origin3D
 	return &stencilUpload{device: d, dst: dst, mipLevel: mipLevel, origin: origin, size: size, temp: temp}, nil
 }
 
-// tempCopy returns the region of temp that holds the stencil bytes.
-func (u *stencilUpload) tempCopy() ImageCopyTexture {
-	return ImageCopyTexture{Texture: u.temp, Aspect: gputypes.TextureAspectAll}
-}
-
 // Staging returns the R8Uint texture the caller writes the stencil bytes into.
 func (u *stencilUpload) Staging() *resource.Texture { return u.temp.impl }
 

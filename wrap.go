@@ -36,9 +36,8 @@ func newDeviceFromHAL(
 	pool := newEncoderPool(halDevice)
 
 	queue := &Queue{
-		hal:       halQueue,
-		halDevice: halDevice,
-		pending:   pendingwrites.New(halDevice, halQueue, pool, coreDevice.Tracker()),
+		hal:     halQueue,
+		pending: pendingwrites.New(halDevice, halQueue, pool, coreDevice.Tracker()),
 	}
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
@@ -48,7 +47,7 @@ func newDeviceFromHAL(
 		queue:          queue,
 		cmdEncoderPool: pool,
 	}
-	queue.device = device
+	queue.device = newQueueDeviceHost(device)
 
 	return device
 }

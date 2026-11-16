@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
+	"github.com/gogpu/wgpu/internal/queue"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -25,10 +26,16 @@ import (
 type Queue struct {
 	mu sync.Mutex // serializes Submit, WriteBuffer, WriteTexture (Rust wgpu parity)
 
-	hal       hal.Queue
-	halDevice hal.Device
-	device    *Device
-	pending   *pendingwrites.Writes
+	hal hal.Queue
+
+	// device is the seam view of the device the queue submits through (ADR-070
+	// S9): its core state, encoder pool, user command encoders and the stencil
+	// upload. A seam value, not *Device: the root adapter adapts at the call
+	// boundary (queue_host_native.go), and a nil value keeps meaning "no
+	// device" for the nil checks below.
+	device queue.DeviceHost
+
+	pending *pendingwrites.Writes
 
 	// test, when non-nil, records the public calls for package wgputest.
 	test core.TestHooks
@@ -174,8 +181,8 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 	// completed so beginner code paths that read a buffer right after a
 	// Submit see the mapping resolve without having to call Device.Poll
 	// explicitly. (FEAT-WGPU-MAPPING-001)
-	if q.device != nil && q.device.core != nil && q.device.core.HasPendingMaps() {
-		q.device.core.PollMaps(q.hal.PollCompleted())
+	if q.device != nil && q.device.Core() != nil && q.device.Core().HasPendingMaps() {
+		q.device.Core().PollMaps(q.hal.PollCompleted())
 	}
 
 	return subIdx, nil
@@ -234,7 +241,7 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*encoder.CommandBuffe
 		}
 		halCmdBufs := cb.HALBufferList() // all CBs from this encoder
 
-		pool := q.device.cmdEncoderPool
+		pool := q.device.EncoderPool()
 		dq.Defer(subIdx, "CmdEncoder", func() {
 			halEnc.ResetAll(halCmdBufs)
 			pool.Release(halEnc)
@@ -246,7 +253,7 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*encoder.CommandBuffe
 	for _, t := range q.transits {
 		halEnc := t.encoder
 		barrierBuf := t.cmdBuf
-		pool := q.device.cmdEncoderPool
+		pool := q.device.EncoderPool()
 		dq.Defer(subIdx, "BarrierEncoder", func() {
 			halEnc.ResetAll([]hal.CommandBuffer{barrierBuf})
 			pool.Release(halEnc)
@@ -425,19 +432,19 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 	if d == nil {
 		return ErrReleased
 	}
-	u, err := d.newStencilUpload(dst.Texture, dst.MipLevel, dst.Origin, *size)
+	u, err := d.NewStencilUpload(dst.Texture.impl, dst.MipLevel, gputypes.Origin3D(dst.Origin), gputypes.Extent3D(*size))
 	if err != nil {
 		return err
 	}
-	enc, err := d.CreateCommandEncoder(&CommandEncoderDescriptor{Label: stencilUploadLabel})
+	enc, err := d.CreateCommandEncoder(stencilUploadLabel)
 	if err != nil {
-		u.temp.Release()
+		u.Staging().Release()
 		return err
 	}
 	// The encoder owns the staging texture from here on: every exit below
 	// discards, releases or submits it.
-	enc.impl.Own(u.Staging())
-	temp := u.tempCopy()
+	enc.Own(u.Staging())
+	temp := ImageCopyTexture{Texture: texturePub(u.Staging()), Aspect: gputypes.TextureAspectAll}
 	if err := q.writeTextureLocked(&temp, data, layout, size); err != nil {
 		enc.DiscardEncoding()
 		return fmt.Errorf("staging upload: %w", err)
@@ -450,7 +457,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 	if err != nil {
 		return err
 	}
-	if _, err := q.submitLocked([]*encoder.CommandBuffer{cb.impl}); err != nil {
+	if _, err := q.submitLocked([]*encoder.CommandBuffer{cb}); err != nil {
 		cb.Release()
 		return err
 	}
@@ -526,8 +533,8 @@ func (q *Queue) GetTimestampPeriod() float32 {
 
 // destroyQueue returns the device's DestroyQueue, or nil if unavailable.
 func (q *Queue) destroyQueue() *core.DestroyQueue {
-	if q.device != nil && q.device.core != nil {
-		return q.device.core.DestroyQueueRef()
+	if q.device != nil && q.device.Core() != nil {
+		return q.device.Core().DestroyQueueRef()
 	}
 	return nil
 }
@@ -694,7 +701,7 @@ func (q *Queue) assembleSubmission(pendingCmdBuf hal.CommandBuffer, commandBuffe
 func (q *Queue) releaseTransits() {
 	for _, t := range q.transits {
 		t.encoder.ResetAll([]hal.CommandBuffer{t.cmdBuf})
-		q.device.cmdEncoderPool.Release(t.encoder)
+		q.device.EncoderPool().Release(t.encoder)
 	}
 	q.transits = q.transits[:0]
 }
@@ -711,10 +718,10 @@ func (q *Queue) releaseTransits() {
 //
 // Reference: wgpu-core command/mod.rs insert_barriers_from_device_tracker
 func (q *Queue) injectBarriers(commandBuffers []*encoder.CommandBuffer) (hal.CommandBuffer, error) {
-	if q.device == nil || q.device.core == nil {
+	if q.device == nil || q.device.Core() == nil {
 		return nil, nil //nolint:nilnil // no device = no barriers needed
 	}
-	tracker := q.device.core.Tracker()
+	tracker := q.device.Core().Tracker()
 	if tracker == nil {
 		return nil, nil //nolint:nilnil // no tracker = no barriers needed
 	}
@@ -737,7 +744,7 @@ func (q *Queue) injectBarriers(commandBuffers []*encoder.CommandBuffer) (hal.Com
 	}
 
 	// Acquire an encoder from the device pool and record the barriers.
-	if q.device.cmdEncoderPool == nil {
+	if q.device.EncoderPool() == nil {
 		return nil, nil //nolint:nilnil // no pool = cannot create barrier CB
 	}
 	return q.recordAndTrackAllBarriers(texTransitions, bufTransitions, texResolver, bufResolver)
@@ -903,7 +910,7 @@ func (q *Queue) recordAndTrackAllBarriers(
 	bufResolveFunc := func(idx track.TrackerIndex) hal.Buffer {
 		return bufResolver[idx]
 	}
-	halEnc, err := q.device.cmdEncoderPool.Acquire()
+	halEnc, err := q.device.EncoderPool().Acquire()
 	if err != nil {
 		return nil, fmt.Errorf("acquire barrier encoder: %w", err)
 	}
@@ -912,7 +919,7 @@ func (q *Queue) recordAndTrackAllBarriers(
 	)
 	if err != nil {
 		halEnc.DiscardEncoding()
-		q.device.cmdEncoderPool.Release(halEnc)
+		q.device.EncoderPool().Release(halEnc)
 		return nil, fmt.Errorf("record barriers: %w", err)
 	}
 

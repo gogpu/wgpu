@@ -18,9 +18,9 @@ func newDownlevelDevice(t *testing.T, flags gputypes.DownlevelFlags) *Device {
 	raw := &noop.Device{}
 	adapter := &core.Adapter{DownlevelCapabilities: gputypes.DownlevelCapabilities{Flags: flags}}
 	coreDevice := core.NewDevice(raw, adapter, 0, gputypes.DefaultLimits(), "downlevel-test")
-	queue := &Queue{hal: &noop.Queue{}, halDevice: raw}
+	queue := &Queue{hal: &noop.Queue{}}
 	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
+	queue.device = newQueueDeviceHost(device)
 	t.Cleanup(device.Release)
 	return device
 }

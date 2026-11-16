@@ -32,9 +32,9 @@ func TestQueueWriteTextureValidation(t *testing.T) {
 	raw := &copyRecordingDevice{}
 	coreDevice := core.NewDevice(raw, nil, 0, gputypes.DefaultLimits(), "write-texture-test")
 	halQueue := &writeTextureRecordingQueue{}
-	queue := &Queue{hal: halQueue, halDevice: raw}
+	queue := &Queue{hal: halQueue}
 	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
+	queue.device = newQueueDeviceHost(device)
 	defer device.Release()
 
 	newTexture := func(format gputypes.TextureFormat, usage gputypes.TextureUsage, mips, samples uint32) *Texture {

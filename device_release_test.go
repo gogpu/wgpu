@@ -50,9 +50,9 @@ func TestDeviceReleaseWaitsBeforeHALDestroy(t *testing.T) {
 	tracked := &releaseTrackingDevice{Device: opened.Device, events: &events}
 	device := &Device{
 		core:  core.NewDevice(tracked, nil, 0, limits, "release-order-test"),
-		queue: &Queue{hal: opened.Queue, halDevice: tracked},
+		queue: &Queue{hal: opened.Queue},
 	}
-	device.queue.device = device
+	device.queue.device = newQueueDeviceHost(device)
 
 	device.Release()
 

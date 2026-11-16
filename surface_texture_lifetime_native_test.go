@@ -54,9 +54,9 @@ func newAcquiredSurfaceForLifetimeTest(t *testing.T) (*Surface, *SurfaceTexture,
 
 	rawDevice := &surfaceTextureLifetimeDevice{}
 	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "surface-texture-lifetime-test")
-	queue := &Queue{hal: &noop.Queue{}, halDevice: rawDevice}
+	queue := &Queue{hal: &noop.Queue{}}
 	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
+	queue.device = newQueueDeviceHost(device)
 
 	rawSurface := &noop.Surface{}
 	surface := &Surface{
@@ -584,9 +584,9 @@ func TestSurfaceSwapchainTextureCaching(t *testing.T) {
 
 	rawDevice := &surfaceTextureLifetimeDevice{}
 	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "cache-test")
-	queue := &Queue{hal: &noop.Queue{}, halDevice: rawDevice}
+	queue := &Queue{hal: &noop.Queue{}}
 	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
+	queue.device = newQueueDeviceHost(device)
 	defer device.Release()
 
 	rawSurface := &noop.Surface{}

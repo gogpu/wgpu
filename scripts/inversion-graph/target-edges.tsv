@@ -24,6 +24,8 @@ internal/queue	internal/pendingwrites	native	N	queue_native.go:31 pending *pendi
 internal/queue	internal/stencilblit	native	N	queue_native.go:427 stencil upload via stencilblit.NewUpload (payload; the queue records the commands)
 internal/queue	internal/hal	all	N	domain baseline (queue_native.go:25-26 hal.Queue, hal.Device)
 internal/queue	internal/core	native	N	queue_native.go:174 q.device.core; :529 DestroyQueueRef
+internal/queue	internal/resource	native	N	seams.go NewStencilUpload (dst *resource.Texture); queue_native.go validateSubmitBuffer/validateSubmitTexture
+internal/queue	internal/resource	wasm	N	at the Move: queue_browser.go ErrReleased == resource.ErrReleased (the golden has no native+wasm token; the pair is declared per context so no row claims an import the tree lacks)
 internal/encoder	internal/resource	all	N	encoder_browser.go:49 CopyBufferToBuffer(*Buffer); encoder_native.go copy paths
 internal/encoder	internal/pipeline	all	N	renderpass_native.go:74 SetPipeline(*RenderPipeline); computepass_native.go:53 (*ComputePipeline)
 internal/encoder	internal/hal	all	N	domain baseline (encoder_native.go hal.CommandEncoder)

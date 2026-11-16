@@ -107,9 +107,8 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 	pool := newEncoderPool(openDevice.Device)
 
 	queue := &Queue{
-		hal:       openDevice.Queue,
-		halDevice: openDevice.Device,
-		pending:   pendingwrites.New(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()),
+		hal:     openDevice.Queue,
+		pending: pendingwrites.New(openDevice.Device, openDevice.Queue, pool, coreDevice.Tracker()),
 	}
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
@@ -119,7 +118,7 @@ func (a *Adapter) requestDeviceHAL(desc *DeviceDescriptor) (*Device, error) {
 		queue:          queue,
 		cmdEncoderPool: pool,
 	}
-	queue.device = device
+	queue.device = newQueueDeviceHost(device)
 
 	return device, nil
 }

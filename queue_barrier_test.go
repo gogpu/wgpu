@@ -37,7 +37,7 @@ func TestInjectTextureBarriers_NilTracker(t *testing.T) {
 	t.Parallel()
 
 	// Device with nil core -> Tracker() returns nil
-	q := &Queue{device: &Device{}}
+	q := &Queue{device: newQueueDeviceHost(&Device{})}
 	cb, err := q.injectBarriers(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
