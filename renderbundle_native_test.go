@@ -21,7 +21,7 @@ var rgba8Formats = []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}
 // pass with no attachments.
 func newEmptyBundle(device *Device) *RenderBundle {
 	return &RenderBundle{
-		device: device,
+		device: device.seamView(),
 		bundleContents: &bundleContents{
 			target: renderBundleTarget{context: core.RenderPassContext{SampleCount: 1}, depthReadOnly: true, stencilReadOnly: true},
 			scope:  core.NewRenderBundleScope(),

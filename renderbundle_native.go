@@ -3,12 +3,12 @@
 package wgpu
 
 import (
-	"errors"
 	"fmt"
 	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
@@ -20,124 +20,22 @@ import (
 //
 // Reference: Rust wgpu-core command/bundle.rs (RenderBundleEncoder,
 // RenderBundleEncoder::finish, RenderBundle::execute).
-
-// Unexported sentinels of render bundle validation, wrapped with the details.
-var (
-	errBundleDescriptor = errors.New("invalid render bundle encoder descriptor")
-	errBundleCommand    = errors.New("invalid render bundle command")
-	errBundleDepthWrite = errors.New("pipeline writes a depth/stencil aspect the render bundle keeps read-only")
-	errBundleReadOnly   = errors.New("render pass depth/stencil is read-only but the render bundle is not")
-	errBundleDevice     = errors.New("resource belongs to another device")
-)
-
-// bundleCommandKind identifies a render bundle command.
-type bundleCommandKind uint8
-
-const (
-	bundleSetPipeline bundleCommandKind = iota
-	bundleSetBindGroup
-	bundleSetVertexBuffer
-	bundleSetIndexBuffer
-	bundleDraw
-	bundleDrawIndexed
-)
-
-// bundleCommand is one command recorded by a RenderBundleEncoder, or one
-// command of a finished RenderBundle.
-// Matches Rust wgpu-core RenderCommand / ArcRenderCommand.
-type bundleCommand struct {
-	kind bundleCommandKind
-	// slot is the bind group index or the vertex buffer slot.
-	slot     uint32
-	pipeline *RenderPipeline
-	group    *resource.BindGroup
-	// offsets is the command's own copy of the dynamic offsets.
-	offsets     []uint32
-	buffer      *Buffer
-	format      gputypes.IndexFormat
-	offset      uint64
-	draw        gputypes.DrawArgs
-	drawIndexed gputypes.DrawIndexedArgs
-}
-
-// renderBundleTarget is the render pass layout a bundle is recorded for:
-// its attachment formats, sample count and read-only depth/stencil aspects.
-type renderBundleTarget struct {
-	context         core.RenderPassContext
-	depthReadOnly   bool
-	stencilReadOnly bool
-}
+//
+// The recording model (bundleCommand, bundleRecording, the target and the
+// contents) and the encoder's constructor live next to their staying root
+// users in renderbundle_recording_native.go until the S6 Move.
 
 // RenderBundleEncoder records reusable render commands. The commands are
 // validated by Finish, which reports the first invalid one.
 //
 // NOT thread-safe.
 type RenderBundleEncoder struct {
-	device *Device
+	device core.DeviceView
 	label  string
 	// The recording lives behind a pointer so RenderBundleEncoder stays a
 	// comparable type, as it was before core recorded bundles.
 	*bundleRecording
 	finished atomic.Bool
-}
-
-// bundleRecording is what a RenderBundleEncoder records until Finish.
-type bundleRecording struct {
-	target   renderBundleTarget
-	commands []bundleCommand
-}
-
-// newRenderBundleEncoder validates desc and returns an encoder for it.
-// Matches Rust wgpu-core RenderBundleEncoder::new.
-func newRenderBundleEncoder(device *Device, desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
-	target, err := renderBundleTargetOf(desc, &device.core.Limits)
-	if err != nil {
-		return nil, err
-	}
-	return &RenderBundleEncoder{device: device, label: desc.Label, bundleRecording: &bundleRecording{target: target}}, nil
-}
-
-// renderBundleTargetOf validates the attachment formats of a render bundle
-// encoder descriptor. An aspect the format does not have counts as read-only,
-// and without a depth/stencil format both do.
-// Matches Rust wgpu-core validate_render_bundle_encoder_descriptor.
-func renderBundleTargetOf(desc *RenderBundleEncoderDescriptor, limits *gputypes.Limits) (renderBundleTarget, error) {
-	target := renderBundleTarget{
-		context: core.RenderPassContext{
-			ColorFormats:       append([]gputypes.TextureFormat(nil), desc.ColorFormats...),
-			DepthStencilFormat: desc.DepthStencilFormat,
-			SampleCount:        max(desc.SampleCount, 1),
-		},
-		depthReadOnly:   true,
-		stencilReadOnly: true,
-	}
-	if limits.MaxColorAttachments > 0 && uint32(len(desc.ColorFormats)) > limits.MaxColorAttachments { //nolint:gosec // slice length fits uint32
-		return target, fmt.Errorf("%w: %d color formats exceed maxColorAttachments %d",
-			errBundleDescriptor, len(desc.ColorFormats), limits.MaxColorAttachments)
-	}
-	hasAttachment := false
-	for i, format := range desc.ColorFormats {
-		if format == gputypes.TextureFormatUndefined {
-			continue
-		}
-		hasAttachment = true
-		if format.IsDepthStencil() || format.IsCompressed() {
-			return target, fmt.Errorf("%w: color format [%d] %s is not a renderable color format",
-				errBundleDescriptor, i, format)
-		}
-	}
-	if ds := desc.DepthStencilFormat; ds != gputypes.TextureFormatUndefined {
-		hasAttachment = true
-		if !ds.IsDepthStencil() {
-			return target, fmt.Errorf("%w: depth/stencil format %s is not a depth or stencil format", errBundleDescriptor, ds)
-		}
-		target.depthReadOnly = !ds.HasDepth() || desc.DepthReadOnly
-		target.stencilReadOnly = !ds.HasStencil() || desc.StencilReadOnly
-	}
-	if !hasAttachment {
-		return target, fmt.Errorf("%w: a render bundle needs at least one color or depth/stencil format", errBundleDescriptor)
-	}
-	return target, nil
 }
 
 // record appends a command unless the encoder is finished.
@@ -196,7 +94,7 @@ func (e *RenderBundleEncoder) Finish(desc *RenderBundleDescriptor) (*RenderBundl
 	}
 	commands := e.commands
 	e.commands = nil
-	if e.device.released.Load() {
+	if e.device.IsReleased() {
 		return nil, fmt.Errorf("wgpu: RenderBundleEncoder.Finish: device: %w", ErrReleased)
 	}
 
@@ -215,29 +113,12 @@ func (e *RenderBundleEncoder) Finish(desc *RenderBundleDescriptor) (*RenderBundl
 
 // RenderBundle is a reusable sequence of render commands.
 type RenderBundle struct {
-	device *Device
+	device core.DeviceView
 	label  string
 	// The contents live behind a pointer so RenderBundle stays a comparable
 	// type, as it was before core recorded bundles.
 	*bundleContents
 	released atomic.Bool
-}
-
-// bundleContents is a finished bundle's validated contents.
-type bundleContents struct {
-	target renderBundleTarget
-	// commands is the resolved command list replayed by ExecuteBundles.
-	commands []bundleCommand
-	// scope holds the usages of the bundle's resources, merged into the
-	// usage scope of every pass that executes the bundle.
-	scope *core.RenderBundleScope
-	// refs are the bundle's references to its pipelines, bind groups and
-	// buffers (and the buffers of its bind groups), held until Release.
-	refs []*core.ResourceRef
-	// groups and buffers are recorded on the command encoder of every pass
-	// that executes the bundle, for submit-time validation.
-	groups  []*resource.BindGroup
-	buffers []*Buffer
 }
 
 // Release drops the bundle's references to its resources. Submissions that
@@ -254,4 +135,39 @@ func (b *RenderBundle) Release() {
 		ref.Drop()
 	}
 	b.refs = nil
+}
+
+// replay records the bundle's resolved commands into a backend render pass.
+// Finish validated them, so no state is tracked here.
+// Matches Rust wgpu-core command/bundle.rs RenderBundle::execute.
+func (b *RenderBundle) replay(raw hal.RenderPassEncoder) error {
+	if raw == nil {
+		return nil
+	}
+	for i := range b.commands {
+		cmd := &b.commands[i]
+		switch cmd.kind {
+		case bundleSetPipeline:
+			raw.SetPipeline(cmd.pipeline.impl.HAL())
+		case bundleSetBindGroup:
+			raw.SetBindGroup(cmd.slot, cmd.group.HAL(), cmd.offsets)
+		case bundleSetVertexBuffer:
+			buffer := cmd.buffer.impl.HALBuffer()
+			if buffer == nil {
+				return fmt.Errorf("vertex buffer %q: %w", cmd.buffer.Label(), core.ErrResourceDestroyed)
+			}
+			raw.SetVertexBuffer(cmd.slot, buffer, cmd.offset)
+		case bundleSetIndexBuffer:
+			buffer := cmd.buffer.impl.HALBuffer()
+			if buffer == nil {
+				return fmt.Errorf("index buffer %q: %w", cmd.buffer.Label(), core.ErrResourceDestroyed)
+			}
+			raw.SetIndexBuffer(buffer, cmd.format, cmd.offset)
+		case bundleDraw:
+			raw.Draw(cmd.draw)
+		case bundleDrawIndexed:
+			raw.DrawIndexed(cmd.drawIndexed)
+		}
+	}
+	return nil
 }

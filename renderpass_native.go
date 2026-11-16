@@ -20,9 +20,8 @@ import (
 // The implementation lives in internal/encoder (ADR-070 S5); this declaration
 // is the public surface: every method is one delegation, and the wrappers are
 // converted to the implementation's handle types at the call boundary. The
-// bundle methods stay here: they name the public RenderBundle type, which
-// stays in this package through S6, so the destination gets ReplayBundle and
-// ResetBundleState instead.
+// bundle methods live in renderbundle_execute.go, next to the type they name;
+// the S6 Move re-homes that whole path into the destination (see that file).
 type RenderPassEncoder struct {
 	impl *encoder.RenderPassEncoder
 
@@ -150,77 +149,4 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirectCount(
 // After this call, the encoder cannot be used again.
 func (p *RenderPassEncoder) End() error {
 	return p.impl.End()
-}
-
-// ExecuteBundles executes reusable render command bundles in this render pass.
-// Each bundle's commands are replayed into the pass, its resources join the
-// pass's usage scope, and the pass is left without a pipeline, bind groups,
-// vertex buffers or index buffer: draws after it must set them again.
-//
-// The method lives on this declaration layer, not in the destination: it names
-// *RenderBundle, a type that stays in this package through S6. The destination
-// supplies the two bundle-free halves — ReplayBundle (scope merge, the replay
-// callback, the pre-move error wrapping) and ResetBundleState.
-func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
-	for _, bundle := range bundles {
-		if err := p.executeBundle(bundle); err != nil {
-			p.encoder.setError(fmt.Errorf("wgpu: RenderPass.ExecuteBundles: %w", err))
-			break
-		}
-	}
-	if len(bundles) > 0 {
-		p.impl.ResetBundleState()
-	}
-}
-
-// executeBundle checks that a bundle fits this pass, merges its usages into
-// the pass's usage scope, keeps its resources alive until the GPU completes
-// the submission, and replays its commands into the backend pass.
-// Matches Rust wgpu-core command/render.rs execute_bundle and
-// command/bundle.rs RenderBundle::execute.
-func (p *RenderPassEncoder) executeBundle(bundle *RenderBundle) error {
-	if err := p.checkBundle(bundle); err != nil {
-		return err
-	}
-	// The scope merge and the replay are the destination's (it holds the core
-	// pass); resource tracking stays here, where the wrappers convert without
-	// an allocation, in the pre-move order: merge, track, replay.
-	return p.impl.ReplayBundle(bundle.scope, bundle.label, func() {
-		for _, ref := range bundle.refs {
-			p.encoder.trackRef(ref)
-		}
-		for _, group := range bundle.groups {
-			p.encoder.trackBindGroup(group)
-		}
-		for _, buffer := range bundle.buffers {
-			p.encoder.trackBuffer(buffer.impl)
-		}
-	}, bundle.replay)
-}
-
-// checkBundle checks that a bundle can run in this pass: same device, the
-// pass's attachment formats and sample count, and read-only where the pass's
-// depth/stencil is. Matches the checks of Rust render.rs execute_bundle.
-func (p *RenderPassEncoder) checkBundle(bundle *RenderBundle) error {
-	if bundle == nil {
-		return fmt.Errorf("%w: render bundle is nil", errBundleCommand)
-	}
-	if bundle.released.Load() {
-		return fmt.Errorf("bundle %q: %w", bundle.label, ErrReleased)
-	}
-	if bundle.bundleContents == nil {
-		return fmt.Errorf("%w: render bundle %q was not created by RenderBundleEncoder.Finish", errBundleCommand, bundle.label)
-	}
-	if bundle.device != p.encoder.device {
-		return fmt.Errorf("bundle %q: %w", bundle.label, errBundleDevice)
-	}
-	if ctx := p.core.PassContext(); ctx != nil {
-		if err := ctx.CheckCompatible(&bundle.target.context, bundle.label); err != nil {
-			return fmt.Errorf("bundle %q: %w", bundle.label, err)
-		}
-	}
-	if (p.depthReadOnly && !bundle.target.depthReadOnly) || (p.stencilReadOnly && !bundle.target.stencilReadOnly) {
-		return fmt.Errorf("bundle %q: %w", bundle.label, errBundleReadOnly)
-	}
-	return nil
 }

@@ -71,7 +71,7 @@ func (p *ComputePassEncoder) SetPipeline(pipeline *ComputePipeline) {
 // SetPipeline, or name an index the current pipeline does not use: the group
 // is bound to the backend at the next dispatch whose pipeline layout uses it.
 func (p *ComputePassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	limits := &p.encoder.device.core.Limits
+	limits := &p.core.Device().Limits
 	if group == nil || group.impl == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: ComputePass.SetBindGroup: bind group is nil"))
 		return
@@ -147,7 +147,7 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 	// VAL-009: Validate workgroup counts against device limits.
 	// Matches Rust wgpu-core compute.rs:853-870.
 	// (0, 0, 0) is allowed as a no-op per spec.
-	limit := p.encoder.device.core.Limits.MaxComputeWorkgroupsPerDimension
+	limit := p.core.Device().Limits.MaxComputeWorkgroupsPerDimension
 	if x > limit || y > limit || z > limit {
 		p.encoder.setError(fmt.Errorf(
 			"wgpu: ComputePass.Dispatch: workgroup count (%d, %d, %d) exceeds device limit %d: %w",
@@ -170,9 +170,9 @@ func (p *ComputePassEncoder) Dispatch(x, y, z uint32) {
 // Matches Rust wgpu-core compute.rs State::flush_bindings, which merges only
 // the bind groups the pipeline uses (binder.list_active).
 func (p *ComputePassEncoder) flushDispatch(method string, indirect *Buffer, indirectUsage track.BufferUses) bool {
-	var groups [MaxBindGroups]*core.BindGroupUsages
+	var groups [core.MaxBindGroups]*core.BindGroupUsages
 	active := groups[:0]
-	for i := uint32(0); i < MaxBindGroups; i++ {
+	for i := uint32(0); i < core.MaxBindGroups; i++ {
 		if bg := p.binder.ActiveGroup(i); bg != nil {
 			active = append(active, bg.Usages())
 		}
@@ -238,7 +238,7 @@ func (p *ComputePassEncoder) DispatchIndirect(buffer *Buffer, offset uint64) {
 	// the validated destination buffer instead of the user's original buffer.
 	//
 	// Matches Rust wgpu-core compute.rs:921-1059.
-	iv := p.encoder.device.core.IndirectValidation()
+	iv := p.core.Device().IndirectValidation()
 	raw := p.core.RawPass()
 	validated := iv != nil && raw != nil
 

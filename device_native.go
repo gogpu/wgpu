@@ -1816,7 +1816,7 @@ func (d *Device) CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) 
 		return nil, ErrReleased
 	}
 
-	bundleEncoder, err := newRenderBundleEncoder(d, desc)
+	bundleEncoder, err := newRenderBundleEncoder(d.seamView(), desc)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: CreateRenderBundleEncoder: %w", err)
 	}

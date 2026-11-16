@@ -24,10 +24,23 @@ import (
 // The type lived in the root package until ADR-070 S5; its signatures name
 // the domain's handle types (resource.Buffer, pipeline.RenderPipeline,
 // resource.BindGroup), and the root declaration layer converts at the call
-// boundary. The public wrapper keeps the bundle-conformance checks and the
-// ExecuteBundles loop, because they name the public RenderBundle type, which
-// this package cannot; ReplayBundle and ResetBundleState here are the
-// bundle-free half the wrapper calls.
+// boundary.
+//
+// Superseded 2026-11-16 (S6 Prepare). At S5 the public wrapper kept the
+// bundle-conformance checks and the ExecuteBundles loop, because they name the
+// public RenderBundle type, which this package cannot; ReplayBundle and
+// ResetBundleState here are the bundle-free half the wrapper calls. That split
+// rested on the premise that RenderBundle stays in the root package through S6
+// — and S6 is exactly the step that ends it: RenderBundle moves into this
+// package, so at the S6 Move the whole bundle-execution path (the checks, the
+// resource tracking, the replay and the reset) becomes this package's, against
+// its own RenderBundle, and the root wrapper delegates. The second reason is
+// the one the S5 fix 56e4471 pinned for the reverse direction: a check or a
+// replay that reads the bundle's resolved state cannot be written in a
+// declaration layer once the type is destination-resident.
+//
+// Until that Move the wrapper still calls ReplayBundle and ResetBundleState,
+// so this comment describes the tree as it is now.
 type RenderPassEncoder struct {
 	core    *core.CoreRenderPassEncoder
 	encoder *CommandEncoder
@@ -76,7 +89,8 @@ type RenderPassEncoder struct {
 // NewRenderPassEncoder builds the pass encoder BeginRenderPass describes. The
 // root declaration layer calls it with the start value and the encoder, and
 // keeps its own copy of the read-only flags and the core pass for the bundle
-// checks (the public RenderBundle type stays root through S6).
+// checks (the public RenderBundle type stays root until the S6 Move — see the
+// type comment for the superseded split).
 func NewRenderPassEncoder(start *RenderPassStart, e *CommandEncoder) *RenderPassEncoder {
 	return &RenderPassEncoder{
 		core:            start.Core,
@@ -560,7 +574,8 @@ func (p *RenderPassEncoder) End() error {
 // replays the bundle's commands into the backend pass. The public wrapper
 // runs the bundle-conformance checks first (they name the public RenderBundle
 // type, which this package cannot) and builds both callbacks from the bundle;
-// the error wrapping is the pre-move one.
+// the error wrapping is the pre-move one. The S5 split is superseded at S6
+// (see the type comment): the S6 Move re-homes the checks here.
 //
 // Matches Rust wgpu-core command/render.rs execute_bundle and
 // command/bundle.rs RenderBundle::execute.

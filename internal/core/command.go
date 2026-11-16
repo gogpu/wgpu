@@ -1761,6 +1761,15 @@ func (p *CoreComputePassEncoder) RawPass() hal.ComputePassEncoder {
 	return p.raw
 }
 
+// Device returns the parent device. The pass validation that needs the
+// device's limits (the dispatch workgroup-count gate) and its indirect
+// validation resources reads them here, so the recorders never reach back
+// through the public device wrapper (the CoreRenderPassEncoder.Device
+// precedent).
+func (p *CoreComputePassEncoder) Device() *Device {
+	return p.device
+}
+
 // ReplaceRawPass replaces the underlying HAL compute pass encoder.
 // Used by indirect dispatch validation which ends/re-begins the HAL pass
 // to insert barriers between the validation dispatch and the user dispatch.

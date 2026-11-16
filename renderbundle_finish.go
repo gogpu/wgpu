@@ -17,13 +17,21 @@ import (
 // (WebGPU setVertexBuffer; Rust wgpu-types VERTEX_ALIGNMENT).
 const vertexBufferAlignment = 4
 
+// refLabel returns the debug label of a resource reference, or "".
+func refLabel(ref *core.ResourceRef) string {
+	if ref == nil {
+		return ""
+	}
+	return ref.Label()
+}
+
 // bundleState validates the commands of a render bundle encoder in order
 // and builds the bundle's resolved command list: SetBindGroup is held by a
 // binder and emitted right before each draw, for the groups the draw's
 // pipeline uses, so the bundle never binds a group without its pipeline.
 // Matches Rust wgpu-core command/bundle.rs State.
 type bundleState struct {
-	device *Device
+	device core.DeviceView
 	target *renderBundleTarget
 	binder encoder.Binder
 
@@ -41,7 +49,7 @@ type bundleState struct {
 	buffers []*Buffer
 }
 
-func newBundleState(device *Device, target *renderBundleTarget) *bundleState {
+func newBundleState(device core.DeviceView, target *renderBundleTarget) *bundleState {
 	return &bundleState{
 		device: device,
 		target: target,
@@ -83,7 +91,7 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 	if pipeline.impl.IsReleased() {
 		return fmt.Errorf("SetPipeline: pipeline: %w", ErrReleased)
 	}
-	if pipeline.impl.Device() != s.device.seamView() {
+	if pipeline.impl.Device() != s.device {
 		return fmt.Errorf("SetPipeline: pipeline: %w", errBundleDevice)
 	}
 	passContext := pipeline.impl.PassContext()
@@ -105,13 +113,13 @@ func (s *bundleState) setPipeline(pipeline *RenderPipeline) error {
 // the binder; nothing is emitted until a draw uses it.
 // Matches Rust bundle.rs set_bind_group.
 func (s *bundleState) setBindGroup(index uint32, group *resource.BindGroup, offsets []uint32) error {
-	if err := encoder.ValidateSetBindGroup("RenderBundleEncoder", index, group, offsets, &s.device.core.Limits); err != nil {
+	if err := encoder.ValidateSetBindGroup("RenderBundleEncoder", index, group, offsets, &s.device.Core().Limits); err != nil {
 		return err
 	}
 	if group.IsReleased() {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, ErrReleased)
 	}
-	if group.Device() != s.device.seamView() {
+	if group.Device() != s.device {
 		return fmt.Errorf("SetBindGroup: index %d: %w", index, errBundleDevice)
 	}
 	if err := s.scope.MergeBindGroup(group.Usages()); err != nil {
@@ -132,7 +140,7 @@ func (s *bundleState) checkBuffer(method string, buffer *Buffer, usage gputypes.
 	}
 	// The buffer's host is the shared device view; the device's cached adapter
 	// is one pointer per Device, so interface equality is device identity.
-	if buffer.impl.Device() != s.device.seamView() {
+	if buffer.impl.Device() != s.device {
 		return fmt.Errorf("%s: buffer: %w", method, errBundleDevice)
 	}
 	if buffer.Usage()&usage == 0 {
@@ -146,7 +154,7 @@ func (s *bundleState) checkBuffer(method string, buffer *Buffer, usage gputypes.
 
 // setVertexBuffer matches Rust bundle.rs set_vertex_buffer.
 func (s *bundleState) setVertexBuffer(cmd *bundleCommand) error {
-	if limit := s.device.core.Limits.MaxVertexBuffers; limit > 0 && cmd.slot >= limit {
+	if limit := s.device.Core().Limits.MaxVertexBuffers; limit > 0 && cmd.slot >= limit {
 		return fmt.Errorf("SetVertexBuffer: %w: slot %d >= maxVertexBuffers %d", errBundleCommand, cmd.slot, limit)
 	}
 	if err := s.checkBuffer("SetVertexBuffer", cmd.buffer, BufferUsageVertex, cmd.offset); err != nil {
