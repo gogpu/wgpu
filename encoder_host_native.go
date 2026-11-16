@@ -45,3 +45,10 @@ func (h encoderDeviceHost) NewStencilUpload(dst *resource.Texture, mipLevel uint
 	}
 	return h.d.newStencilUpload(pub, mipLevel, Origin3D(origin), Extent3D(size))
 }
+
+// Features returns the device's enabled features: the render pass reads them
+// for its draw feature gates (MultiDrawIndirect and MultiDrawIndirectCount),
+// as the pre-move pass read them from *Device directly.
+func (h encoderDeviceHost) Features() gputypes.Features {
+	return h.d.Features()
+}

@@ -97,7 +97,10 @@ func (p *RenderPassEncoder) SetPipeline(pipeline *RenderPipeline) {
 // SetPipeline, or name an index the current pipeline does not use: the group
 // is bound to the backend at the next draw whose pipeline layout uses it.
 func (p *RenderPassEncoder) SetBindGroup(index uint32, group *BindGroup, offsets []uint32) {
-	limits := &p.encoder.device.core.Limits
+	// The core pass owns the device that created it: the limits are read from
+	// there, not through the root device wrapper, so the read needs no seam
+	// method after the move into internal/encoder (ADR-070 S5).
+	limits := &p.core.Device().Limits
 	if group == nil || group.impl == nil {
 		p.encoder.setError(fmt.Errorf("wgpu: RenderPass.SetBindGroup: bind group is nil"))
 		return
@@ -422,35 +425,9 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	p.core.MultiDrawIndexedIndirect(buffer.impl.CoreBuffer(), offset, drawCount)
 }
 
-// ExecuteBundles executes reusable render command bundles in this render pass.
-// Each bundle's commands are replayed into the pass, its resources join the
-// pass's usage scope, and the pass is left without a pipeline, bind groups,
-// vertex buffers or index buffer: draws after it must set them again.
-func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
-	for _, bundle := range bundles {
-		if err := p.executeBundle(bundle); err != nil {
-			p.encoder.setError(fmt.Errorf("wgpu: RenderPass.ExecuteBundles: %w", err))
-			break
-		}
-	}
-	if len(bundles) > 0 {
-		p.resetBundleState()
-	}
-}
-
-// resetBundleState clears the pipeline, bind groups, vertex buffers and
-// index buffer after ExecuteBundles: a bundle leaves the backend with its own
-// state, and WebGPU requires them to be set again (executeBundles; Rust
-// wgpu-core State::reset_bundle). Without it the binder would take the
-// backend's bindings for current.
-func (p *RenderPassEncoder) resetBundleState() {
-	p.binder.reset()
-	p.pipelineSet = false
-	p.requiredVertexBuffers = 0
-	p.currentStripIndexFormat = nil
-	p.vertexBufferCount = 0
-	p.indexBufferSet = false
-}
+// ExecuteBundles and resetBundleState live in renderbundle_execute.go: they
+// name *RenderBundle, a type that stays in this package through S6, so they
+// stay with their helper executeBundle instead of moving with this file in S5.
 
 // MultiDrawIndirectCount draws primitives with a GPU-provided draw count.
 // countBuffer must hold a uint32 count at countOffset. VAL-C2: requires FeatureMultiDrawIndirectCount.

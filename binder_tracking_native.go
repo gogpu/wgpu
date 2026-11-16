@@ -12,6 +12,28 @@ import (
 	"github.com/gogpu/wgpu/internal/resource"
 )
 
+// The binder: per-slot bind group state, the draw-time compatibility checks and
+// the late buffer binding validation shared by the render pass, the compute
+// pass and the render bundle encoder.
+//
+// This file is the staying-side home of the declarations that lived in
+// binder.go until the S5 Prepare (2026-11-16). They stay in the root package
+// because staying root files name them (the `unexported-boundary` class of the
+// ADR-070 planner: computepass_native.go:38 and renderbundle_finish.go:27 hold
+// a `binder` field; both wrap the group's compatibility errors with
+// errBindGroupIncompatible; both call validateSetBindGroup). The moving S5 set
+// — renderpass_native.go, renderpass_browser.go, renderpass_rust.go,
+// renderpass_indirect_count.go — reaches them through handRewrite-deferred
+// references, which the Move resolves.
+//
+// Move worklist (S5): the binder cluster relocates into internal/encoder with
+// the render pass (its only remaining user inside the destination once S6
+// moves the compute pass and the bundle encoder); the root copies of
+// computepass_native.go and renderbundle_finish.go then reach it as
+// encoder.Binder / encoder.ValidateSetBindGroup / encoder.ErrBindGroupIncompatible
+// until S6. The white-box tests binder_test.go and binder_rebind_test.go follow
+// the cluster into the destination.
+
 // lateBufferBinding tracks a single buffer binding that requires late validation.
 // Populated from two independent sources (order-independent, matching Rust):
 //   - ShaderExpectSize is set when a pipeline is bound (from LateSizedBufferGroup)

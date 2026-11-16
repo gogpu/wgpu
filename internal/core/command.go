@@ -1443,6 +1443,13 @@ func (p *CoreRenderPassEncoder) PassContext() *RenderPassContext {
 	return p.passContext
 }
 
+// Device returns the parent device. The pass validation that needs the
+// device's limits (SetBindGroup's dynamic-offset checks) reads them here, so
+// the recorders never reach back through the public device wrapper.
+func (p *CoreRenderPassEncoder) Device() *Device {
+	return p.device
+}
+
 // recordBufferUsage records a buffer usage in this render pass's usage scope.
 // Buffers without valid tracking data are skipped. Returns an error if the
 // buffer already has an incompatible usage in this pass.

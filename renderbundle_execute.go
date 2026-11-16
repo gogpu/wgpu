@@ -71,6 +71,42 @@ func (p *RenderPassEncoder) checkBundle(bundle *RenderBundle) error {
 	return nil
 }
 
+// ExecuteBundles executes reusable render command bundles in this render pass.
+// Each bundle's commands are replayed into the pass, its resources join the
+// pass's usage scope, and the pass is left without a pipeline, bind groups,
+// vertex buffers or index buffer: draws after it must set them again.
+//
+// ExecuteBundles and resetBundleState keep their home here, next to
+// executeBundle, instead of moving with the rest of renderpass_native.go in
+// S5: they name *RenderBundle, which stays in this package through S6, and the
+// destination cannot name a root type. The Move gives the internal encoder a
+// small method for the replay-and-reset step this file then calls.
+func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
+	for _, bundle := range bundles {
+		if err := p.executeBundle(bundle); err != nil {
+			p.encoder.setError(fmt.Errorf("wgpu: RenderPass.ExecuteBundles: %w", err))
+			break
+		}
+	}
+	if len(bundles) > 0 {
+		p.resetBundleState()
+	}
+}
+
+// resetBundleState clears the pipeline, bind groups, vertex buffers and
+// index buffer after ExecuteBundles: a bundle leaves the backend with its own
+// state, and WebGPU requires them to be set again (executeBundles; Rust
+// wgpu-core State::reset_bundle). Without it the binder would take the
+// backend's bindings for current.
+func (p *RenderPassEncoder) resetBundleState() {
+	p.binder.reset()
+	p.pipelineSet = false
+	p.requiredVertexBuffers = 0
+	p.currentStripIndexFormat = nil
+	p.vertexBufferCount = 0
+	p.indexBufferSet = false
+}
+
 // replay records the bundle's resolved commands into a backend render pass.
 // Finish validated them, so no state is tracked here.
 // Matches Rust wgpu-core command/bundle.rs RenderBundle::execute.

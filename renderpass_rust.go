@@ -132,23 +132,6 @@ func (p *RenderPassEncoder) MultiDrawIndexedIndirect(buffer *Buffer, offset uint
 	})
 }
 
-// lowerRustIndexedIndirect lowers one counted span through the Rust adapter's
-// single-record interface. Invalid positive spans delegate exactly one failing
-// record before any valid record can be emitted.
-func lowerRustIndexedIndirect(bufferSize, offset uint64, drawCount uint32, draw func(uint64)) {
-	if drawCount == 0 {
-		return
-	}
-	if !indexedIndirectRangeFits(bufferSize, offset, drawCount) {
-		draw(indirect.DelegatedValidationOffset(bufferSize, offset, drawIndexedIndirectRecordSize, drawCount))
-		return
-	}
-	for i := uint32(0); i < drawCount; i++ {
-		recordOffset, _ := indirect.RecordOffset(offset, drawIndexedIndirectRecordSize, i)
-		draw(recordOffset)
-	}
-}
-
 // End ends the render pass.
 func (p *RenderPassEncoder) End() error {
 	if p.released {

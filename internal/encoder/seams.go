@@ -88,4 +88,15 @@ type DeviceHost interface {
 	// NewStencilUpload creates the staging texture an upload of size into the
 	// stencil of dst at mipLevel and origin goes through.
 	NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin gputypes.Origin3D, size gputypes.Extent3D) (Upload, error)
+	// Features returns the device's enabled features. The render pass reads
+	// them for the draw feature gates (MultiDrawIndirect and
+	// MultiDrawIndirectCount) exactly as the pre-move pass read them from the
+	// root Device.
+	//
+	// A value, not a handle: there is no untyped-nil case here, and a
+	// zero-value encoder (nil seam) panics on the call, as the pre-move nil
+	// *Device dereference did. A host returns the features it enabled at
+	// device creation, never a zero set: a zero set would silently disable
+	// gates the device supports.
+	Features() gputypes.Features
 }

@@ -9,19 +9,6 @@ import (
 	"github.com/gogpu/wgpu/internal/core"
 )
 
-type indirectCountDrawConfig struct {
-	validateDrawOp  string
-	featureResource string
-	indirectBuffer  *Buffer
-	indirectOffset  uint64
-	countBuffer     *Buffer
-	countOffset     uint64
-	maxDrawCount    uint32
-	recordStride    uint64
-	preValidate     func() error
-	record          func()
-}
-
 func (p *RenderPassEncoder) executeIndirectCountDraw(cfg indirectCountDrawConfig) {
 	if cfg.maxDrawCount == 0 {
 		return
