@@ -14,10 +14,12 @@ import (
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
+	"github.com/gogpu/wgpu/internal/device"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // Device represents a logical GPU device.
@@ -26,9 +28,22 @@ import (
 // Device methods are safe for concurrent use, except Release() which
 // must not be called concurrently with other methods.
 type Device struct {
-	core     *core.Device
-	queue    *Queue
+	core  *core.Device
+	queue *Queue
+
+	// instance is the identity-check cache: the root Instance that adopted this
+	// device, written once by setInstance at construction and cleared by
+	// Release. Surface.Configure compares it to reject a cross-instance
+	// device/surface pair. It is never set independently of instanceHost, so
+	// the two cannot diverge (ADR-070 S11, lead ruling).
 	instance *Instance
+
+	// instanceHost is the device domain's seam view of the instance: the
+	// teardown scan's surface list and the unregister on release. nil for a
+	// device that was never adopted (a bare HAL or core-only device), which is
+	// also when instance is nil.
+	instanceHost device.InstanceHost
+
 	released atomic.Bool
 
 	// test, when non-nil, records the public calls for package wgputest.
@@ -63,6 +78,24 @@ type Device struct {
 	// the white-box fixtures that build a Device as a bare literal instead of
 	// going through a constructor.
 	view atomic.Pointer[deviceView]
+}
+
+// setInstance wires the device to the instance that adopted it: it stores the
+// seam host the release paths read and refreshes the identity cache from the
+// same host, so the two always describe one instance. It takes the concrete
+// host rather than device.InstanceHost because it binds the device pointer and
+// reads the root instance pointer, neither of which the seam may name; the
+// call-site assignment is the compile check that the host satisfies the seam.
+//
+// Called once, by Instance.adoptDevice. Nothing else writes instance or
+// instanceHost (ADR-070 S11, lead ruling).
+func (d *Device) setInstance(h *deviceInstanceHost) {
+	if h == nil {
+		return
+	}
+	h.d = d
+	d.instanceHost = h
+	d.instance = h.i
 }
 
 // Queue returns the device's command queue.
@@ -1673,16 +1706,16 @@ func (d *Device) Release() {
 	if d == nil || d.released.Swap(true) {
 		return
 	}
-	var configuredSurfaces []*Surface
-	if d.instance != nil {
-		configuredSurfaces = d.instance.surfacesForDevice(d)
+	var configuredSurfaces []*surface.Surface
+	if d.instanceHost != nil {
+		configuredSurfaces = d.instanceHost.SurfacesForDevice(d.seamView())
 	}
 	// Retire active acquisitions while the backend device is still alive.
 	// Vulkan keeps the configured swapchain itself and retires it in
 	// hal.Device.Destroy; other backends also get a chance to release borrowed
 	// drawable state before their device disappears.
-	for _, surface := range configuredSurfaces {
-		surface.discardForDevice(d)
+	for _, s := range configuredSurfaces {
+		s.DiscardForDevice(d.core)
 	}
 	if d.instance != nil {
 		defer func() {
@@ -1732,8 +1765,8 @@ func (d *Device) Release() {
 	// Step 5: Destroy core + HAL device. core.Destroy() calls FlushAll again
 	// (idempotent — already flushed) then halDevice.Destroy().
 	d.core.Destroy()
-	for _, surface := range configuredSurfaces {
-		surface.retireDevice(d)
+	for _, s := range configuredSurfaces {
+		s.RetireDevice(d.core)
 	}
 }
 

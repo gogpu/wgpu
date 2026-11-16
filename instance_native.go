@@ -182,7 +182,7 @@ func (i *Instance) adoptDevice(device *Device) error {
 		i.devices = make(map[*Device]struct{})
 	}
 	i.devices[device] = struct{}{}
-	device.instance = i
+	device.setInstance(newDeviceInstanceHost(i))
 	return nil
 }
 
@@ -221,24 +221,10 @@ func (i *Instance) unregisterSurface(surface *Surface) {
 	i.mu.Unlock()
 }
 
-func (i *Instance) surfacesForDevice(device *Device) []*Surface {
-	if i == nil || device == nil {
-		return nil
-	}
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	surfaces := make([]*Surface, 0, len(i.surfaces))
-	// Device.Release marks the device released before reaching this scan, and
-	// Surface.Configure rejects a released device before assigning surface.device.
-	// The association is therefore stable for this teardown snapshot even though
-	// Surface deliberately has no second ownership lock.
-	for surface := range i.surfaces {
-		if surface != nil && surface.sameDevice(device) {
-			surfaces = append(surfaces, surface)
-		}
-	}
-	return surfaces
-}
+// surfacesForDevice stood here as the device teardown's scan. It moved into the
+// device domain's instance host (device_instance_host_native.go), which walks
+// this registry under the same lock and filtering rule; Device.Release reads
+// the scan through that seam (ADR-070 S11).
 
 func (i *Instance) beginRelease() ([]*Device, []*Surface, bool) {
 	if i == nil {

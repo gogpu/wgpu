@@ -447,30 +447,11 @@ func (s *Surface) DiscardTexture() {
 	s.impl.DiscardTexture()
 }
 
-// sameDevice reports whether the surface is configured against device. The
-// destination compares the core device identity, so an adapter value built per
-// call never compares equal to the stored one. A nil device, or a nil core on
-// either side, is no match.
-func (s *Surface) sameDevice(device *Device) bool {
-	if s == nil || s.impl == nil || device == nil {
-		return false
-	}
-	return s.impl.SameDevice(device.core)
-}
-
-func (s *Surface) discardForDevice(device *Device) {
-	if s == nil || s.impl == nil || device == nil {
-		return
-	}
-	s.impl.DiscardForDevice(device.core)
-}
-
-func (s *Surface) retireDevice(device *Device) {
-	if s == nil || s.impl == nil || device == nil {
-		return
-	}
-	s.impl.RetireDevice(device.core)
-}
+// sameDevice, discardForDevice and retireDevice stood here as the device
+// teardown's projections onto this wrapper. Release now reads the configured
+// surfaces from device.InstanceHost, which hands it the implementations
+// directly, so the three lost their only caller and go with the seam that
+// replaced them (ADR-070 S11).
 
 // Release releases the surface: the implementation destroys the HAL surfaces,
 // and this layer then unregisters the surface from its instance and drops the
