@@ -26,9 +26,10 @@ type DeviceDescriptor struct {
 // The implementation lives in internal/instance (ADR-070 S12); this type is the
 // declaration layer the public API is frozen on.
 //
-// released is the public zero-value contract: a wrapper without an
-// implementation cannot record its release in it, and the browser build's zero
-// value answers its HAL kind until it is released.
+// released is declaration-layer state, not an implementation fact: a wrapper
+// without an implementation cannot record its release in it, and the browser
+// build's zero value answers its HAL kind until it is released. Release is its
+// single writer (ADR-070 S12 settle); nothing else assigns it.
 type Adapter struct {
 	impl     *instance.Adapter
 	released bool
@@ -45,7 +46,14 @@ func (a *Adapter) Limits() gputypes.Limits { return a.impl.Limits() }
 
 // DownlevelCapabilities returns backend capability flags for downlevel adapters.
 // Browsers are fully WebGPU compliant, so this returns the default (full compliance).
+//
+// A nil receiver answers the default too: the pre-move method was a constant and
+// ignored the receiver, and the declaration layer must not turn that into a
+// panic (ADR-070 S12 settle).
 func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	if a == nil {
+		return gputypes.DefaultDownlevelCapabilities()
+	}
 	return a.impl.DownlevelCapabilities()
 }
 

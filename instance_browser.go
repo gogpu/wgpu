@@ -32,9 +32,10 @@ type InstanceDescriptor struct {
 // The implementation lives in internal/instance (ADR-070 S12); this type is the
 // declaration layer the public API is frozen on.
 //
-// released is the public zero-value contract: a wrapper without an
-// implementation cannot record its release in it, and the browser build's zero
-// value answers its HAL kind until it is released.
+// released is declaration-layer state, not an implementation fact: a wrapper
+// without an implementation cannot record its release in it, and the browser
+// build's zero value answers its HAL kind until it is released. Release is its
+// single writer (ADR-070 S12 settle); nothing else assigns it.
 type Instance struct {
 	impl     *instance.Instance
 	released bool

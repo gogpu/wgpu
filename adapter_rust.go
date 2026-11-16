@@ -42,7 +42,14 @@ func (a *Adapter) Limits() gputypes.Limits { return a.impl.Limits() }
 
 // DownlevelCapabilities returns backend capability flags for downlevel adapters.
 // Rust wgpu handles real values internally; from Go FFI we return fully compliant defaults.
+//
+// A nil receiver answers them too: the pre-move method was a constant and
+// ignored the receiver, and the declaration layer must not turn that into a
+// panic (ADR-070 S12 settle).
 func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
+	if a == nil {
+		return gputypes.DefaultDownlevelCapabilities()
+	}
 	return a.impl.DownlevelCapabilities()
 }
 
@@ -75,8 +82,12 @@ type SurfaceCapabilities struct {
 }
 
 // GetSurfaceCapabilities returns the capabilities of a surface for this adapter.
+//
+// A nil receiver answers nil. Unlike DownlevelCapabilities, the pre-move method
+// read its receiver (a.released) and panicked on a nil one, so this guard is a
+// safe-direction delta, not a restored default (ADR-070 S12 settle, P2-CORE-034).
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
-	if surface == nil {
+	if a == nil || surface == nil {
 		return nil
 	}
 	caps := a.impl.GetSurfaceCapabilities(surface.impl)
