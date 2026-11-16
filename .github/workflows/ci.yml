@@ -483,11 +483,11 @@ jobs:
         [ $WARNINGS -gt 0 ] && echo "::warning::$WARNINGS ecosystem dep(s) outdated"
         exit 0
 
-  # The root package's js/wasm tests actually EXECUTE here (node runs the
+  # The root and encoder packages' js/wasm tests actually EXECUTE here (node runs the
   # wasm binary): browser-context contract tests are otherwise compiled and
   # vetted but never run (P2-INFRA-014).
   wasm-test:
-    name: wasm test (root package, node)
+    name: wasm test (root + encoder, node)
     runs-on: ubuntu-latest
 
     steps:
@@ -503,11 +503,11 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Run the root test suite on js/wasm
+    - name: Run the root and encoder test suites on js/wasm
       env:
         GOOS: js
         GOARCH: wasm
-      run: go test -count=1 -v .
+      run: go test -count=1 -v . ./internal/encoder/
 
   # The one check the main-protection ruleset requires, by this exact job name:
   # renaming the job silently drops the requirement. Jobs and the matrix can
