@@ -63,12 +63,15 @@ type testHALCommandBuffer struct{ hal.CommandBuffer }
 func (testHALCommandBuffer) Destroy() {}
 
 // testHALQueue is the HAL queue double: it counts the uploads and submissions
-// that reach it and reports a completion index the test controls.
+// that reach it and reports a completion index the test controls. An upload
+// error can be installed to keep the backend-error path covered (the double
+// otherwise always succeeds, so nothing else would exercise the propagation).
 type testHALQueue struct {
 	hal.Queue
-	submitCalls   int
-	writeTextures int
-	completed     uint64
+	submitCalls     int
+	writeTextures   int
+	completed       uint64
+	writeTextureErr error
 }
 
 func (q *testHALQueue) Submit([]hal.CommandBuffer) (uint64, error) {
@@ -80,7 +83,7 @@ func (q *testHALQueue) PollCompleted() uint64 { return q.completed }
 
 func (q *testHALQueue) WriteTexture(*hal.ImageCopyTexture, []byte, *hal.ImageDataLayout, *hal.Extent3D) error {
 	q.writeTextures++
-	return nil
+	return q.writeTextureErr
 }
 
 // testEncoderPool is the HalEncoderPool double: Acquire hands out the minimal

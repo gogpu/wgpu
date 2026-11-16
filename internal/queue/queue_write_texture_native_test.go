@@ -137,3 +137,29 @@ func TestQueueWriteTextureValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestWriteTextureHALErrorPropagates keeps the backend-error path covered: the
+// validation table's valid rows only assert success, and the destination's HAL
+// double returns nil unconditionally, so without this test a swallowed backend
+// error would go unnoticed (the pre-move double delegated to noop.Queue, which
+// could report one). The HAL error must reach the caller verbatim.
+func TestWriteTextureHALErrorPropagates(t *testing.T) {
+	host, device := newTestHost(t, false)
+	halErr := errors.New("test HAL: texture upload failed")
+	halQueue := &testHALQueue{writeTextureErr: halErr}
+	q := New(halQueue, nil)
+	q.SetDevice(host)
+
+	tex := newTestUploadTexture(t, device, host, gputypes.TextureUsageCopyDst, 1, 1)
+	dst := &ImageCopyTexture{Texture: tex}
+	layout := &ImageDataLayout{BytesPerRow: 16, RowsPerImage: 4}
+	size := &Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 1}
+
+	err := q.WriteTexture(dst, make([]byte, 64), layout, size)
+	if !errors.Is(err, halErr) {
+		t.Fatalf("WriteTexture = %v, want the HAL error verbatim", err)
+	}
+	if halQueue.writeTextures != 1 {
+		t.Fatalf("backend writes = %d, want 1", halQueue.writeTextures)
+	}
+}
