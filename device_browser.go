@@ -105,6 +105,11 @@ func convertTextureDescriptor(desc *TextureDescriptor) js.Value {
 
 // CreateTextureView creates a view into a texture.
 func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor) (*TextureView, error) {
+	// A non-nil wrapper without an implementation is a zero-value handle, not
+	// an absent one: it answers ErrReleased on every build (S11 review F3).
+	if texture != nil && texture.impl == nil {
+		return nil, ErrReleased
+	}
 	var parent *resource.Texture
 	if texture != nil {
 		parent = texture.impl

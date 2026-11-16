@@ -12,6 +12,7 @@ package wgpu
 // cache the surface cross-check reads.
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gogpu/gputypes"
@@ -112,6 +113,12 @@ func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
 
 // CreateTextureView creates a view into a texture.
 func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor) (*TextureView, error) {
+	// A non-nil wrapper without an implementation is a zero-value handle, not
+	// an absent one: it answers ErrReleased, as the pre-move implementation did
+	// through the nil-safe ResolveHAL (S11 review F3).
+	if texture != nil && texture.impl == nil {
+		return nil, ErrReleased
+	}
 	var parent *resource.Texture
 	if texture != nil {
 		parent = texture.impl
@@ -201,14 +208,11 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		}
 		entries := make([]device.BindGroupEntry, len(desc.Entries))
 		for i, e := range desc.Entries {
-			entries[i] = device.BindGroupEntry{
-				Binding:     e.Binding,
-				Buffer:      bufferImpl(e.Buffer),
-				Offset:      e.Offset,
-				Size:        e.Size,
-				Sampler:     samplerImpl(e.Sampler),
-				TextureView: textureViewImpl(e.TextureView),
+			entry, err := bindGroupEntry(e)
+			if err != nil {
+				return nil, err
 			}
+			entries[i] = entry
 		}
 		bgDesc = &device.BindGroupDescriptor{Label: desc.Label, Layout: layout, Entries: entries}
 	}
@@ -217,6 +221,36 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 		return nil, err
 	}
 	return &BindGroup{impl: impl}, nil
+}
+
+// bindGroupEntry converts one public bind group entry into the device-local
+// one. The three zero-value handles keep the answers they had before the move,
+// per the S11 review's identity standard:
+//   - a non-nil TextureView wrapper without an implementation answered
+//     ErrReleased (its nil-safe ResolveHAL guard);
+//   - a non-nil Buffer wrapper without an implementation panicked in the
+//     pre-move entry inspection, which read the public wrapper's Usage through
+//     a nil handle (buildBindGroupValidationInfos:692);
+//   - a non-nil Sampler wrapper without an implementation was accepted and
+//     bound nothing.
+//
+// Normalising the three to defined errors is a good change that is carded for
+// after this moves-only window.
+func bindGroupEntry(e BindGroupEntry) (device.BindGroupEntry, error) {
+	if e.TextureView != nil && e.TextureView.impl == nil {
+		return device.BindGroupEntry{}, ErrReleased
+	}
+	if e.Buffer != nil && e.Buffer.impl == nil {
+		_ = e.Buffer.Usage() // nil handle: panics, exactly as before the move
+	}
+	return device.BindGroupEntry{
+		Binding:     e.Binding,
+		Buffer:      bufferImpl(e.Buffer),
+		Offset:      e.Offset,
+		Size:        e.Size,
+		Sampler:     samplerImpl(e.Sampler),
+		TextureView: textureViewImpl(e.TextureView),
+	}, nil
 }
 
 // samplerImpl returns the implementation handle of a sampler wrapper, or nil.
@@ -416,6 +450,12 @@ func (d *Device) Poll(pollType PollType) bool {
 
 // CreateRenderBundleEncoder creates an encoder for reusable render commands.
 func (d *Device) CreateRenderBundleEncoder(desc *RenderBundleEncoderDescriptor) (*RenderBundleEncoder, error) {
+	// The descriptor check belongs before the forwarding: a nil descriptor
+	// answered this error before the move, and a nil *Device would otherwise
+	// panic on d.impl first (S11 delta review M1).
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: render bundle encoder descriptor is nil")
+	}
 	var encDesc *encoder.RenderBundleEncoderDescriptor
 	if desc != nil {
 		encDesc = encoderRenderBundleEncoderDescriptor(desc)

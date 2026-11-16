@@ -49,8 +49,9 @@ import (
 // instance that adopted it.
 //
 // It is the type every extraction child receives as its device view, and the
-// five seam interfaces are satisfied directly (see assert_native.go): the S1
-// to S10 adapters in the root package are gone.
+// five seam interfaces are satisfied directly, by the call-site assignments
+// that hand this value to each child (the buffer, encoder, queue, surface and
+// stencil-blit seams): ADR-070 §15.6 uses assignment instead of var _.
 type Device struct {
 	core  *core.Device
 	queue *queue.Queue
@@ -125,6 +126,20 @@ func (d *Device) SetQueueForTest(q *queue.Queue) {
 	d.queue = q
 }
 
+// orZero returns d, or the zero struct when d is nil. The root declaration
+// layer forwards every public Device call to its implementation pointer, and a
+// zero-value wgpu.Device has none: pre-move those calls read the zero core
+// state of the root Device and answered with the errors that state produces
+// (S11 review F2). Each entry point a caller can reach starts by replacing a
+// nil receiver with the zero struct, so a nil receiver answers exactly what
+// the contract table in zero_value_native_test.go pins for the zero struct.
+func orZero(d *Device) *Device {
+	if d == nil {
+		return &Device{}
+	}
+	return d
+}
+
 // Core returns the core device state a child records against.
 func (d *Device) Core() *core.Device {
 	if d == nil {
@@ -191,6 +206,7 @@ func (d *Device) Limits() gputypes.Limits {
 
 // CreateBuffer creates a GPU buffer from an already-converted descriptor.
 func (d *Device) CreateBuffer(halDesc *hal.BufferDescriptor) (*resource.Buffer, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -226,6 +242,7 @@ func (d *Device) CreateBuffer(halDesc *hal.BufferDescriptor) (*resource.Buffer, 
 
 // CreateTexture creates a GPU texture from an already-normalized descriptor.
 func (d *Device) CreateTexture(halDesc *hal.TextureDescriptor) (*resource.Texture, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -390,6 +407,7 @@ func validateTextureViewDescriptor(texture *resource.Texture, halDesc *hal.Textu
 // caller passed no descriptor; the defaults are resolved here exactly as the
 // pre-move body resolved them.
 func (d *Device) CreateTextureView(texture *resource.Texture, halDesc *hal.TextureViewDescriptor) (*resource.TextureView, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -460,6 +478,7 @@ func (d *Device) CreateTextureView(texture *resource.Texture, halDesc *hal.Textu
 
 // CreateSampler creates a texture sampler from an already-converted descriptor.
 func (d *Device) CreateSampler(halDesc *hal.SamplerDescriptor) (*resource.Sampler, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -489,6 +508,7 @@ func (d *Device) CreateSampler(halDesc *hal.SamplerDescriptor) (*resource.Sample
 // descriptor. core.ValidateShaderModuleDescriptor fills the descriptor's IR and
 // Info, which the module keeps for pipeline introspection.
 func (d *Device) CreateShaderModule(halDesc *hal.ShaderModuleDescriptor) (*resource.ShaderModule, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -522,6 +542,7 @@ func (d *Device) CreateShaderModule(halDesc *hal.ShaderModuleDescriptor) (*resou
 
 // CreateBindGroupLayout creates a bind group layout.
 func (d *Device) CreateBindGroupLayout(halDesc *hal.BindGroupLayoutDescriptor) (*resource.BindGroupLayout, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -555,6 +576,7 @@ func (d *Device) CreateBindGroupLayout(halDesc *hal.BindGroupLayoutDescriptor) (
 // the internal handles are both derived from layouts, after the nil and released
 // checks the pre-move body performed on the public wrappers.
 func (d *Device) CreatePipelineLayout(halDesc *hal.PipelineLayoutDescriptor, layouts []*resource.BindGroupLayout) (*resource.PipelineLayout, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -603,6 +625,7 @@ func (d *Device) CreatePipelineLayout(halDesc *hal.PipelineLayoutDescriptor, lay
 // CreateBindGroup creates a bind group from the device-local descriptor: the
 // label, the internal layout handle and the internal resource handles.
 func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*resource.BindGroup, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -982,6 +1005,7 @@ func newPipelineLayoutRef(d core.DeviceView, halDevice hal.Device, halLayout hal
 // CreateRenderPipeline creates a render pipeline. The extras carry the internal
 // handles and the fragment description the HAL descriptor cannot.
 func (d *Device) CreateRenderPipeline(halDesc *hal.RenderPipelineDescriptor, extras RenderPipelineExtras) (*pipeline.RenderPipeline, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -990,9 +1014,25 @@ func (d *Device) CreateRenderPipeline(halDesc *hal.RenderPipelineDescriptor, ext
 	}
 	// A released layout may already be queued for destruction; the pipeline
 	// would be created from a dying HAL layout and would later revive its
-	// reference count (P2-CORE-022).
+	// reference count (P2-CORE-022). It keeps its pre-move precedence over the
+	// fragment check below: a descriptor that is both released and invalid
+	// answered ErrReleased before the move (S11 delta review N5).
 	if extras.Layout != nil && extras.Layout.IsReleased() {
 		return nil, core.ErrReleased
+	}
+	// A fragment state without a module is an invalid descriptor: WebGPU
+	// requires GPUFragmentState.module, and the pre-move body dereferenced it
+	// (a panic). The HAL descriptor cannot carry the invalid stage — toHAL
+	// drops it when the module is nil, so the fragment validation in
+	// ValidateRenderPipelineDescriptor never sees it and the pipeline would be
+	// built without a fragment stage while HasFragment still fills the pass
+	// context's color formats (S11 review F1). Reject it here, the earliest
+	// point that still knows both.
+	if extras.HasFragment && extras.FragmentModule == nil {
+		return nil, &core.CreateRenderPipelineError{
+			Kind:  core.CreateRenderPipelineErrorMissingFragmentModule,
+			Label: halDesc.Label,
+		}
 	}
 
 	halDevice := d.halDevice()
@@ -1230,6 +1270,7 @@ func stencilFaceKeeps(s hal.StencilFaceState) bool {
 // shader-module handle the stage checks read and layout the internal pipeline
 // layout the refcount and group count come from.
 func (d *Device) CreateComputePipeline(halDesc *hal.ComputePipelineDescriptor, module *resource.ShaderModule, layout *resource.PipelineLayout) (*pipeline.ComputePipeline, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -1475,6 +1516,7 @@ func (d *Device) NewStencilUpload(dst *resource.Texture, mipLevel uint32, origin
 
 // CreateFence creates a GPU synchronization fence.
 func (d *Device) CreateFence() (*resource.Fence, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -1493,6 +1535,7 @@ func (d *Device) CreateFence() (*resource.Fence, error) {
 
 // CreateQuerySet creates a query set for occlusion or timestamp queries.
 func (d *Device) CreateQuerySet(halDesc *hal.QuerySetDescriptor) (*resource.QuerySet, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return nil, core.ErrReleased
 	}
@@ -1535,6 +1578,7 @@ func newQuerySetRef(d *Device, coreQS *core.QuerySet, label string) *core.Resour
 
 // ResetFence resets a fence to the unsignaled state.
 func (d *Device) ResetFence(f *resource.Fence) error {
+	d = orZero(d)
 	if d.released.Load() {
 		return core.ErrReleased
 	}
@@ -1550,6 +1594,7 @@ func (d *Device) ResetFence(f *resource.Fence) error {
 
 // GetFenceStatus returns true if the fence is signaled (non-blocking).
 func (d *Device) GetFenceStatus(f *resource.Fence) (bool, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return false, core.ErrReleased
 	}
@@ -1565,6 +1610,7 @@ func (d *Device) GetFenceStatus(f *resource.Fence) (bool, error) {
 
 // WaitForFence waits for a fence to reach the specified value.
 func (d *Device) WaitForFence(f *resource.Fence, value uint64, timeout time.Duration) (bool, error) {
+	d = orZero(d)
 	if d.released.Load() {
 		return false, core.ErrReleased
 	}
@@ -1581,6 +1627,7 @@ func (d *Device) WaitForFence(f *resource.Fence, value uint64, timeout time.Dura
 // FreeCommandBuffer returns a command buffer to the command pool.
 // For multi-CB encoders, all accumulated HAL command buffers are freed.
 func (d *Device) FreeCommandBuffer(cb *encoder.CommandBuffer) {
+	d = orZero(d)
 	if d.released.Load() || cb == nil {
 		return
 	}
@@ -1607,6 +1654,7 @@ func (d *Device) PopErrorScope() *core.GPUError {
 
 // WaitIdle waits for all GPU work to complete.
 func (d *Device) WaitIdle() error {
+	d = orZero(d)
 	if d.released.Load() {
 		return core.ErrReleased
 	}
@@ -1632,7 +1680,10 @@ func (d *Device) waitIdle() error {
 // MaintainAfterIdle recycles staging buffers and destroys deferred GPU
 // resources after the HAL reports the device is idle. The root test hook reads
 // it.
-func (d *Device) MaintainAfterIdle() { d.maintainAfterIdle() }
+func (d *Device) MaintainAfterIdle() {
+	d = orZero(d)
+	d.maintainAfterIdle()
+}
 
 // maintainAfterIdle is the body of MaintainAfterIdle.
 func (d *Device) maintainAfterIdle() {
@@ -1780,6 +1831,7 @@ func (d *Device) halDevice() hal.Device {
 
 // CreateRenderBundleEncoder creates an encoder for reusable render commands.
 func (d *Device) CreateRenderBundleEncoder(desc *encoder.RenderBundleEncoderDescriptor) (*encoder.RenderBundleEncoder, error) {
+	d = orZero(d)
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: render bundle encoder descriptor is nil")
 	}

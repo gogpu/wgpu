@@ -7,20 +7,33 @@ package device
 
 // The device domain's zero-value, nil-state and released-device contract
 // (ADR-070 S11, commit 3). Every answer reproduces the pre-move public Device of
-// device_native.go at 1d1778e, cited per case; where the pre-move code panicked,
-// that is recorded here and the case is not invoked. The released answers are
-// core.ErrReleased by identity: errors.Is is the callers' contract.
+// device_native.go at 1d1778e, cited per case, with the two exceptions named
+// below; where the pre-move code panicked, that is recorded here and the case
+// is not invoked. The released answers are core.ErrReleased by identity:
+// errors.Is is the callers' contract.
 //
-// Two classes answer differently from the pre-move root Device only because
-// the Move made them reachable, not because this commit changed them. Features
-// and Limits on a zero-value device dereferenced d.core and panicked pre-move
-// (device_native.go:74-81 at 1d1778e); the seam guards them now. A nil
+// Two classes answer differently from the pre-move root Device, both named in
+// the CHANGELOG. Features and Limits on a zero-value device dereferenced d.core
+// and panicked pre-move (device_native.go:74-81 at 1d1778e); the seam guards
+// them now. Release on a zero-value Device is a no-op where pre-move it
+// panicked through the nil device — the safe direction, the window's only
+// intentional behavior change, carded as P2-CORE-034. A nil
 // receiver is guarded by the destination's accessors, where pre-move only
 // destroyQueue/lastSubmissionIndex/halDevice guarded their field (:1742, :1787,
 // :1795) and the exported Features/Limits did not; Queue in the root
 // declaration layer still has no nil guard, exactly as pre-move (:68-71). The
 // widening is the seam's, and the table pins it so no later step narrows it
 // back into a panic.
+//
+// What this table pins is the implementation's zero value. The public
+// wgpu.Device caller actually holds was the other half of the contract and was
+// missing here (S11 review F2): its declaration layer forwards to a nil
+// *device.Device, so it used to panic where the zero struct answered. The
+// fix round gives every entry point a nil-receiver guard that delegates to the
+// zero struct, so the two receivers now answer identically; the root test
+// TestPublicZeroValueDeviceAnswers proves the create, fence and wait rows
+// through the public receiver, and the remaining rows are pinned here on both
+// zero-value receivers and were verified by probe against the pre-move tree.
 
 import (
 	"errors"
@@ -241,69 +254,113 @@ func TestNilReceiverReleaseIsANoOp(t *testing.T) {
 // TestMaintainAfterIdleNilQueue pins the pre-move nil-queue early return
 // (device_native.go:1629 at 1d1778e; the root coverage test covers the same
 // guard through the public hook): maintenance on a device with no queue must
-// not panic.
+// not panic, on either zero-value receiver.
 func TestMaintainAfterIdleNilQueue(t *testing.T) {
-	zero := &Device{}
-	zero.MaintainAfterIdle()
+	runOnZeroValues(t, func(t *testing.T, d *Device) {
+		d.MaintainAfterIdle()
+	})
 }
 
-// TestZeroStructCreateGuards pins the descriptor answers the zero struct gives
-// before any core state is touched, and the core.ErrReleased answers of the
-// paths whose first HAL lookup finds no device. Each string is the pre-move
-// one (device_native.go:89, :136, :317, :439, :480, :516, :569, :939, :1179,
-// :1466, :1809 at 1d1778e).
-func TestZeroStructCreateGuards(t *testing.T) {
-	d := &Device{}
+// TestRenderPipelineMissingFragmentModule pins the descriptor check that keeps
+// a module-less fragment state from reaching the HAL (S11 review F1). toHAL
+// drops the fragment stage when its module is nil, so the descriptor arrives
+// with no fragment while HasFragment is set; the check is the last place the
+// invalid descriptor is visible. Both zero-value receivers answer it, which is
+// what the nil receiver's delegation guard forwards to.
+func TestRenderPipelineMissingFragmentModule(t *testing.T) {
+	runOnZeroValues(t, func(t *testing.T, d *Device) {
+		_, err := d.CreateRenderPipeline(&hal.RenderPipelineDescriptor{Label: "frag-nil"}, RenderPipelineExtras{HasFragment: true})
+		var rpe *core.CreateRenderPipelineError
+		if !errors.As(err, &rpe) || rpe.Kind != core.CreateRenderPipelineErrorMissingFragmentModule {
+			t.Fatalf("error %v (%T), want *core.CreateRenderPipelineError of kind MissingFragmentModule", err, err)
+		}
+		if rpe.Label != "frag-nil" {
+			t.Fatalf("error label = %q, want the HAL descriptor's label", rpe.Label)
+		}
+	})
+}
 
+// TestZeroValueCreateGuards pins the create, fence, error-scope and wait
+// answers on both zero-value receivers. Each string is the pre-move one
+// (device_native.go:89, :136, :317, :439, :480, :516, :569, :939, :1179,
+// :1466, :1809 at 1d1778e); the pre-move public Device answered them too,
+// which the root test TestPublicZeroValueDeviceAnswers proves through the
+// declaration layer. The nil receiver reaches these answers through the
+// delegation guard in each entry point (S11 review F2); before the fix round
+// every case below panicked on it.
+//
+// Five cases are recorded and not invoked, because the zero struct itself
+// panics and the guard therefore only forwards the panic: CreateBuffer with a
+// descriptor and CreateCommandEncoder reach the nil core (:201 and :1447 here;
+// :99 and :1414 pre-move), PushErrorScope and PopErrorScope reach it through
+// core (:1599-1605 here), and Release does (:1725 here; :1734 pre-move).
+func TestZeroValueCreateGuards(t *testing.T) {
 	descriptorTests := []struct {
 		name string
-		run  func() error
+		run  func(d *Device) error
 		want string
 	}{
-		{"CreateBuffer", func() error { _, err := d.CreateBuffer(nil); return err }, "wgpu: buffer descriptor is nil"},
-		{"CreateTexture", func() error { _, err := d.CreateTexture(nil); return err }, "wgpu: texture descriptor is nil"},
-		{"CreateTextureView", func() error { _, err := d.CreateTextureView(nil, nil); return err }, "wgpu: texture is nil"},
-		{"CreateShaderModule", func() error { _, err := d.CreateShaderModule(nil); return err }, "wgpu: shader module descriptor is nil"},
-		{"CreateBindGroupLayout", func() error { _, err := d.CreateBindGroupLayout(nil); return err }, "wgpu: bind group layout descriptor is nil"},
-		{"CreatePipelineLayout", func() error { _, err := d.CreatePipelineLayout(nil, nil); return err }, "wgpu: pipeline layout descriptor is nil"},
-		{"CreateBindGroup", func() error { _, err := d.CreateBindGroup(nil); return err }, "wgpu: bind group descriptor is nil"},
-		{"CreateRenderPipeline", func() error { _, err := d.CreateRenderPipeline(nil, RenderPipelineExtras{}); return err }, "wgpu: render pipeline descriptor is nil"},
-		{"CreateComputePipeline", func() error { _, err := d.CreateComputePipeline(nil, nil, nil); return err }, "wgpu: compute pipeline descriptor is nil"},
-		{"CreateQuerySet", func() error { _, err := d.CreateQuerySet(nil); return err }, "wgpu: query set descriptor is nil"},
-		{"CreateRenderBundleEncoder", func() error { _, err := d.CreateRenderBundleEncoder(nil); return err }, "wgpu: render bundle encoder descriptor is nil"},
+		{"CreateBuffer", func(d *Device) error { _, err := d.CreateBuffer(nil); return err }, "wgpu: buffer descriptor is nil"},
+		{"CreateTexture", func(d *Device) error { _, err := d.CreateTexture(nil); return err }, "wgpu: texture descriptor is nil"},
+		{"CreateTextureView", func(d *Device) error { _, err := d.CreateTextureView(nil, nil); return err }, "wgpu: texture is nil"},
+		{"CreateShaderModule", func(d *Device) error { _, err := d.CreateShaderModule(nil); return err }, "wgpu: shader module descriptor is nil"},
+		{"CreateBindGroupLayout", func(d *Device) error { _, err := d.CreateBindGroupLayout(nil); return err }, "wgpu: bind group layout descriptor is nil"},
+		{"CreatePipelineLayout", func(d *Device) error { _, err := d.CreatePipelineLayout(nil, nil); return err }, "wgpu: pipeline layout descriptor is nil"},
+		{"CreateBindGroup", func(d *Device) error { _, err := d.CreateBindGroup(nil); return err }, "wgpu: bind group descriptor is nil"},
+		{"CreateRenderPipeline", func(d *Device) error {
+			_, err := d.CreateRenderPipeline(nil, RenderPipelineExtras{})
+			return err
+		}, "wgpu: render pipeline descriptor is nil"},
+		{"CreateComputePipeline", func(d *Device) error { _, err := d.CreateComputePipeline(nil, nil, nil); return err }, "wgpu: compute pipeline descriptor is nil"},
+		{"CreateQuerySet", func(d *Device) error { _, err := d.CreateQuerySet(nil); return err }, "wgpu: query set descriptor is nil"},
+		{"CreateRenderBundleEncoder", func(d *Device) error { _, err := d.CreateRenderBundleEncoder(nil); return err }, "wgpu: render bundle encoder descriptor is nil"},
 	}
 	for _, tt := range descriptorTests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.run()
-			if err == nil || err.Error() != tt.want {
-				t.Fatalf("%s error = %v, want %q", tt.name, err, tt.want)
-			}
+			runOnZeroValues(t, func(t *testing.T, d *Device) {
+				if err := tt.run(d); err == nil || err.Error() != tt.want {
+					t.Fatalf("%s error = %v, want %q", tt.name, err, tt.want)
+				}
+			})
 		})
 	}
 
-	// CreateBuffer with a descriptor and CreateCommandEncoder with a label are
-	// not invoked: pre-move and here they reach the nil core and panic
-	// (device_native.go:99 and :1414 at 1d1778e; :201 and :1447 here).
 	releasedTests := []struct {
 		name string
-		run  func() error
+		run  func(d *Device) error
 	}{
-		{"CreateSampler", func() error { _, err := d.CreateSampler(nil); return err }},
-		{"CreateTexture without a HAL device", func() error { _, err := d.CreateTexture(&hal.TextureDescriptor{}); return err }},
-		{"CreateRenderBundleEncoder without a HAL device", func() error {
+		{"CreateSampler", func(d *Device) error { _, err := d.CreateSampler(nil); return err }},
+		{"CreateTexture without a HAL device", func(d *Device) error {
+			_, err := d.CreateTexture(&hal.TextureDescriptor{})
+			return err
+		}},
+		{"CreateRenderBundleEncoder without a HAL device", func(d *Device) error {
 			_, err := d.CreateRenderBundleEncoder(&encoder.RenderBundleEncoderDescriptor{})
 			return err
 		}},
-		{"CreateFence", func() error { _, err := d.CreateFence(); return err }},
-		{"WaitIdle", func() error { return d.WaitIdle() }},
+		{"CreateFence", func(d *Device) error { _, err := d.CreateFence(); return err }},
+		{"WaitIdle", func(d *Device) error { return d.WaitIdle() }},
+		{"ResetFence", func(d *Device) error { return d.ResetFence(nil) }},
+		{"GetFenceStatus", func(d *Device) error { _, err := d.GetFenceStatus(nil); return err }},
+		{"WaitForFence", func(d *Device) error { _, err := d.WaitForFence(nil, 0, 0); return err }},
 	}
 	for _, tt := range releasedTests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.run(); !errors.Is(err, core.ErrReleased) {
-				t.Fatalf("%s error = %v, want core.ErrReleased", tt.name, err)
-			}
+			runOnZeroValues(t, func(t *testing.T, d *Device) {
+				if err := tt.run(d); !errors.Is(err, core.ErrReleased) {
+					t.Fatalf("%s error = %v, want core.ErrReleased", tt.name, err)
+				}
+			})
 		})
 	}
+
+	// The void entry points answer without state on both receivers: a command
+	// buffer that is nil or carries no HAL buffers has nothing to free, and
+	// the zero device has no HAL device to free it on.
+	runOnZeroValues(t, func(t *testing.T, d *Device) {
+		d.FreeCommandBuffer(nil)
+		d.FreeCommandBuffer(&encoder.CommandBuffer{})
+	})
 }
 
 // TestNilCoreContract pins a device built without core state or queue: the

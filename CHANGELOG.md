@@ -35,6 +35,10 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
 
 ### Changed
 
+- **`Device.Release()` on a zero-value `Device` no longer panics.** A zero-value device holds nothing to
+  release; the call was an accidental nil dereference before the internal reorganisation. It is the move's
+  only intentional behaviour change, in the safe direction (the remaining zero-value normalisations are
+  tracked in P2-CORE-034).
 - **Adapter selection: the default backends mask is hardware-only** (ADR-083). The Pure Go software backend
   registers by default, but it is not in the default mask, normal enumeration or Auto selection: a machine without
   a hardware adapter reports `wgpu.ErrNoHardwareAdapter` from a plain `RequestAdapter`, and `gogpu` retries with the
