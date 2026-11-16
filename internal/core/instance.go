@@ -513,6 +513,28 @@ func (i *Instance) RequestAdapterWithSurface(options *gputypes.RequestAdapterOpt
 	})
 }
 
+// admitSurfaceFallbackCandidates extends a surface request's candidate list
+// with the lazily admitted fallback adapters and returns their ID set. The
+// caller's surface map was built before the first force request, so it cannot
+// name the software backend; the software HAL surface is created on demand at
+// configure (surface_native.go), which is why a missing surface hint must not
+// drop a fallback adapter. The map remains authoritative for the hardware
+// backends, whose instances existed when it was built.
+func (i *Instance) admitSurfaceFallbackCandidates(options *gputypes.RequestAdapterOptions, allAdapterIDs []AdapterID) ([]AdapterID, map[AdapterID]struct{}) {
+	if options == nil || !options.ForceFallbackAdapter {
+		return allAdapterIDs, nil
+	}
+	fallback := i.ensureFallbackAdapters()
+	if len(fallback) == 0 {
+		return allAdapterIDs, nil
+	}
+	ids := make(map[AdapterID]struct{}, len(fallback))
+	for _, id := range fallback {
+		ids[id] = struct{}{}
+	}
+	return append(allAdapterIDs, fallback...), ids
+}
+
 // RequestAdapterWithSurfaces requests an adapter using the surface created for
 // each adapter's own backend. This mirrors Rust wgpu's per-backend surface map
 // while preserving RequestAdapterWithSurface for callers that own one HAL.
@@ -550,20 +572,10 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 	allAdapterIDs := append([]AdapterID(nil), i.adapters...)
 	i.mu.RUnlock()
 
-	// ADR-083 §2.3: the lazily admitted fallback adapters are candidates too.
-	// The caller's surface map was built before the first force request, so it
-	// cannot name the software backend; the software HAL surface is created on
-	// demand at configure (surface_native.go), which is why a missing surface
-	// hint must not drop a fallback adapter — the map stays authoritative for
-	// the hardware backends, whose instances existed when it was built.
-	fallbackIDs := make(map[AdapterID]struct{})
-	if options != nil && options.ForceFallbackAdapter {
-		fallback := i.ensureFallbackAdapters()
-		allAdapterIDs = append(allAdapterIDs, fallback...)
-		for _, id := range fallback {
-			fallbackIDs[id] = struct{}{}
-		}
-	}
+	// ADR-083 §2.3: the lazily admitted fallback adapters are candidates too;
+	// admitSurfaceFallbackCandidates explains why a missing surface hint keeps
+	// them.
+	allAdapterIDs, fallbackIDs := i.admitSurfaceFallbackCandidates(options, allAdapterIDs)
 
 	hub := GetGlobal().Hub()
 	i.mu.RLock()
@@ -578,9 +590,6 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 		}
 		surfaceHint := surfaceForBackend(adapter.Backend)
 		if surfaceHint == nil {
-			// A fallback adapter without a surface hint is still a candidate:
-			// its HAL surface is created on demand at configure. Hardware
-			// backends keep the caller's map as the authority.
 			if _, isFallback := fallbackIDs[adapterID]; isFallback {
 				candidates = append(candidates, adapterID)
 			}
