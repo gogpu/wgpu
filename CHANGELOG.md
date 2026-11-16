@@ -28,6 +28,10 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
 - **`Texture.Release` on a texture without a device and a HAL object no longer panics.** The wrapper reached
   `Device.destroyTextureDeferred` through the nil device; a detached texture from `wgputest.NewDetachedTexture`
   now releases cleanly, twice if asked. A root test pins it, and its negative control fails without the guard.
+- **Vulkan: a barrier over a 3D texture covers it whatever layer range it names.** A 3D image has one layer, and
+  Vulkan reads an explicit layer count of a 3D image created 2D-array compatible as a count of depth slices once
+  `maintenance9` is enabled; the validation layer warned about a `CommandEncoder.TransitionTextures` barrier that
+  named one layer of a 3D texture.
 
 ### Changed
 

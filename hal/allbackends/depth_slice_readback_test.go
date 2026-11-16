@@ -97,3 +97,37 @@ func TestDepthSliceViewRelease(t *testing.T) {
 		r.check(t, 0, 2, sliceRed)
 	})
 }
+
+// TestExplicitBarrierOverDepthSlices records an explicit barrier over a 3D
+// texture that names one array layer, then reads a slice back. A 3D texture
+// has one layer, and Vulkan reads an explicit layer count of a 3D image
+// created 2D-array compatible as a count of depth slices once maintenance9 is
+// enabled, so the barrier must cover the image's remaining layers: the
+// validation layer warns otherwise.
+func TestExplicitBarrierOverDepthSlices(t *testing.T) {
+	forEachOverrideBackend(t, 0, func(t *testing.T, device *wgpu.Device) {
+		r := newTargetRig(t, device, gputypes.TextureDimension3D, sliceRigDepth)
+		one := uint32(1)
+		r.render(t, 0, &one, sliceRed)
+		enc, err := device.CreateCommandEncoder(nil)
+		if err != nil {
+			t.Fatalf("CreateCommandEncoder: %v", err)
+		}
+		enc.TransitionTextures([]wgpu.TextureBarrier{{
+			Texture: r.texture,
+			Range:   wgpu.TextureRange{MipLevelCount: 1, ArrayLayerCount: 1},
+			Usage: wgpu.TextureUsageTransition{
+				OldUsage: gputypes.TextureUsageRenderAttachment,
+				NewUsage: gputypes.TextureUsageCopySrc,
+			},
+		}})
+		cmd, err := enc.Finish()
+		if err != nil {
+			t.Fatalf("Finish: %v", err)
+		}
+		if _, err := device.Queue().Submit(cmd); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		r.check(t, 0, 1, sliceRed)
+	})
+}
