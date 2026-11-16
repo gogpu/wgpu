@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/encoder"
 )
 
@@ -20,33 +19,25 @@ import (
 // The implementation lives in internal/encoder (ADR-070 S5); this declaration
 // is the public surface: every method is one delegation, and the wrappers are
 // converted to the implementation's handle types at the call boundary. The
-// bundle methods live in renderbundle_execute.go, next to the type they name;
-// the S6 Move re-homes that whole path into the destination (see that file).
+// bundle execution path re-homed into the destination at the S6 Move; the
+// public bundle method lives in renderbundle_execute.go, next to the type it
+// names.
 type RenderPassEncoder struct {
 	impl *encoder.RenderPassEncoder
 
-	// core is the same core pass the implementation holds: the bundle checks
-	// read the pass context through it, exactly as the pre-move pass did.
-	core *core.CoreRenderPassEncoder
-	// encoder is the encoder that began the pass: bundle errors are recorded
-	// there, and the bundle device check compares its device.
+	// encoder is the encoder that began the pass: draw-path errors such as a
+	// nil pipeline are recorded on it. The bundle checks that read the core
+	// pass and the read-only flags are the destination's since the S6 Move.
 	encoder *CommandEncoder
-	// depthReadOnly and stencilReadOnly mirror the attachment flags: a bundle
-	// executed in the pass must be read-only where the pass is.
-	depthReadOnly   bool
-	stencilReadOnly bool
 }
 
 // newRenderPassEncoder builds the public pass over the destination's. The
 // start value carries the core pass, the wgputest hooks and the read-only
-// flags — the data the pre-move constructor read.
+// flags — the destination reads them for the bundle checks.
 func newRenderPassEncoder(start *encoder.RenderPassStart, e *CommandEncoder) *RenderPassEncoder {
 	return &RenderPassEncoder{
-		impl:            encoder.NewRenderPassEncoder(start, e.impl),
-		core:            start.Core,
-		encoder:         e,
-		depthReadOnly:   start.DepthReadOnly,
-		stencilReadOnly: start.StencilReadOnly,
+		impl:    encoder.NewRenderPassEncoder(start, e.impl),
+		encoder: e,
 	}
 }
 

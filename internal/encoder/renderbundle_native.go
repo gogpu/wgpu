@@ -43,8 +43,12 @@ type RenderBundleEncoder struct {
 }
 
 // record appends a command unless the encoder is finished.
+//
+// A nil receiver is the public zero value: the pre-move encoder returned early
+// on its nil recording, so a recording call on a zero-value public
+// RenderBundleEncoder is a silent no-op rather than a panic (ADR-070 §6).
 func (e *RenderBundleEncoder) record(cmd bundleCommand) {
-	if e.finished.Load() || e.bundleRecording == nil {
+	if e == nil || e.finished.Load() || e.bundleRecording == nil {
 		return
 	}
 	e.commands = append(e.commands, cmd)

@@ -28,9 +28,19 @@ func (p *RenderPassEncoder) ExecuteBundles(bundles ...*RenderBundle) {
 	}
 	impls := make([]*encoder.RenderBundle, len(bundles))
 	for i, bundle := range bundles {
-		if bundle != nil {
-			impls[i] = bundle.impl
+		if bundle == nil {
+			continue
 		}
+		// A non-nil wrapper with a nil implementation is the zero-value
+		// RenderBundle. Before the move it reported "was not created by
+		// RenderBundleEncoder.Finish"; it crosses as a zero destination bundle
+		// (nil contents) so that text stays the same, where a nil pointer
+		// would read as a nil bundle and change it.
+		if bundle.impl == nil {
+			impls[i] = &encoder.RenderBundle{}
+			continue
+		}
+		impls[i] = bundle.impl
 	}
 	p.impl.ExecuteBundles(impls...)
 }

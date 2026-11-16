@@ -467,6 +467,21 @@ func TestExecuteBundlesChecks(t *testing.T) {
 	}
 }
 
+// TestExecuteBundlesResetsPassStateAfterError pins the pre-move contract that
+// the pass state is cleared even when a bundle fails its checks: the reset
+// runs once after the loop, error break included.
+func TestExecuteBundlesResetsPassStateAfterError(t *testing.T) {
+	rig := newBundleTestRig(t)
+	_, pass := rig.beginPass(t, false)
+	layout := rebindLayout(false)
+	pass.SetPassStateForTest(layout, rig.group(layout))
+
+	pass.ExecuteBundles(nil) // a nil bundle fails the first check
+	if set, group, assigned := pass.PassStateForTest(); set || group != nil || assigned != nil {
+		t.Fatal("ExecuteBundles kept the pipeline or the bind groups after an error")
+	}
+}
+
 // TestRenderBundleUsageScope checks that a bundle's buffer usages conflict
 // with each other when the bundle is finished, and with the pass's usages
 // when it is executed (Rust RenderBundleScope, merge_render_bundle).

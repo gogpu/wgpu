@@ -7,13 +7,14 @@ package encoder
 // pass and the render bundle encoder.
 //
 // The cluster lived in the root package's binder_tracking_native.go from the
-// S5 Prepare until the Move (2026-11-16); it relocates here with the render
-// pass. The root copies of the compute pass and the render bundle encoder
-// reach it as Binder / ValidateSetBindGroup / ErrBindGroupIncompatible until
-// S6 moves them into the destination, which is why the methods those two
-// files call are exported: an unexported method of another package is not
-// callable, and the alternative — a root-side shim type — would duplicate the
-// state. The payload types and the other two sentinels stay unexported.
+// S5 Prepare until the Move (2026-11-16); it relocated here with the render
+// pass. Binder, ValidateSetBindGroup and ErrBindGroupIncompatible are exported
+// because at S5 the root copies of the compute pass and the render bundle
+// encoder called them across the package boundary — an unexported method of
+// another package is not callable, and a root-side shim would duplicate the
+// state. S6 moved those two files into this package, so every user of the
+// cluster is here now. The payload types and the other two sentinels stay
+// unexported.
 //
 // The white-box tests binder_test.go and binder_rebind_test.go follow the
 // cluster into this package.
