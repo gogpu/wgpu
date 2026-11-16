@@ -82,17 +82,3 @@ func (r *recordingRegistry) take() ([]*CommandEncoder, []*CommandBuffer) {
 	clear(sets.buffers)
 	return encoders, buffers
 }
-
-// discardRecordings discards every command encoder and releases every
-// command buffer still in the registry. Called by Device.Release while the
-// backend device is alive, before the deferred destructions are flushed, so
-// the resources they referenced are destroyed with the rest.
-func (d *Device) discardRecordings() {
-	encoders, buffers := d.recordings.take()
-	for _, e := range encoders {
-		e.DiscardEncoding()
-	}
-	for _, cb := range buffers {
-		cb.Release()
-	}
-}
