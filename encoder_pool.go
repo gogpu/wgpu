@@ -98,7 +98,7 @@ func (p *encoderPool) Release(enc hal.CommandEncoder) {
 
 // retire destroys an acquired encoder that its holder will not return (the
 // pending writes of a device being released).
-func (p *encoderPool) retire(enc hal.CommandEncoder) {
+func (p *encoderPool) Retire(enc hal.CommandEncoder) {
 	p.mu.Lock()
 	delete(p.outstanding, enc)
 	p.mu.Unlock()

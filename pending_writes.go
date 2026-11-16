@@ -40,7 +40,7 @@ type pendingWrites struct {
 	// pool is a reference to the shared device-level encoder pool.
 	// Not owned by pendingWrites — owned by Device. destroy() clears the
 	// reference without destroying the pool. nil for non-batching backends.
-	pool *encoderPool
+	pool core.HalEncoderPool
 
 	// belt manages reusable staging buffer chunks for zero-allocation
 	// buffer writes. nil for non-batching backends.
@@ -134,7 +134,7 @@ type inflightSubmission struct {
 //
 // tracker is the device tracker that batched writes update (nil in unit tests
 // that do not exercise barriers).
-func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool *encoderPool, tracker *core.DeviceTracker) *pendingWrites {
+func newPendingWrites(halDevice hal.Device, halQueue hal.Queue, pool core.HalEncoderPool, tracker *core.DeviceTracker) *pendingWrites {
 	pw := &pendingWrites{
 		halDevice:    halDevice,
 		halQueue:     halQueue,
@@ -518,7 +518,7 @@ func (pw *pendingWrites) flush() (hal.CommandBuffer, hal.CommandEncoder, []hal.T
 		for _, owner := range owners {
 			if owner.RecordedHAL() != raw {
 				pw.discardRecording()
-				return nil, nil, nil, nil, fmt.Errorf("wgpu: pending writes: destination texture retired before submit: %w", ErrReleased)
+				return nil, nil, nil, nil, fmt.Errorf("wgpu: pending writes: destination texture retired before submit: %w", core.ErrReleased)
 			}
 		}
 	}
@@ -707,7 +707,7 @@ func (pw *pendingWrites) destroy() {
 		if sub.encoder != nil {
 			// Encoder owns the command buffer's resources. Destroy releases both.
 			if pw.pool != nil {
-				pw.pool.retire(sub.encoder)
+				pw.pool.Retire(sub.encoder)
 			} else {
 				sub.encoder.Destroy()
 			}

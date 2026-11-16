@@ -142,7 +142,7 @@ func TestEncoderPool_TracksOutstanding(t *testing.T) {
 		t.Fatalf("%d outstanding after 3 acquires, want 3", n)
 	}
 	pool.Release(released)
-	pool.retire(retired)
+	pool.Retire(retired)
 	if n := outstanding(); n != 1 {
 		t.Fatalf("%d outstanding after release and retire, want 1", n)
 	}

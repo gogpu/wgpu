@@ -5,14 +5,15 @@ package core
 import "github.com/gogpu/wgpu/internal/hal"
 
 // HalEncoderPool is the encoder domain's seam view of the device's HAL
-// command encoder pool (ADR-070 shape B, user decision 2026-11-16).
+// command encoder pool (ADR-070 shape B, user decision 2026-11-16; extended
+// with Retire at S8, lead-approved 2026-11-16).
 //
-// It declares exactly what the moving encoder files call on the pool and
-// nothing of its device-internal lifecycle (retire, destroy): the concrete
-// pool stays in the root package until S11 moves it with the Device into
-// internal/device. The root host adapts at the call boundary, where it can
-// name its own concrete type; the child seam embeds core.DeviceView and adds
-// this accessor (the S1 precedent).
+// It declares exactly what the moving encoder and pending-writes files call
+// on the pool and nothing else of its device-internal lifecycle (destroy):
+// the concrete pool stays in the root package until S11 moves it with the
+// Device into internal/device. The root host adapts at the call boundary,
+// where it can name its own concrete type; the child seam embeds
+// core.DeviceView and adds this accessor (the S1 precedent).
 //
 // No type of internal/encoder or of the root package appears here on
 // purpose: a core -> internal/encoder edge would be the S3 import cycle under
@@ -29,6 +30,12 @@ type HalEncoderPool interface {
 	// Release returns an acquired encoder to the pool after ResetAll. The
 	// encoder must be in "closed" state (not recording).
 	Release(hal.CommandEncoder)
+	// Retire destroys an acquired encoder that its holder will not return
+	// (the pending writes of a device being released). It is not Release: a
+	// retired encoder is never reused, so it does not need the ResetAll'ed
+	// contract; and it is not a bare Destroy either — the pool must also
+	// forget the encoder, or its later destroy would double-destroy it.
+	Retire(hal.CommandEncoder)
 }
 
 // EncoderRecordings is the encoder domain's seam view of the device's
