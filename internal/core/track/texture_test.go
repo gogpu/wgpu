@@ -580,21 +580,46 @@ func TestTextureUsageConflictError(t *testing.T) {
 	t.Parallel()
 
 	for _, c := range []struct {
+		label    string
 		selector TextureSelector
 		want     string
 	}{
-		{TextureSelector{}, "track: texture 5 usage conflict on the whole texture: existing 16 incompatible with 8"},
-		{subresourceSelector(3, 2, 1, 0), "track: texture 5 usage conflict on mip level 1, array layer 0: existing 16 incompatible with 8"},
-		{subresourceSelector(3, 2, 0, 1), "track: texture 5 usage conflict on mip level 0, array layer 1: existing 16 incompatible with 8"},
+		{"", TextureSelector{},
+			"track: texture 5 usage conflict on the whole texture: existing Resource incompatible with CopyDst"},
+		{"albedo", subresourceSelector(3, 2, 1, 0),
+			`track: texture "albedo" usage conflict on mip level 1, array layer 0: existing Resource incompatible with CopyDst`},
+		{"albedo", TextureSelector{
+			TextureMipLevelCount: 3, TextureArrayLayerCount: 6,
+			BaseMipLevel: 1, MipLevelCount: 2, BaseArrayLayer: 2, ArrayLayerCount: 3,
+		}, `track: texture "albedo" usage conflict on mip levels 1 to 2, array layers 2 to 4: existing Resource incompatible with CopyDst`},
 	} {
 		err := &TextureUsageConflictError{
 			Index:    TrackerIndex(5),
+			Label:    c.label,
 			Selector: c.selector,
 			Existing: TextureUsesResource,
 			New:      TextureUsesCopyDst,
 		}
 		if got := err.Error(); got != c.want {
 			t.Errorf("Error() = %q, want %q", got, c.want)
+		}
+	}
+}
+
+func TestTextureUses_String(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		uses TextureUses
+		want string
+	}{
+		{TextureUsesNone, "None"},
+		{TextureUsesColorTarget, "ColorTarget"},
+		{TextureUsesResource | TextureUsesStorageRead, "Resource|StorageRead"},
+		{TextureUsesCopyDst | 1<<12, "CopyDst|0x1000"},
+	} {
+		if got := c.uses.String(); got != c.want {
+			t.Errorf("TextureUses(%#x).String() = %q, want %q", uint32(c.uses), got, c.want)
 		}
 	}
 }

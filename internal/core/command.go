@@ -1221,7 +1221,7 @@ func (p *renderPassAttachmentScope) add(view *TextureView, usage track.TextureUs
 	}
 	subresources := view.Parent.Subresources(view.BaseMipLevel, view.MipLevelCount, view.BaseArrayLayer, view.ArrayLayerCount)
 	if err := p.scope.SetSubresourceUsage(td.Index(), subresources, usage); err != nil {
-		return err
+		return withTextureLabel(err, view.Parent)
 	}
 	if _, seen := p.views[td.Index()]; !seen {
 		p.views[td.Index()] = view

@@ -57,7 +57,12 @@ func TestTextureUsageScope_SubresourcesDoNotConflict(t *testing.T) {
 		overlap       TextureSelector
 		conflictAt    TextureSelector
 	}{
-		{"mip levels", selectMipLevel(1), selectMipLevel(0), selectMipLevel(1), subresourceSelector(3, 2, 1, 0)},
+		// The conflict names the drawn layers of the first conflicting
+		// level: both layers of level 1, or layer 1 of level 0.
+		{"mip levels", selectMipLevel(1), selectMipLevel(0), selectMipLevel(1), TextureSelector{
+			TextureMipLevelCount: 3, TextureArrayLayerCount: 2,
+			BaseMipLevel: 1, MipLevelCount: 1, BaseArrayLayer: 0, ArrayLayerCount: 2,
+		}},
 		{"array layers", selectArrayLayer(1), selectArrayLayer(0), TextureSelector{}, subresourceSelector(3, 2, 0, 1)},
 	} {
 		scope := NewTextureUsageScope()
@@ -81,6 +86,22 @@ func TestTextureUsageScope_SubresourcesDoNotConflict(t *testing.T) {
 		if conflict.Selector != c.conflictAt {
 			t.Errorf("%s: conflict on %+v, want %+v", c.name, conflict.Selector, c.conflictAt)
 		}
+	}
+
+	// A usage of part of a texture whose subresources share one usage
+	// conflicts on every subresource it covers.
+	whole := NewTextureUsageScope()
+	_ = whole.SetSubresourceUsage(2, TextureSelector{}, TextureUsesColorTarget)
+	lowerLevels := TextureSelector{
+		TextureMipLevelCount: 3, TextureArrayLayerCount: 2,
+		BaseMipLevel: 1, MipLevelCount: 2, BaseArrayLayer: 0, ArrayLayerCount: 2,
+	}
+	var conflict *TextureUsageConflictError
+	if err := whole.SetSubresourceUsage(2, lowerLevels, TextureUsesResource); !errors.As(err, &conflict) {
+		t.Fatalf("sampling two levels of a drawn texture: err = %v, want a conflict", err)
+	}
+	if want := lowerLevels; conflict.Selector != want {
+		t.Errorf("conflict on %v, want %v", conflict.Selector, want)
 	}
 
 	// A refused usage changes nothing, even on the subresources it does

@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gogpu/wgpu/internal/core/track"
@@ -118,7 +119,17 @@ func (s *passUsageScope) addTexture(use BindGroupTextureUse) error {
 	if !s.textures.IsUsed(td.Index()) {
 		s.textureRefs = append(s.textureRefs, use)
 	}
-	return s.textures.SetSubresourceUsage(td.Index(), use.Subresources, use.Usage)
+	return withTextureLabel(s.textures.SetSubresourceUsage(td.Index(), use.Subresources, use.Usage), use.Texture)
+}
+
+// withTextureLabel puts texture's label in err if err is a texture usage
+// conflict, so its message names the texture, and returns err.
+func withTextureLabel(err error, texture *Texture) error {
+	var conflict *track.TextureUsageConflictError
+	if errors.As(err, &conflict) {
+		conflict.Label = texture.Label()
+	}
+	return err
 }
 
 // mergeBindGroup merges every usage of a bind group into the scope.

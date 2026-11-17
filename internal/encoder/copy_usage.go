@@ -108,7 +108,7 @@ func prepareCopyTextureUsages(requests []copyTextureUsage) ([]preparedCopyTextur
 		combined := existing | request.usage
 		if !combined.IsCompatible(combined) {
 			return nil, &track.TextureUsageConflictError{
-				Index: index, Existing: existing, New: request.usage,
+				Index: index, Label: request.texture.CoreTexture().Label(), Existing: existing, New: request.usage,
 			}
 		}
 		prepared[position].usage = combined

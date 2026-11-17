@@ -4,6 +4,7 @@ package track
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
@@ -35,6 +36,42 @@ const (
 	TextureUsesStorageRead       TextureUses = 1 << 8 // Storage texture read-only
 	TextureUsesStorageWrite      TextureUses = 1 << 9 // Storage texture write-only
 )
+
+// textureUsesNames names each texture usage flag, in flag order.
+var textureUsesNames = [...]struct {
+	uses TextureUses
+	name string
+}{
+	{TextureUsesUninitialized, "Uninitialized"},
+	{TextureUsesPresent, "Present"},
+	{TextureUsesCopySrc, "CopySrc"},
+	{TextureUsesCopyDst, "CopyDst"},
+	{TextureUsesResource, "Resource"},
+	{TextureUsesColorTarget, "ColorTarget"},
+	{TextureUsesDepthStencilRead, "DepthStencilRead"},
+	{TextureUsesDepthStencilWrite, "DepthStencilWrite"},
+	{TextureUsesStorageRead, "StorageRead"},
+	{TextureUsesStorageWrite, "StorageWrite"},
+}
+
+// String names the usages, as "ColorTarget" or "Resource|StorageRead", and
+// "None" for none. A flag without a name is written in hexadecimal.
+func (u TextureUses) String() string {
+	if u == TextureUsesNone {
+		return "None"
+	}
+	var names []string
+	for _, flag := range textureUsesNames {
+		if u&flag.uses != 0 {
+			names = append(names, flag.name)
+			u &^= flag.uses
+		}
+	}
+	if u != 0 {
+		names = append(names, fmt.Sprintf("%#x", uint32(u)))
+	}
+	return strings.Join(names, "|")
+}
 
 // textureUsesInclusive is the combination of states that may coexist.
 // Reference: wgpu-types TextureUses::INCLUSIVE
@@ -444,20 +481,28 @@ func (p TexturePendingTransition) IntoHAL(texture hal.Texture) hal.TextureBarrie
 // are detected within the same scope.
 type TextureUsageConflictError struct {
 	Index TrackerIndex
-	// Selector selects the subresource the usages conflict on, one mip level
-	// and one array layer, the first found. It is the zero selector, every
-	// subresource, when both usages cover the whole texture.
+	// Label is the texture's label, set by the caller that knows the
+	// texture; the tracker knows only its index.
+	Label string
+	// Selector selects the subresources the usages conflict on: every
+	// subresource (the zero selector) when both usages cover the whole
+	// texture, every one the new usage covers when the texture's
+	// subresources share one usage, and otherwise, on the first mip level
+	// that conflicts, the layers from the first conflicting one that share
+	// its usage.
 	Selector TextureSelector
 	Existing TextureUses
 	New      TextureUses
 }
 
-// Error implements the error interface.
+// Error implements the error interface. It names the texture by its label,
+// or by its tracker index when it has none, the subresources the usages
+// conflict on and the usages.
 func (e *TextureUsageConflictError) Error() string {
-	if e.Selector.SelectsAll() {
-		return fmt.Sprintf("track: texture %d usage conflict on the whole texture: existing %d incompatible with %d",
-			e.Index, e.Existing, e.New)
+	texture := fmt.Sprintf("texture %d", e.Index)
+	if e.Label != "" {
+		texture = fmt.Sprintf("texture %q", e.Label)
 	}
-	return fmt.Sprintf("track: texture %d usage conflict on mip level %d, array layer %d: existing %d incompatible with %d",
-		e.Index, e.Selector.BaseMipLevel, e.Selector.BaseArrayLayer, e.Existing, e.New)
+	return fmt.Sprintf("track: %s usage conflict on %v: existing %v incompatible with %v",
+		texture, e.Selector, e.Existing, e.New)
 }

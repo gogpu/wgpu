@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -338,8 +339,13 @@ func TestRenderPass_AttachmentAndBindGroupConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginRenderPass: %v", err)
 	}
-	if err := pass.MergeBindGroup(textureUses(target, track.TextureUsesResource)); err == nil {
-		t.Fatal("expected a usage conflict between color attachment and sampled")
+	err = pass.MergeBindGroup(textureUses(target, track.TextureUsesResource))
+	var conflict *track.TextureUsageConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("MergeBindGroup = %v, want a usage conflict between color attachment and sampled", err)
+	}
+	if conflict.Label != "target" {
+		t.Errorf("conflict label = %q, want the texture's, %q", conflict.Label, "target")
 	}
 }
 

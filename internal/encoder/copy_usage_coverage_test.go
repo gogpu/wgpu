@@ -109,6 +109,9 @@ func TestCopyUsageScopeIsPerCommand(t *testing.T) {
 	if !errors.As(err, &textureConflict) {
 		t.Fatalf("texture copied onto itself = %v, want TextureUsageConflictError", err)
 	}
+	if textureConflict.Label != "per-command-texture" {
+		t.Errorf("conflict label = %q, want the texture's, %q", textureConflict.Label, "per-command-texture")
+	}
 
 	buffers, err := prepareCopyBufferUsages([]copyBufferUsage{
 		{buffer: buffer, usage: track.BufferUsesCopySrc},

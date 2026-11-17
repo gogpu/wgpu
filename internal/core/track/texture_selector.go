@@ -2,6 +2,8 @@
 
 package track
 
+import "fmt"
+
 // TextureSelector selects the subresources of one texture a usage covers:
 // MipLevelCount mip levels from BaseMipLevel and ArrayLayerCount array layers
 // from BaseArrayLayer, of a texture of TextureMipLevelCount mip levels and
@@ -27,6 +29,25 @@ func (s TextureSelector) SelectsAll() bool {
 	mipStart, mipEnd, layerStart, layerEnd := s.bounds(s.TextureMipLevelCount, s.TextureArrayLayerCount)
 	return mipStart == 0 && mipEnd == s.TextureMipLevelCount &&
 		layerStart == 0 && layerEnd == s.TextureArrayLayerCount
+}
+
+// String names the subresources the selector selects, as "the whole
+// texture" or "mip level 1, array layers 0 to 5".
+func (s TextureSelector) String() string {
+	if s.SelectsAll() {
+		return "the whole texture"
+	}
+	mipStart, mipEnd, layerStart, layerEnd := s.bounds(s.TextureMipLevelCount, s.TextureArrayLayerCount)
+	return subresourceRange("mip level", mipStart, mipEnd) + ", " + subresourceRange("array layer", layerStart, layerEnd)
+}
+
+// subresourceRange names the items [start, end) called name, as "mip level
+// 1" or "mip levels 1 to 3".
+func subresourceRange(name string, start, end uint32) string {
+	if end <= start+1 {
+		return fmt.Sprintf("%s %d", name, start)
+	}
+	return fmt.Sprintf("%ss %d to %d", name, start, end-1)
 }
 
 // bounds returns the selected mip levels [mipStart, mipEnd) and array layers

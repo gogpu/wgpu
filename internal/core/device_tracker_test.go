@@ -826,6 +826,7 @@ func TestBeginRenderPass_TextureConflict_Error(t *testing.T) {
 		raw:          NewSnatchable[hal.Texture](nil),
 		device:       device,
 		trackingData: td,
+		label:        "shared-attachment",
 	}
 	view := &TextureView{Parent: tex}
 
@@ -849,6 +850,9 @@ func TestBeginRenderPass_TextureConflict_Error(t *testing.T) {
 	var conflict *track.TextureUsageConflictError
 	if !errors.As(passErr, &conflict) {
 		t.Fatalf("BeginRenderPass = %v, want TextureUsageConflictError", passErr)
+	}
+	if conflict.Label != "shared-attachment" {
+		t.Errorf("conflict label = %q, want the texture's, %q", conflict.Label, "shared-attachment")
 	}
 	if len(halEncoder.events) != 0 {
 		t.Errorf("conflicting pass reached the HAL encoder: %v", halEncoder.events)
