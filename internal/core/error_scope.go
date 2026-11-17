@@ -256,6 +256,17 @@ func (d *Device) reportError(filter ErrorFilter, message string) bool {
 	return d.errorScopes().ReportError(filter, message)
 }
 
+// ReportError is the exported sink for internal callers OUTSIDE this package —
+// currently the queue's submit-class seam (error-scope reshape, stage A3).
+// It is internal API; the public surface is unaffected. Classes enter through
+// their own seam methods, never by widening the encoder funnel.
+func (d *Device) ReportError(filter ErrorFilter, message string) bool {
+	if d == nil {
+		return false
+	}
+	return d.reportError(filter, message)
+}
+
 // errorScopes returns the device's ErrorScopeManager.
 //
 // Production devices are constructor-initialized (NewDevice and the legacy

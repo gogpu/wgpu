@@ -156,7 +156,8 @@ var _ DeviceHost = testDeviceHost{}
 func (testDeviceHost) Recordings() core.EncoderRecordings[*CommandEncoder, *CommandBuffer] {
 	return nil
 }
-func (testDeviceHost) EncoderPool() core.HalEncoderPool { return nil }
+func (testDeviceHost) EncoderPool() core.HalEncoderPool   { return nil }
+func (testDeviceHost) ReportSubmitValidationError(string) {}
 func (testDeviceHost) NewStencilUpload(*resource.Texture, uint32, gputypes.Origin3D, gputypes.Extent3D) (*stencilblit.Upload, error) {
 	return nil, errTestNoStencilUpload
 }

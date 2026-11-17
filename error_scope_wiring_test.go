@@ -62,3 +62,69 @@ func TestErrorScopeCapturesDeferredValidationError(t *testing.T) {
 		t.Fatalf("errors.Is(%v, wgpu.ErrValidation) = false, want true", gpuErr)
 	}
 }
+
+// TestErrorScopeCapturesSubmitValidationError is the class-2 (submit) fail-first
+// case: the submit-time validation error returned by Submit must also land in
+// the open validation scope, without changing Submit's own error.
+func TestErrorScopeCapturesSubmitValidationError(t *testing.T) {
+	_, _, device := newDevice(t)
+	defer device.Release()
+	requireHAL(t, device)
+
+	mappedBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label:            "scope-capture-mapped",
+		Size:             64,
+		Usage:            wgpu.BufferUsageMapWrite | wgpu.BufferUsageCopySrc,
+		MappedAtCreation: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer mapped: %v", err)
+	}
+	defer mappedBuf.Release()
+
+	dstBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
+		Label: "scope-capture-dst-submit",
+		Size:  64,
+		Usage: wgpu.BufferUsageCopyDst,
+	})
+	if err != nil {
+		t.Fatalf("CreateBuffer dst: %v", err)
+	}
+	defer dstBuf.Release()
+
+	enc, err := device.CreateCommandEncoder(nil)
+	if err != nil {
+		t.Fatalf("CreateCommandEncoder: %v", err)
+	}
+	enc.CopyBufferToBuffer(mappedBuf, 0, dstBuf, 0, 64)
+	cmdBuf, err := enc.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	if err := device.PushErrorScope(wgpu.ErrorFilterValidation); err != nil {
+		t.Fatalf("PushErrorScope: %v", err)
+	}
+
+	_, submitErr := device.Queue().Submit(cmdBuf)
+	if submitErr == nil {
+		t.Fatal("Submit should fail: command buffer references a mapped buffer")
+	}
+	if !errors.Is(submitErr, wgpu.ErrSubmitBufferMapped) {
+		t.Fatalf("Submit error = %v, want ErrSubmitBufferMapped", submitErr)
+	}
+
+	gpuErr, popErr := device.PopErrorScope()
+	if popErr != nil {
+		t.Fatalf("PopErrorScope: unexpected error: %v", popErr)
+	}
+	if gpuErr == nil {
+		t.Fatal("the validation scope captured nothing: the submit-class validation error never reached the device's error scope (stage A3 wiring missing)")
+	}
+	if gpuErr.Type != wgpu.ErrorFilterValidation {
+		t.Fatalf("captured GPUError.Type = %v, want %v", gpuErr.Type, wgpu.ErrorFilterValidation)
+	}
+	if !errors.Is(gpuErr, wgpu.ErrValidation) {
+		t.Fatalf("errors.Is(%v, wgpu.ErrValidation) = false, want true", gpuErr)
+	}
+}

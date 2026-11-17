@@ -120,12 +120,21 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 
 	// Validate user command buffers before closing the pending-write encoder.
 	// A validation error leaves buffered writes intact for a later valid Submit
-	// and cannot strand an ended internal command buffer.
+	// and cannot strand an ended internal command buffer. The error also enters
+	// the device's error-scope sink through the submit-class seam (stage A3):
+	// explicitly this class, never widened out of the encoder funnel.
 	for i, cb := range commandBuffers {
 		if cb == nil {
-			return 0, fmt.Errorf("wgpu: command buffer at index %d is nil", i)
+			err := fmt.Errorf("wgpu: command buffer at index %d is nil", i)
+			if q.device != nil {
+				q.device.ReportSubmitValidationError(err.Error())
+			}
+			return 0, err
 		}
 		if err := validateCommandBufferForSubmit(cb, i); err != nil {
+			if q.device != nil {
+				q.device.ReportSubmitValidationError(err.Error())
+			}
 			return 0, err
 		}
 	}

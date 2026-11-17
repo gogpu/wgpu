@@ -193,6 +193,16 @@ func (d *Device) EncoderPool() core.HalEncoderPool {
 	return d.cmdEncoderPool
 }
 
+// ReportSubmitValidationError delivers a submit-class validation error to the
+// core device's error-scope sink (error-scope reshape, stage A3). It is the
+// seam behind the queue's explicit class entry; nothing else routes through it.
+func (d *Device) ReportSubmitValidationError(message string) {
+	if d == nil || d.core == nil {
+		return
+	}
+	d.core.ReportError(core.ErrorFilterValidation, message)
+}
+
 // Recordings returns the device's recordings registry.
 func (d *Device) Recordings() core.EncoderRecordings[*encoder.CommandEncoder, *encoder.CommandBuffer] {
 	if d == nil {
