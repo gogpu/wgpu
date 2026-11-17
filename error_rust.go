@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // Public API sentinel errors.
@@ -39,8 +40,11 @@ var (
 	// never returns it. It wraps ErrDeviceLost there and here.
 	ErrContextReleased = fmt.Errorf("wgpu: the native context was released with the last surface and device that used it: %w", ErrDeviceLost)
 
-	// ErrOutOfMemory is returned when the GPU is out of memory.
-	ErrOutOfMemory = errors.New("wgpu: out of memory")
+	// ErrOutOfMemory is returned when the GPU is out of memory. It binds the
+	// HAL sentinel core.SentinelForFilter answers with (the same value the
+	// native build binds), so GPUError.Unwrap's OutOfMemory category is this
+	// error (per-build identity, scope reshape issue #421).
+	ErrOutOfMemory = hal.ErrDeviceOutOfMemory
 
 	// ErrSurfaceLost is returned when the surface is lost.
 	ErrSurfaceLost = errors.New("wgpu: surface lost")
@@ -98,6 +102,22 @@ var (
 	ErrDispatchIndirectBufferOverrun   = errors.New("wgpu: indirect dispatch args exceed buffer size")
 )
 
+// Error-scope sentinels (the error-scope reshape, issue #421). They bind the
+// internal/core values this build links (like ErrReleased), so GPUError.Unwrap
+// classification holds within the build; the binding's own errors are a
+// separate, documented limit (N4) — they are mapped into our GPUError by the
+// device wrapper, never confused with these sentinels.
+var (
+	// ErrValidation is the category identity of a captured validation GPUError.
+	ErrValidation = core.ErrValidation
+	// ErrInternal is the category identity of a captured internal GPUError.
+	ErrInternal = core.ErrInternal
+	// ErrErrorScopeEmpty names the empty-scope-stack case. On rust the empty
+	// stack is reported by wgpu-native itself and comes back wrapped by the
+	// device wrapper — the rust contract test documents that per-build limit.
+	ErrErrorScopeEmpty = core.ErrErrorScopeEmpty
+)
+
 // GPUError represents a captured GPU error from an error scope.
 // Matches the core.GPUError structure used by the native backend.
 type GPUError struct {
@@ -111,6 +131,14 @@ type GPUError struct {
 // Error implements the error interface.
 func (e *GPUError) Error() string {
 	return fmt.Sprintf("GPU %s error: %s", e.Type, e.Message)
+}
+
+// Unwrap returns the sentinel that identifies the error's category, so
+// errors.Is(err, wgpu.ErrValidation) (and ErrOutOfMemory / ErrInternal) works
+// on a captured GPUError. The mapping lives in internal/core: a public method
+// is one delegation, and identity is per build by construction.
+func (e *GPUError) Unwrap() error {
+	return core.SentinelForFilter(core.ErrorFilter(e.Type))
 }
 
 // ErrorFilter selects which errors an error scope captures.

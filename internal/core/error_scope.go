@@ -3,9 +3,47 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/gogpu/wgpu/internal/hal"
 )
+
+// ErrErrorScopeEmpty is returned by PopErrorScope when no scope is on the
+// stack — the WebGPU spec's OperationError case. It is a defined sentinel so
+// the public root name binds the same value on native builds and errors.Is
+// can answer; identity is per build (native binds this value, rust and browser
+// declare their own), never across builds.
+var ErrErrorScopeEmpty = errors.New("wgpu: PopErrorScope: error scope stack is empty (no matching PushErrorScope)")
+
+// Error-scope category sentinels (the error-scope reshape): GPUError.Unwrap
+// answers with these, so errors.Is classifies a captured error. The public
+// root names bind these values on the builds that carry core (native and
+// rust); the browser build declares its own in internal/browser.
+var (
+	// ErrValidation is the category identity of a captured validation error.
+	ErrValidation = errors.New("wgpu: validation error")
+	// ErrInternal is the category identity of a captured internal error.
+	ErrInternal = errors.New("wgpu: internal error")
+)
+
+// SentinelForFilter maps an error filter to its category sentinel. It lives
+// here, not in the public declaration layer, so the public Unwrap is one
+// delegation with no logic (the public-layer gate's rule). OutOfMemory maps to
+// the HAL sentinel the root binds as ErrOutOfMemory.
+func SentinelForFilter(f ErrorFilter) error {
+	if f == ErrorFilterValidation {
+		return ErrValidation
+	}
+	if f == ErrorFilterOutOfMemory {
+		return hal.ErrDeviceOutOfMemory
+	}
+	if f == ErrorFilterInternal {
+		return ErrInternal
+	}
+	return nil
+}
 
 // ErrorFilter specifies which error types to capture in an error scope.
 //
@@ -122,7 +160,7 @@ func (m *ErrorScopeManager) PopErrorScope() (*GPUError, error) {
 	defer m.mu.Unlock()
 
 	if len(m.scopes) == 0 {
-		return nil, fmt.Errorf("error scope stack is empty: no matching PushErrorScope")
+		return nil, ErrErrorScopeEmpty
 	}
 
 	// Pop the last scope (LIFO)
@@ -223,17 +261,18 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 // PopErrorScope pops the most recently pushed error scope and returns the
 // captured error, if any.
 //
-// Returns the captured GPUError, or nil if no matching error occurred
-// within the scope. Panics if the error scope stack is empty (no
-// matching PushErrorScope was called).
+// Contract (at most one side is non-nil):
+//   - (*GPUError, nil): a captured error;
+//   - (nil, nil): the scope was on the stack and captured nothing — the common path;
+//   - (nil, ErrErrorScopeEmpty): pop with no matching push (the spec's
+//     OperationError case) — never a panic.
 //
 // Note: Error scopes are LIFO -- the last pushed scope is popped first.
-func (d *Device) PopErrorScope() *GPUError {
-	gpuErr, err := d.errorScopes().PopErrorScope()
-	if err != nil {
-		panic(fmt.Sprintf("PopErrorScope: %v", err))
+func (d *Device) PopErrorScope() (*GPUError, error) {
+	if d == nil {
+		return nil, nil //nolint:nilnil // (nil, nil) is the error-scope contract's capture-nothing answer, not a missing error
 	}
-	return gpuErr
+	return d.errorScopes().PopErrorScope()
 }
 
 // reportError reports a GPU error to the device's error scope stack.
@@ -247,14 +286,26 @@ func (d *Device) reportError(filter ErrorFilter, message string) bool {
 	return d.errorScopes().ReportError(filter, message)
 }
 
-// errorScopes returns the device's ErrorScopeManager, creating it lazily
-// if needed. This supports both the HAL-based and ID-based device paths.
+// ReportError is the exported sink for internal callers OUTSIDE this package —
+// currently the queue's submit-class seam (error-scope reshape, stage A3).
+// It is internal API; the public surface is unaffected. Classes enter through
+// their own seam methods, never by widening the encoder funnel.
+func (d *Device) ReportError(filter ErrorFilter, message string) bool {
+	if d == nil {
+		return false
+	}
+	return d.reportError(filter, message)
+}
+
+// errorScopes returns the device's ErrorScopeManager.
 //
-// Note: This is not thread-safe for the initial creation of the manager
-// when called concurrently on a brand-new Device. In practice, this is
-// not an issue because PushErrorScope is always called before any GPU
-// operations, and GPU operations happen on a single goroutine per device.
-// The ErrorScopeManager itself is fully thread-safe once created.
+// Production devices are constructor-initialized (NewDevice and the legacy
+// registration constructor both set the manager), so the common path has no
+// lazy write and the Device-level concurrency promise holds for every device
+// built through a constructor. The lazy branch below exists only for
+// zero-value Devices (tests and legacy value copies); a zero-value Device is
+// single-goroutine by contract — its first PushErrorScope must happen on the
+// goroutine that owns it.
 func (d *Device) errorScopes() *ErrorScopeManager {
 	if d.errorScopeManager == nil {
 		d.errorScopeManager = NewErrorScopeManager()

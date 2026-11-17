@@ -872,7 +872,10 @@ func TestDeviceErrorScope(t *testing.T) {
 
 	// Push an error scope, then pop it. No error should be captured.
 	device.PushErrorScope(wgpu.ErrorFilterValidation)
-	gpuErr := device.PopErrorScope()
+	gpuErr, err := device.PopErrorScope()
+	if err != nil {
+		t.Fatalf("PopErrorScope: unexpected error: %v", err)
+	}
 	if gpuErr != nil {
 		t.Errorf("PopErrorScope returned non-nil error: %v", gpuErr)
 	}
@@ -886,12 +889,18 @@ func TestDeviceErrorScopeMultiple(t *testing.T) {
 	device.PushErrorScope(wgpu.ErrorFilterValidation)
 	device.PushErrorScope(wgpu.ErrorFilterOutOfMemory)
 
-	gpuErr2 := device.PopErrorScope()
+	gpuErr2, err2 := device.PopErrorScope()
+	if err2 != nil {
+		t.Fatalf("PopErrorScope (inner): unexpected error: %v", err2)
+	}
 	if gpuErr2 != nil {
 		t.Errorf("PopErrorScope (inner) returned non-nil error: %v", gpuErr2)
 	}
 
-	gpuErr1 := device.PopErrorScope()
+	gpuErr1, err1 := device.PopErrorScope()
+	if err1 != nil {
+		t.Fatalf("PopErrorScope (outer): unexpected error: %v", err1)
+	}
 	if gpuErr1 != nil {
 		t.Errorf("PopErrorScope (outer) returned non-nil error: %v", gpuErr1)
 	}
@@ -913,7 +922,10 @@ func TestDeviceErrorScopeAllFilters(t *testing.T) {
 	for _, f := range filters {
 		t.Run(f.name, func(t *testing.T) {
 			device.PushErrorScope(f.filter)
-			gpuErr := device.PopErrorScope()
+			gpuErr, err := device.PopErrorScope()
+			if err != nil {
+				t.Fatalf("PopErrorScope for %s: unexpected error: %v", f.name, err)
+			}
 			if gpuErr != nil {
 				t.Errorf("PopErrorScope for %s returned non-nil error: %v", f.name, gpuErr)
 			}

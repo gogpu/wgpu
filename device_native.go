@@ -397,13 +397,24 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 }
 
 // PopErrorScope pops the most recently pushed error scope.
-// Returns the captured error, or nil if no error occurred.
-func (d *Device) PopErrorScope() *GPUError {
-	e := d.impl.PopErrorScope()
-	if e == nil {
-		return nil
+//
+// Contract (at most one side is non-nil): a captured error, or
+// (nil, nil) when the scope captured nothing — the common path — or
+// (nil, ErrErrorScopeEmpty) when the stack was empty (the spec's
+// OperationError case). It never panics: a nil or zero-value device answers
+// (nil, nil), matching the rust build (expert P3-1, stage A1).
+func (d *Device) PopErrorScope() (*GPUError, error) {
+	if d == nil || d.impl == nil {
+		return nil, nil //nolint:nilnil // (nil, nil) is the error-scope contract's capture-nothing answer, not a missing error
 	}
-	return &GPUError{Type: ErrorFilter(e.Type), Message: e.Message}
+	e, err := d.impl.PopErrorScope()
+	if err != nil {
+		return nil, err
+	}
+	if e == nil {
+		return nil, nil //nolint:nilnil // same contract: the scope was on the stack and captured nothing (the common path)
+	}
+	return &GPUError{Type: ErrorFilter(e.Type), Message: e.Message}, nil
 }
 
 // WaitIdle waits for all GPU work to complete.

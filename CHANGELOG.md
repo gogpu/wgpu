@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Error scopes work on every backend**: `Device.PopErrorScope()` returns the captured error, `(nil, nil)` when the
+  scope captured nothing (the common path), or `(nil, ErrErrorScopeEmpty)` on an empty stack — the WebGPU spec's
+  OperationError case, no longer a panic. New sentinels `ErrValidation`, `ErrInternal` and `ErrErrorScopeEmpty`;
+  `GPUError` gains `Unwrap`, so `errors.Is(err, wgpu.ErrValidation)` (and `ErrOutOfMemory` / `ErrInternal`) classifies
+  a captured error. Native scopes capture the validation errors raised while recording commands (still surfaced by
+  `Finish` as before) and by `Submit`; the browser build drives the JS device's own `pushErrorScope`/`popErrorScope`;
+  the rust build keeps its delegation to wgpu-native.
+- **One public `GPUError` shape on every build**: the js/wasm declaration gains the `Type ErrorFilter` field (it had
+  only `Message`), so code that inspects `e.Type` compiles on wasm too; the js/wasm API golden carries this field as
+  its named delta.
+
+### Changed
+
+- **`(*Device).PopErrorScope()` changed signature**: it returns `(*GPUError, error)` where it returned `*GPUError`.
+  An empty-stack pop no longer panics. On the rust build an empty stack arrives as the binding's own error, wrapped
+  (`errors.As` reaches its value); the per-build sentinels keep `errors.Is` identity within each build.
+- **Why this is a PATCH**: the error scopes were a claimed-but-unimplemented feature — the native path captured
+  nothing and the browser path panicked — and there are **zero call sites** of the method in the ecosystem
+  (measured 2026-11-17 across all GoGPU repositories and go-webgpu). The compile-breaking signature change is the
+  documented exception the 0.x version rules allow, stated here so nobody discovers it through a compiler error;
+  the migration section says what to change.
+
+### Migration
+
+- `gpuErr := device.PopErrorScope()` → `gpuErr, err := device.PopErrorScope()`. An empty stack is now the spec's
+  OperationError case (`errors.Is(err, wgpu.ErrErrorScopeEmpty)`); a captured error is classified with
+  `errors.Is(gpuErr, wgpu.ErrValidation)` (or `ErrOutOfMemory` / `ErrInternal`). The captured `GPUError` still
+  carries its `Type` and `Message`, so code that inspected the struct keeps working; the rust binding's rejection
+  value is inspectable through the wrapped error.
+
+### Known limits
+
+- The browser scope implementation is exercised by the contract and mapping tests under node (CI runs them); a live
+  WebGPU device in a real browser is not part of CI.
+
 ## [0.35.0] - 2026-11-17
 
 The internal-layout release (ADR-070): the implementation moves into `internal/`, and the public package set becomes

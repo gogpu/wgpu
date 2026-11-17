@@ -326,25 +326,29 @@ func (d *Device) PushErrorScope(filter core.ErrorFilter) error {
 }
 
 // PopErrorScope pops the most recently pushed error scope.
-func (d *Device) PopErrorScope() *core.GPUError {
+func (d *Device) PopErrorScope() (*core.GPUError, error) {
 	var instanceR *rwgpu.Instance
 	if d.instance != nil {
 		instanceR = d.instance.InstanceR()
 	}
 	if d.r == nil || instanceR == nil {
-		return nil
+		return nil, nil
 	}
 	errType, message, err := d.r.PopErrorScopeAsync(instanceR)
 	if err != nil {
-		return nil //nolint:nilerr // PopErrorScope reports no captured error on infrastructure failure
+		// The binding reports infrastructure failures here (an empty scope stack
+		// arrives as the binding's own error). It is returned to the caller
+		// instead of being swallowed; the rust contract test documents the
+		// per-build difference from ErrErrorScopeEmpty.
+		return nil, fmt.Errorf("wgpu: PopErrorScope (rust): %w", err)
 	}
 	if errType == rwgpu.ErrorTypeNoError {
-		return nil
+		return nil, nil
 	}
 	return &core.GPUError{
 		Type:    convertRustErrorType(errType),
 		Message: message,
-	}
+	}, nil
 }
 
 // WaitIdle waits for all GPU work to complete.

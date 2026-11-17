@@ -64,6 +64,10 @@ func CreateDevice(adapterID AdapterID, desc *gputypes.DeviceDescriptor) (DeviceI
 		Features: enabledFeatures,
 		Limits:   deviceLimits,
 		Queue:    queueID,
+		// Constructor-initialized so the manager is never lazily created on a
+		// concurrent path (B1 of the error-scope work; the Device concurrency
+		// promise holds for constructed devices).
+		errorScopeManager: NewErrorScopeManager(),
 	}
 
 	// Register the device

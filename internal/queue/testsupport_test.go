@@ -140,6 +140,10 @@ func (h *testHost) EncoderPool() core.HalEncoderPool {
 	return h.pool
 }
 
+// ReportSubmitValidationError is a no-op fixture: queue tests that assert the
+// scope sink live in the root package (error_scope_wiring_test.go).
+func (h *testHost) ReportSubmitValidationError(string) {}
+
 // CreateCommandEncoder answers a bare encoder handle: a queue test that needs
 // a recording encoder builds it through the core device instead.
 func (h *testHost) CreateCommandEncoder(string) (*encoder.CommandEncoder, error) {

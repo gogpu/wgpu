@@ -63,6 +63,13 @@ type DeviceHost interface {
 	// label (the stencil upload's, today).
 	CreateCommandEncoder(label string) (*encoder.CommandEncoder, error)
 
+	// ReportSubmitValidationError delivers a submit-class validation error to
+	// the device's error-scope sink (error-scope reshape, stage A3). The class
+	// enters EXPLICITLY through this method: the encoder funnel stays
+	// validation-time only, and a future class gets its own seam method rather
+	// than widening an existing one.
+	ReportSubmitValidationError(message string)
+
 	// NewStencilUpload creates the staging R8Uint texture an upload of size
 	// into the stencil of dst at mipLevel and origin goes through, and returns
 	// the payload the queue records the blit from. dst is an implementation

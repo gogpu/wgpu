@@ -212,6 +212,8 @@ func NewDevice(
 		Features:       features,
 		Limits:         limits,
 		downlevel:      downlevel,
+		// Constructor-initialized (B1): no lazy creation on a concurrent path.
+		errorScopeManager: NewErrorScopeManager(),
 	}
 	valid := &atomic.Bool{}
 	valid.Store(true)

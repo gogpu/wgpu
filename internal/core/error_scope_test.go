@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"sync"
 	"testing"
 )
@@ -418,7 +419,10 @@ func TestDeviceErrorScopes(t *testing.T) {
 	}
 
 	// Pop the scope
-	gpuErr := device.PopErrorScope()
+	gpuErr, err := device.PopErrorScope()
+	if err != nil {
+		t.Fatalf("device.PopErrorScope: unexpected error: %v", err)
+	}
 	if gpuErr == nil {
 		t.Fatal("device.PopErrorScope should return the captured error")
 	}
@@ -427,20 +431,20 @@ func TestDeviceErrorScopes(t *testing.T) {
 	}
 }
 
-func TestDevicePopErrorScopeEmptyPanics(t *testing.T) {
+func TestDevicePopErrorScopeEmptyReturnsSentinel(t *testing.T) {
 	device := &Device{
 		Label: "test device",
 	}
 
-	// PopErrorScope on empty stack should panic
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("device.PopErrorScope on empty stack should panic")
-		}
-	}()
-
-	device.PopErrorScope()
+	// The reshape contract: pop with no matching push answers the sentinel,
+	// never a panic (the spec's OperationError case).
+	gpuErr, err := device.PopErrorScope()
+	if gpuErr != nil {
+		t.Fatalf("PopErrorScope on an empty stack returned a GPUError: %v", gpuErr)
+	}
+	if !errors.Is(err, ErrErrorScopeEmpty) {
+		t.Fatalf("PopErrorScope on an empty stack = %v, want ErrErrorScopeEmpty", err)
+	}
 }
 
 func TestDeviceErrorScopeLazyInit(t *testing.T) {
