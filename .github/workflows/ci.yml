@@ -74,12 +74,18 @@ jobs:
         ./scripts/check-android-arm64-preview.sh
 
   # Build verification - Cross-platform
+  #
+  # darwin is built by the cross-compile job below, not on a hosted macOS
+  # runner: the module is Pure Go (CGO_ENABLED=0), so `go build ./...` with
+  # GOOS=darwin covers exactly what a native macOS build did, while the hosted
+  # macOS pool is capacity-constrained (2026-11 outage, P2-INFRA-018). The
+  # macOS runtime signal stays with the `test` job on macos-latest.
   build:
     name: Build - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
         go-version: ['1.25']
 
     steps:
@@ -126,6 +132,11 @@ jobs:
           - { goos: android, goarch: "386", tags: '', name: 'android-386-no-backends' }
           - { goos: android, goarch: arm, tags: '', name: 'android-arm-no-backends' }
           - { goos: android, goarch: amd64, tags: '', name: 'android-amd64-no-backends' }
+          # darwin replaces the native macOS build leg (see the build job's
+          # comment): the whole module, both Apple architectures. Pure Go means
+          # the cross-compile output is what the macOS toolchain produces.
+          - { goos: darwin, goarch: arm64, tags: '', name: 'darwin-arm64', pkgs: './...' }
+          - { goos: darwin, goarch: amd64, tags: '', name: 'darwin-amd64', pkgs: './...' }
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -141,7 +152,7 @@ jobs:
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
         CGO_ENABLED: 0
-      run: go build ${{ matrix.tags && format('-tags={0}', matrix.tags) || '' }} .
+      run: go build ${{ matrix.tags && format('-tags={0}', matrix.tags) || '' }} ${{ matrix.pkgs || '.' }}
 
   # Unit tests - Cross-platform
   test:
