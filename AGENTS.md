@@ -79,7 +79,7 @@ public path only).
 
 ## Current Version
 
-v0.34.15 | Go 1.25+ | Dependencies: naga v0.21.12, gpucontext v0.32.0, gputypes v0.8.2, goffi v0.6.8, webgpu v0.5.5
+v0.35.0 | Go 1.25+ | Dependencies: naga v0.22.4, gpucontext v0.32.0, gputypes v0.9.1, goffi v0.6.8, webgpu v0.5.5
 
 ## Build & Test
 

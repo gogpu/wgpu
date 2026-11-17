@@ -84,7 +84,7 @@ GOOS=js GOARCH=wasm go build -o app.wasm .
 > | `-tags rust` | go-webgpu/webgpu → wgpu-native v29 | wgpu-native's backends |
 > | `GOOS=js` | syscall/js → Browser WebGPU | Web applications |
 >
-> **API consistency:** The public API compiles on all build targets. HAL wrapper functions (`NewDeviceFromHAL`, `NewSurfaceFromHAL`, etc.) return errors or nil on Rust/Browser builds where no Go HAL layer exists. Use `RequestAdapter` → `RequestDevice` for the standard cross-backend path.
+> **API consistency:** The public API compiles on all build targets. The `HAL()` accessors on `Instance`, `Adapter`, `Device` and `Surface` exist on every build and return `hal.Handles` in that build's terms — the native backend's handles, `KindWebGPU` handles behind the wgpu-native binding, or `KindBrowser` on the browser build — and a nil or released object answers the zero `Handles` (`KindUnknown`). Use `RequestAdapter` → `RequestDevice` for the standard cross-backend path.
 
 ---
 

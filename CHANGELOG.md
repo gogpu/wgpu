@@ -7,11 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-A seam patch before the internal-layout change (v0.35.0): the test seam gains constant-time counters and
-metadata-only textures — the last `NewTextureFromHAL` replacement — and naga reaches v0.22.4.
+## [0.35.0] - 2026-11-17
+
+The internal-layout release (ADR-070): the implementation moves into `internal/`, and the public package set becomes
+three packages — the root module, a thin `hal` (`BackendKind` and `Handles`: 16 names, no functions, no imports) and
+`wgputest`. Outside the names and the backend imports listed below, public consumers need no source changes;
+behaviour is unchanged, and the signature-level API golden (windows, rust and wasm) records an empty delta beyond
+this list. The window's final verification sweep adds nothing user-visible: it is behaviour-identical platform moves,
+tests, fuzz corpora and the lint/waiver tooling.
 
 ### Added
 
+- **Thin `hal`** (ADR-070): `BackendKind` with nine typed `Kind*` constants and `Handles` with five nested
+  per-backend `uintptr` handle structs — 16 public names, no functions, no methods, no imports. `KindUnknown` (0)
+  is the zero value, and a released object or one without a HAL object reports it; `KindVulkan` (1), `KindMetal`
+  (2), `KindDX12` (3), `KindGLES` (4), `KindBrowser` (5) and `KindSoftware` (6) coincide with the corresponding
+  `gputypes.Backend` values, with `KindGLES` being gputypes' `GL` ("OpenGL/OpenGL ES"); `KindNoop` (7) and
+  `KindWebGPU` (8) have no gputypes counterpart, and `KindWebGPU` names the wgpu-native binding of the rust build.
+  `Handles` carries `Kind` and the matching `VulkanHandles`, `DX12Handles`, `MetalHandles`, `GLESHandles` or
+  `WebGPUHandles` struct.
+- **Four HAL accessors on every build tag**: `(*Instance).HAL()`, `(*Adapter).HAL()`, `(*Device).HAL()` and
+  `(*Surface).HAL()`, all returning `hal.Handles`. A nil or released object answers the zero `Handles`
+  (`KindUnknown`); the handles are borrowed and valid only while the wgpu object they came from lives.
+- **`ErrNoBackendRegistered`, `ErrNoHardwareAdapter` and `ErrNoFallbackAdapter`** (ADR-083), each wired so it
+  fires: a mask that selects no registered backend, registered backends that produce no adapter, and a requested
+  fallback with no CPU adapter.
+- **CI: a `wasm test (root + encoder, node)` job**, so the js/wasm tests of the root and encoder packages execute
+  instead of only compiling.
 - **`wgputest.(*Recorder).Counts`** returns the number of records of each kind — encoders, buffers, textures,
   views, vertex and index binds, bind groups, passes, draws, indexed draws, submits — computed from the trace's
   slice lengths under the recorder's lock. A test that only compares totals (a submit counter, a benchmark's
@@ -23,18 +45,19 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   panics; `Release` is a no-op. It replaces the hand-written `hal.Texture` stubs that consumers built through
   `NewTextureFromHAL`, which leaves the public API when `hal` becomes internal (ADR-070).
 
-### Fixed
-
-- **`Texture.Release` on a texture without a device and a HAL object no longer panics.** The wrapper reached
-  `Device.destroyTextureDeferred` through the nil device; a detached texture from `wgputest.NewDetachedTexture`
-  now releases cleanly, twice if asked. A root test pins it, and its negative control fails without the guard.
-- **Vulkan: a barrier over a 3D texture covers it whatever layer range it names.** A 3D image has one layer, and
-  Vulkan reads an explicit layer count of a 3D image created 2D-array compatible as a count of depth slices once
-  `maintenance9` is enabled; the validation layer warned about a `CommandEncoder.TransitionTextures` barrier that
-  named one layer of a 3D texture.
-
 ### Changed
 
+- **`(*Surface).HAL` now returns `hal.Handles`** on the native build (was `hal.Surface`); on the rust and js/wasm
+  builds it is new, so those two contexts gain all four accessors.
+- **`QueryType`, `GPUError` and `ErrorFilter` are defined types in the root package** (they were aliases; the
+  shapes are unchanged — `QueryType` uint32, `ErrorFilter` int, `GPUError` a struct with `Type` and `Message` and
+  an `Error()` method), and `QueryTypeOcclusion`, `QueryTypeTimestamp`, `ErrorFilterValidation`,
+  `ErrorFilterOutOfMemory` and `ErrorFilterInternal` are defined in the root package with the same values. The
+  rust and browser builds already defined `GPUError` and `ErrorFilter` themselves.
+- **The seven error sentinels keep their names, values and `errors.Is` identity**: `ErrDeviceLost`,
+  `ErrOutOfMemory`, `ErrSurfaceLost`, `ErrSurfaceOutdated`, `ErrTimeout`, `ErrContextReleased` and
+  `ErrWorkgroupBarrierUnsupported` are bound to the internal HAL package on native builds, and the rust and
+  browser builds keep their own values. An `errors.Is` test pins the identity.
 - **`Device.Release()` on a zero-value `Device` no longer panics.** A zero-value device holds nothing to
   release; the call was an accidental nil dereference before the internal reorganisation. It is one of the
   move's intentional behaviour changes, in the safe direction (the remaining zero-value normalisations are
@@ -50,6 +73,10 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   software mask on that sentinel. Select it explicitly with `Backends: gputypes.BackendsSoftware` (normal
   enumeration) or with `RequestAdapterOptions.ForceFallbackAdapter`, which reaches the software backend under the
   default mask, requests with a compatible surface included, and prefers it over other CPU adapters (ADR-079).
+- **gputypes v0.9.1** (from v0.8.2): `Backends` is a 32-bit mask, and the Pure Go software renderer has its own
+  `BackendSoftware` (6) and `BackendsSoftware` flag; `DefaultInstanceDescriptor().Backends` is now `BackendsAll` —
+  every hardware backend, never software. Source-compatible for code that uses the named constants; only an
+  explicit `uint8` conversion of a mask breaks.
 - **naga v0.22.1** (from v0.21.12). v0.22.0 and v0.22.1 are the SPIR-V input frontend's Phase 3 work — row-major
   matrix members on read and a spec-correct store, projected samples of arrayed images, the storage-expression
   budget, positioned post-parse errors, `nagac --from-spirv` — plus the IR's name-presence model and the
@@ -84,14 +111,55 @@ metadata-only textures — the last `NewTextureFromHAL` replacement — and naga
   diff v0.22.3 → v0.22.4 of **0/69 shaders in SPIR-V and in MSL** — the zero-diff expectation was stated before
   the run and held; gg's leg of the gate PASS (25/25 byte-identical) with a positive control proving the gate sees
   the `subgroupElect` change class.
+- **Tooling, no public API change:** the signature-level API golden (`tools/apigolden`, one golden per build
+  context), the symbol-keyed public-layer waiver gate (`internal/layoutcheck`) with its CI growth and expiry audit
+  (`tools/waiveraudit`), the descriptor projection drift test with its fuzz roundtrips, and
+  `BenchmarkEncoderFinish`.
 
 ### Removed
 
+- **`NewDeviceFromHAL`, `NewSurfaceFromHAL`, `NewTextureFromHAL`, `NewTextureViewFromHAL` and
+  `NewSamplerFromHAL`** leave the root API; construct through the public device path or `wgputest`
+  (`NewSoftwareDevice`, `NewNoopDevice`).
+- **`(*Device).HalDevice`**; the native objects behind a device are `(*Device).HAL()`.
 - **`(*Surface).SetPrepareFrame`** leaves the public API with the internal-layout change (ADR-070). No consumer
   used it — a grep over the ecosystem with wgpu excluded found zero hits (2026-11-15) — and with the setter gone
   there was no production path to register the hook, so the internal mechanism went with it: `internal/core`'s
   `SetPrepareFrame`, `PrepareFrameFunc`, the `prepareFrame` field and `applyPrepareFrame`, and the two core tests
   that covered them.
+- **`hal.RegisterBackend`, `hal.RegisterBackendFactory`, `core.RegisterBackendProvider` and
+  `core.RegisterHALBackends`**; the backends register by default, and the registry functions are internal.
+- **`ErrNoAdapters` and `ErrNoBackends`**, replaced by the ADR-083 trio above. Neither was returned by any path,
+  and no consumer referenced either name.
+- **Every `hal/**` and `core/**` package leaves the public package set**: the backends and the validation layer
+  live under `internal/` now, and three public packages remain — the root module, the thin `hal` and `wgputest`.
+
+### Fixed
+
+- **`Texture.Release` on a texture without a device and a HAL object no longer panics.** The wrapper reached
+  `Device.destroyTextureDeferred` through the nil device; a detached texture from `wgputest.NewDetachedTexture`
+  now releases cleanly, twice if asked. A root test pins it, and its negative control fails without the guard.
+- **Concurrent first map operations on one `Device` no longer race.** The map tracker's lazy slot was a plain
+  field, so two concurrent first registrations could both see nil, install two trackers, and leave a buffer
+  registered in the tracker nobody polls: its map never resolved. The slot is now published through an atomic
+  compare-and-swap, so a concurrently registered buffer always lands in the tracker the device polls. This is a
+  pre-existing defect, found while moving the domain; a concurrent first-use test reproduces it under `-race`.
+- **Vulkan: a barrier over a 3D texture covers it whatever layer range it names** (#412, by @dvoyni). A 3D image
+  has one layer, and Vulkan reads an explicit layer count of a 3D image created 2D-array compatible as a count of
+  depth slices once `maintenance9` is enabled; the validation layer warned about a
+  `CommandEncoder.TransitionTextures` barrier that named one layer of a 3D texture.
+
+### Migration
+
+- Public consumers: no source changes outside the names and imports above; behaviour is unchanged.
+- Code that imported `hal/vulkan`, `hal/dx12`, `hal/gles`, `hal/software` or `hal/allbackends` to register a
+  backend: all five backends register by default now — delete the blank imports.
+- Code that used `hal.Device`, `hal.Queue`, `hal.Buffer` or another HAL implementation type: use
+  `(*Instance|Adapter|Device|Surface).HAL()` and the `hal.Handles` structs.
+- `wgpu.NewDeviceFromHAL` users: construct through `wgputest` (`NewSoftwareDevice` or `NewNoopDevice`) or the
+  public device path.
+- `ErrNoAdapters` and `ErrNoBackends` users: use `ErrNoBackendRegistered`, `ErrNoHardwareAdapter` or
+  `ErrNoFallbackAdapter` (ADR-083).
 
 ## [0.34.15] - 2026-11-14
 
@@ -4716,7 +4784,8 @@ The following features are not yet fully implemented in the Vulkan backend:
 - **OpenGL ES backend** (`hal/gles/`) - Pure Go via goffi (~3.5K LOC)
 
 [#55]: https://github.com/gogpu/wgpu/issues/55
-[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.34.14...HEAD
+[Unreleased]: https://github.com/gogpu/wgpu/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/gogpu/wgpu/compare/v0.34.15...v0.35.0
 [0.34.14]: https://github.com/gogpu/wgpu/compare/v0.34.13...v0.34.14
 [0.17.0]: https://github.com/gogpu/wgpu/compare/v0.16.17...v0.17.0
 [0.16.14]: https://github.com/gogpu/wgpu/compare/v0.16.13...v0.16.14
