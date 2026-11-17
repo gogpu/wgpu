@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI: the darwin build is a cross-compile on a Linux runner** — both Apple architectures, the whole module, on
+  the same ubuntu pool as every other target. The module is Pure Go, so the cross-compiled build is what the macOS
+  toolchain produced; the hosted macOS pool's capacity crunch (since the macOS 14 image retirement on 2026-11-02)
+  no longer holds the build check hostage. The macOS **runtime** signal — the test suite on Apple's paravirtual
+  Metal device — stays on `macos-latest`, where it belongs.
 - **Error scopes work on every backend**: `Device.PopErrorScope()` returns the captured error, `(nil, nil)` when the
   scope captured nothing (the common path), or `(nil, ErrErrorScopeEmpty)` on an empty stack — the WebGPU spec's
   OperationError case, no longer a panic. New sentinels `ErrValidation`, `ErrInternal` and `ErrErrorScopeEmpty`;
