@@ -32,7 +32,7 @@ var (
 	// Metal framework init, because the symbol accessors (GetClass/Sel) may be
 	// reached before an explicit Init. See ensureObjCRuntime.
 	objcOnce sync.Once
-	objcErr  error
+	errObjC  error
 )
 
 // Init initializes the Metal framework.
@@ -57,9 +57,9 @@ func Init() error {
 // and then continues with the framework.
 func ensureObjCRuntime() error {
 	objcOnce.Do(func() {
-		objcErr = initObjCRuntime()
+		errObjC = initObjCRuntime()
 	})
-	return objcErr
+	return errObjC
 }
 
 func doInit() error {
