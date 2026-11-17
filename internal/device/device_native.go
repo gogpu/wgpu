@@ -1821,7 +1821,18 @@ func (d *Device) Poll(t core.PollType) bool {
 	case core.PollWait:
 		// Wait on the HAL device so all submissions complete, then drain.
 		if halDev, ok := d.core.HalDeviceHandle(); ok {
-			_ = halDev.WaitIdle()
+			if err := halDev.WaitIdle(); err != nil {
+				// The wait itself failed: report it to the error-scope sink and
+				// claim no completion. Draining with the all-indices-completed
+				// sentinel after a failed wait would resolve every pending map
+				// as done on a device that may be lost. The lost-device class
+				// becomes first-class with the uncaptured-error idiom
+				// (P1-API-039); until then the internal class is the honest
+				// one — the failure is the implementation's, not the caller's
+				// validation.
+				d.core.ReportError(core.ErrorFilterInternal, "Device.Poll: wait idle: "+err.Error())
+				return false
+			}
 		}
 		// Drain with a sentinel "all indices completed".
 		return d.core.PollMaps(^uint64(0))
