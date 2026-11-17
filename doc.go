@@ -19,6 +19,18 @@
 // Resources are reference-counted internally. Release is idempotent; methods
 // on a released resource that return an error report ErrReleased.
 //
+// # Error Scopes
+//
+// Device.PushErrorScope and Device.PopErrorScope implement the WebGPU error
+// scope model. PopErrorScope returns (*GPUError, error), and at most one side
+// is non-nil: a captured error; (nil, nil) when the scope captured nothing, the
+// common path; or (nil, ErrErrorScopeEmpty) on an empty stack — the spec's
+// OperationError case, never a panic. A captured *GPUError answers errors.Is
+// against ErrValidation, ErrOutOfMemory and ErrInternal through its Unwrap, and
+// carries the category and message itself. Scopes capture the validation
+// errors raised while recording commands and by Submit. On the browser build
+// the scopes drive the JS device's own pushErrorScope and popErrorScope.
+//
 // # Backend Registration
 //
 // The platform hardware backends register by default (ADR-083): Vulkan, DX12
