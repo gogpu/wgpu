@@ -1482,12 +1482,14 @@ func (d *Device) CreateCommandEncoder(label string) (*encoder.CommandEncoder, er
 	if d.cmdEncoderPool != nil {
 		halEnc, err := d.cmdEncoderPool.Acquire()
 		if err != nil {
+			d.reportEncoderBudgetError(err)
 			return nil, fmt.Errorf("wgpu: encoder pool acquire: %w", err)
 		}
 
 		if err := halEnc.BeginEncoding(label); err != nil {
 			// Failed to begin encoding — return encoder to pool for future use.
 			d.cmdEncoderPool.Release(halEnc)
+			d.reportEncoderBudgetError(err)
 			return nil, fmt.Errorf("wgpu: begin encoding: %w", err)
 		}
 
@@ -1803,6 +1805,18 @@ func (d *Device) Release() {
 	for _, s := range configuredSurfaces {
 		s.RetireDevice(d.core)
 	}
+}
+
+// reportEncoderBudgetError reports a command-buffer-budget failure from the
+// encoder pool path to the device's error scope as an internal-class GPU error
+// (P1-MTL-008, issue #428). The error stays an operation failure: the device is
+// healthy, and submitting or dropping encoders frees the budget. The
+// device-lost idiom is deliberately separate and belongs to D2 (P1-API-039).
+func (d *Device) reportEncoderBudgetError(err error) {
+	if err == nil || d == nil || d.core == nil || !errors.Is(err, hal.ErrCommandBufferBudget) {
+		return
+	}
+	d.core.ReportError(core.ErrorFilterInternal, "Device.CreateCommandEncoder: "+err.Error())
 }
 
 // destroyQueue returns the device's DestroyQueue for deferred resource destruction.
