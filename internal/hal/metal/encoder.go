@@ -105,7 +105,7 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 	// The command buffer takes ownership of the budget unit: it is released
 	// exactly once when the buffer is committed (Queue.Submit) or destroyed
 	// without having been committed (CommandBuffer.releaseBudget).
-	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device, icbOwners: e.icbOwners, budget: e.budget()}
+	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device, icbOwners: e.icbOwners, budgetUnit: newCommandBudgetUnit(e.budget())}
 	e.cmdBuffer = 0 // Recording state becomes false
 	e.icbOwners = nil
 	e.finished = cb
@@ -573,10 +573,10 @@ type CommandBuffer struct {
 	drawable  ID // Attached drawable for presentation
 	icbOwners []*indexedICBOwnership
 	destroy   sync.Once
-	// budget is the queue's command-buffer budget the buffer was created
-	// against; budgetOnce makes the matching release happen exactly once.
-	budget     *commandBudget
-	budgetOnce sync.Once
+	// budgetUnit holds the buffer's place in the queue's command-buffer
+	// budget; releaseBudget returns it exactly once, at the commit or at the
+	// drop, whichever comes first.
+	budgetUnit commandBudgetUnit
 }
 
 // Destroy releases the command buffer.
@@ -601,12 +601,12 @@ func (cb *CommandBuffer) Destroy() {
 // created command buffer stops counting as created-not-submitted when it is
 // committed (Queue.Submit) or when it is destroyed without ever being
 // committed; whichever comes first releases the unit, and the second call is a
-// no-op (sync.Once).
+// no-op (commandBudgetUnit owns the sync.Once).
 func (cb *CommandBuffer) releaseBudget() {
-	if cb == nil || cb.budget == nil {
+	if cb == nil {
 		return
 	}
-	cb.budgetOnce.Do(func() { cb.budget.Release() })
+	cb.budgetUnit.release()
 }
 
 // SetDrawable attaches a drawable for presentation.

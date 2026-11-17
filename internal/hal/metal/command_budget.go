@@ -3,7 +3,10 @@
 
 package metal
 
-import "sync/atomic"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // commandBudget counts the MTLCommandBuffers created through
 // CommandEncoder.BeginEncoding that have neither been submitted nor dropped.
@@ -79,4 +82,72 @@ func (b *commandBudget) Release() {
 // submitted or dropped. It serves the guard's WARN and the unit tests.
 func (b *commandBudget) Outstanding() int64 {
 	return b.outstanding.Load()
+}
+
+// commandBudgetUnit is the accounting unit of one created command buffer: it
+// holds the buffer's place in the command budget and returns that place
+// exactly once, whichever comes first — the commit of a Submit batch or the
+// drop of the buffer without committing. A second return would under-count the
+// outstanding buffers and let more than the limit through, which is why the
+// unit, and not the call sites, owns the sync.Once.
+//
+// The zero value (a nil budget) is a unit whose release is a no-op; device-free
+// tests construct command buffers without a Metal device.
+type commandBudgetUnit struct {
+	budget *commandBudget
+	once   sync.Once
+}
+
+// newCommandBudgetUnit returns the unit of a command buffer created against b.
+func newCommandBudgetUnit(b *commandBudget) commandBudgetUnit {
+	return commandBudgetUnit{budget: b}
+}
+
+// release returns the unit's place to the budget, once.
+func (u *commandBudgetUnit) release() {
+	if u == nil || u.budget == nil {
+		return
+	}
+	u.once.Do(u.budget.Release)
+}
+
+// budgetedSubmit is one command buffer of a Submit batch as the accounting
+// loop sees it: the raw handle the hooks pass to Objective-C, and the unit the
+// commit returns. A zero value (unit == nil) marks a slot of the caller's list
+// that held no Metal command buffer; the loop skips it, and a last slot that is
+// zero receives no completion registration, as before.
+type budgetedSubmit struct {
+	raw  uintptr
+	unit *commandBudgetUnit
+}
+
+// submitHooks carries the Objective-C effects of a submission, so the
+// accounting loop is platform-neutral and unit-testable on every platform:
+// onLast registers the batch's completion tracking on its last command buffer,
+// and commit sends -commit to one buffer.
+type submitHooks struct {
+	onLast func(raw uintptr, subIdx uint64)
+	commit func(raw uintptr)
+}
+
+// runSubmit runs the per-buffer part of Queue.Submit: it registers completion
+// tracking on the batch's last Metal command buffer, commits every buffer, and
+// returns each buffer's unit to the command budget at that instant.
+//
+// This is the decrement the budget depends on: a unit returned here (or by
+// commandBudgetUnit.release from a drop path) frees the place for the next
+// recording. It lives outside the darwin-only files so the accounting is
+// pinned by tests that run on every platform.
+func runSubmit(batch []budgetedSubmit, hooks submitHooks, subIdx uint64) {
+	lastIdx := len(batch) - 1
+	for i := range batch {
+		if batch[i].unit == nil {
+			continue
+		}
+		if i == lastIdx {
+			hooks.onLast(batch[i].raw, subIdx)
+		}
+		hooks.commit(batch[i].raw)
+		batch[i].unit.release()
+	}
 }
