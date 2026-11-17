@@ -20,7 +20,7 @@
 #
 # Every `permanent` row names its removal path, because `permanent` alone would make the time bound bite
 # nothing: the conversions are removed by P2-API-034/P2-API-035 before v1.0 and re-reviewed at each release,
-# the wgputest facade rows by P2-API-032 before v1.0, and the factory rows are design (ADR-070 §15.10) with
+# the wgputest facade rows by P2-API-032 before v1.0, and the factory rows are design (ADR-070 §15.13) with
 # no removal planned.
 #
 # Groups: six wgputest facade rows (P2-API-032); 31 boundary conversions, carded for the generated-projection
@@ -28,7 +28,7 @@
 # internal because internal cannot import root (R5). The other six rows belong to four D7 thin-sweep boundary
 # declarations that do not take root types, so R5 is not their reason (two of them carry two loops each):
 # surface_native.go createHALSurfaces, device_browser.go stencilOpToJS and the two convertVertexBufferLayouts.
-# Four factory closures are design, not debt (ADR-070 §15.10).
+# Four factory closures are design, not debt (ADR-070 §15.13).
 limit: 41
 wgputest/wgputest.go	WithRecorder	closure	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; permanent: removed by P2-API-032 before v1.0	wgpu	P2-API-032	permanent
 wgputest/wgputest.go	WithFaults	closure	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; permanent: removed by P2-API-032 before v1.0	wgpu	P2-API-032	permanent
@@ -67,7 +67,7 @@ renderbundle_execute.go	(*RenderPassEncoder).ExecuteBundles	range	(*RenderPassEn
 surface_native.go	createHALSurfaces	range	calls each enabled backend's Instance.CreateSurface for the target and collects the created hal.Surface per backend; a D7 thin-sweep boundary choice that takes no root type, so R5 is not its reason; the HAL surface map is the public boundary; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
 surface_native.go	(SurfaceTargetUnsafe).halTarget	switch	maps the public SurfaceTargetUnsafe kind to hal.SurfaceTargetKind; internal cannot name the public target type, so the projection stays beside it; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
 surface_rust_linux.go	createPlatformSurfaceTarget	switch	maps the public Xlib/Wayland target kind to the wgpu-native CreateSurfaceFromXlibWindow/CreateSurfaceFromWaylandSurface call; the rust binding is the public boundary; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
-wgputest_factory.go	init	closure	The bridge contract (internal/wgputestbridge/bridge.go:4-9): "Go does not let a package construct a type with unexported fields from another package ... The root package registers a Factory ... here at init." This init closure registers the HAL accessor; root-side by construction (ADR-070 §15.10); permanent: design (ADR-070 §15.10), no removal planned	wgpu	ADR-070 §15.10	permanent
-wgputest_factory.go	init	closure#2	Same bridge contract (bridge.go:4-9): this second init closure registers the device-from-HAL factory, type-asserts the HAL device/queue and calls the root newDeviceFromHAL, which internal cannot reach (ADR-070 §15.10); permanent: design (ADR-070 §15.10), no removal planned	wgpu	ADR-070 §15.10	permanent
-wgputest_factory.go	newTestDeviceFactory	closure	The factory closure asserts the bridge's opaque device/queue to hal.Device/hal.Queue, builds the hooks, wraps through the root newDeviceFromHAL and returns root *wgpu.Device/*wgpu.Queue: the bridge returns root types (bridge.go:4-9), so the factory is root-side (ADR-070 §15.10); permanent: design (ADR-070 §15.10), no removal planned	wgpu	ADR-070 §15.10	permanent
-wgputest_factory.go	newTestDeviceFactory	closure#2	The returned cleanup closure is the second literal; it calls device.Release() on the root wrapper, which internal cannot name (ADR-070 §15.10); permanent: design (ADR-070 §15.10), no removal planned	wgpu	ADR-070 §15.10	permanent
+wgputest_factory.go	init	closure	The bridge contract (internal/wgputestbridge/bridge.go:4-9): "Go does not let a package construct a type with unexported fields from another package ... The root package registers a Factory ... here at init." This init closure registers the HAL accessor; root-side by construction (ADR-070 §15.13); permanent: design (ADR-070 §15.13), no removal planned	wgpu	ADR-070 §15.13	permanent
+wgputest_factory.go	init	closure#2	Same bridge contract (bridge.go:4-9): this second init closure registers the device-from-HAL factory, type-asserts the HAL device/queue and calls the root newDeviceFromHAL, which internal cannot reach (ADR-070 §15.13); permanent: design (ADR-070 §15.13), no removal planned	wgpu	ADR-070 §15.13	permanent
+wgputest_factory.go	newTestDeviceFactory	closure	The factory closure asserts the bridge's opaque device/queue to hal.Device/hal.Queue, builds the hooks, wraps through the root newDeviceFromHAL and returns root *wgpu.Device/*wgpu.Queue: the bridge returns root types (bridge.go:4-9), so the factory is root-side (ADR-070 §15.13); permanent: design (ADR-070 §15.13), no removal planned	wgpu	ADR-070 §15.13	permanent
+wgputest_factory.go	newTestDeviceFactory	closure#2	The returned cleanup closure is the second literal; it calls device.Release() on the root wrapper, which internal cannot name (ADR-070 §15.13); permanent: design (ADR-070 §15.13), no removal planned	wgpu	ADR-070 §15.13	permanent

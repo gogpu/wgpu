@@ -118,6 +118,12 @@ linters:
           sizeThreshold: 256
 
   exclusions:
+    # Generated files are recognized by the standard `^// Code generated .* DO NOT EDIT\.$` marker and are
+    # excluded from every linter in strict mode: no ad-hoc path exclusion, and a marker outside the leading
+    # comment block does not exempt a file. The pinned v2.15.0 loader default is already strict (S13 trial
+    # review F-A3, verified); this key records the decision where enforcement lives, so a loader-default
+    # change cannot silently loosen it.
+    generated: strict
     rules:
       # types package - standard wgpu naming convention
       - path: types/.*\.go

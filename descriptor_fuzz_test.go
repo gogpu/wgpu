@@ -394,6 +394,19 @@ func bufferUsageSeeds() []gputypes.BufferUsage {
 	}
 }
 
+// colorWriteMaskSeeds lists every ColorWriteMask constant: the type is a bit flag without a String method,
+// so enumValues cannot discover it (the same reason bufferUsageSeeds and textureUsageSeeds are hand-kept).
+func colorWriteMaskSeeds() []gputypes.ColorWriteMask {
+	return []gputypes.ColorWriteMask{
+		gputypes.ColorWriteMaskNone,
+		gputypes.ColorWriteMaskRed,
+		gputypes.ColorWriteMaskGreen,
+		gputypes.ColorWriteMaskBlue,
+		gputypes.ColorWriteMaskAlpha,
+		gputypes.ColorWriteMaskAll,
+	}
+}
+
 // reportDiff fails on every difference between want and got.
 func reportDiff[T any](t *testing.T, want, got T) {
 	t.Helper()
@@ -530,6 +543,39 @@ func FuzzBindGroupLayoutDescriptorRoundtrip(f *testing.F) {
 	addSeed(f, BindGroupLayoutDescriptor{})
 	addSeed(f, emptyCollectionsSeed[BindGroupLayoutDescriptor]())
 	addSeed(f, BindGroupLayoutDescriptor{Label: "bgl", Entries: []gputypes.BindGroupLayoutEntry{{Binding: 1}, {Binding: 2}}})
+	for _, stages := range enumValues[gputypes.ShaderStages](8) {
+		addSeed(f, BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{Visibility: stages}}})
+	}
+	for _, binding := range enumValues[gputypes.BufferBindingType](8) {
+		addSeed(f, BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+			Buffer: &gputypes.BufferBindingLayout{Type: binding},
+		}}})
+	}
+	for _, binding := range enumValues[gputypes.SamplerBindingType](8) {
+		addSeed(f, BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+			Sampler: &gputypes.SamplerBindingLayout{Type: binding},
+		}}})
+	}
+	for _, sample := range enumValues[gputypes.TextureSampleType](16) {
+		addSeed(f, BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+			Texture: &gputypes.TextureBindingLayout{SampleType: sample},
+		}}})
+	}
+	for _, dimension := range enumValues[gputypes.TextureViewDimension](16) {
+		addSeed(f, BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+			Texture: &gputypes.TextureBindingLayout{ViewDimension: dimension},
+		}}})
+	}
+	for _, access := range enumValues[gputypes.StorageTextureAccess](8) {
+		addSeed(f, BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+			StorageTexture: &gputypes.StorageTextureBindingLayout{Access: access},
+		}}})
+	}
+	for _, format := range enumValues[gputypes.TextureFormat](512) {
+		addSeed(f, BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+			StorageTexture: &gputypes.StorageTextureBindingLayout{Format: format},
+		}}})
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		x := fuzzDecode[BindGroupLayoutDescriptor](data)
 		reportDiff(t, x, bindGroupLayoutDescriptorFromHAL(x.toHAL()))
@@ -544,6 +590,18 @@ func FuzzDepthStencilStateRoundtrip(f *testing.F) {
 	}
 	for _, compare := range enumValues[gputypes.CompareFunction](16) {
 		addSeed(f, DepthStencilState{DepthCompare: compare})
+	}
+	for _, compare := range enumValues[gputypes.CompareFunction](16) {
+		addSeed(f, DepthStencilState{
+			StencilFront: StencilFaceState{Compare: compare},
+			StencilBack:  StencilFaceState{Compare: compare},
+		})
+	}
+	for _, op := range enumValues[gputypes.StencilOperation](16) {
+		addSeed(f, DepthStencilState{
+			StencilFront: StencilFaceState{FailOp: op, DepthFailOp: op, PassOp: op},
+			StencilBack:  StencilFaceState{FailOp: op, DepthFailOp: op, PassOp: op},
+		})
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		x := fuzzDecode[DepthStencilState](data)
@@ -664,6 +722,59 @@ func FuzzRenderPipelineDescriptorRoundtrip(f *testing.F) {
 	addSeed(f, RenderPipelineDescriptor{})
 	addSeed(f, numericEdgeSeed[RenderPipelineDescriptor](quietNaN32, quietNaN64))
 	addSeed(f, emptyCollectionsSeed[RenderPipelineDescriptor]())
+	for _, topology := range enumValues[gputypes.PrimitiveTopology](8) {
+		addSeed(f, RenderPipelineDescriptor{Primitive: gputypes.PrimitiveState{Topology: topology}})
+	}
+	for _, indexFormat := range enumValues[gputypes.IndexFormat](8) {
+		strip := indexFormat
+		addSeed(f, RenderPipelineDescriptor{Primitive: gputypes.PrimitiveState{StripIndexFormat: &strip}})
+	}
+	for _, face := range enumValues[gputypes.FrontFace](8) {
+		addSeed(f, RenderPipelineDescriptor{Primitive: gputypes.PrimitiveState{FrontFace: face}})
+	}
+	for _, cull := range enumValues[gputypes.CullMode](8) {
+		addSeed(f, RenderPipelineDescriptor{Primitive: gputypes.PrimitiveState{CullMode: cull}})
+	}
+	for _, format := range enumValues[gputypes.TextureFormat](512) {
+		addSeed(f, RenderPipelineDescriptor{DepthStencil: &DepthStencilState{Format: format}})
+		addSeed(f, RenderPipelineDescriptor{Fragment: &FragmentState{Targets: []gputypes.ColorTargetState{{Format: format}}}})
+	}
+	for _, compare := range enumValues[gputypes.CompareFunction](16) {
+		addSeed(f, RenderPipelineDescriptor{DepthStencil: &DepthStencilState{DepthCompare: compare}})
+		addSeed(f, RenderPipelineDescriptor{DepthStencil: &DepthStencilState{
+			StencilFront: StencilFaceState{Compare: compare},
+			StencilBack:  StencilFaceState{Compare: compare},
+		}})
+	}
+	for _, op := range enumValues[gputypes.StencilOperation](16) {
+		addSeed(f, RenderPipelineDescriptor{DepthStencil: &DepthStencilState{
+			StencilFront: StencilFaceState{FailOp: op, DepthFailOp: op, PassOp: op},
+			StencilBack:  StencilFaceState{FailOp: op, DepthFailOp: op, PassOp: op},
+		}})
+	}
+	for _, mode := range enumValues[gputypes.VertexStepMode](8) {
+		addSeed(f, RenderPipelineDescriptor{Vertex: VertexState{Buffers: []gputypes.VertexBufferLayout{{StepMode: mode}}}})
+	}
+	for _, format := range enumValues[gputypes.VertexFormat](64) {
+		addSeed(f, RenderPipelineDescriptor{Vertex: VertexState{Buffers: []gputypes.VertexBufferLayout{{
+			Attributes: []gputypes.VertexAttribute{{Format: format}},
+		}}}})
+	}
+	for _, factor := range enumValues[gputypes.BlendFactor](32) {
+		addSeed(f, RenderPipelineDescriptor{Fragment: &FragmentState{Targets: []gputypes.ColorTargetState{{Blend: &gputypes.BlendState{
+			Color: gputypes.BlendComponent{SrcFactor: factor, DstFactor: factor},
+			Alpha: gputypes.BlendComponent{SrcFactor: factor, DstFactor: factor},
+		}}}}})
+	}
+	for _, op := range enumValues[gputypes.BlendOperation](8) {
+		addSeed(f, RenderPipelineDescriptor{Fragment: &FragmentState{Targets: []gputypes.ColorTargetState{{Blend: &gputypes.BlendState{
+			Color: gputypes.BlendComponent{Operation: op},
+			Alpha: gputypes.BlendComponent{Operation: op},
+		}}}}})
+	}
+	for _, mask := range colorWriteMaskSeeds() {
+		addSeed(f, RenderPipelineDescriptor{Fragment: &FragmentState{Targets: []gputypes.ColorTargetState{{WriteMask: mask}}}})
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		x := fuzzDecode[RenderPipelineDescriptor](data)
 		// Resource handles never resolve in a fuzz value: the mirror's Layout,

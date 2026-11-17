@@ -29,11 +29,22 @@ package wgpu
 //   - unexported fields are not compared: the public handles carry no exported
 //     value (their impl is unexported), and the reachable fuzz domain keeps
 //     them nil. That decision is per pair and stated at each adapter.
+//
+// Aliasing. The forward toHAL is a read-only projection and shares slice, map
+// and pointer backing with its input (descriptor.go); the reverse conversions
+// copy, deeply over every reference field the public descriptors carry — slices
+// are reallocated, and each nested slice or pointer (a layout's Attributes, an
+// entry's binding layouts, a target's Blend, a Primitive's StripIndexFormat) is
+// copied by its typed helper. The aliasing test below proves it at the top
+// level and in the nested fields. The boundary follows from the reachable
+// domain: unexported handle fields stay nil and are neither copied nor
+// compared.
 
 import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -177,6 +188,9 @@ func diffStruct(a, b reflect.Value, path string, problems *[]string) {
 
 // --- reverse conversions ---------------------------------------------------
 
+// copySlice copies a slice of values that carry no reference fields of their own. An element that holds a
+// slice, map or pointer needs its own copy below: a shallow element copy leaves the mirror reachable through
+// the output (F-B1 of the S13 trial review).
 func copySlice[T any](in []T) []T {
 	if in == nil {
 		return nil
@@ -186,6 +200,8 @@ func copySlice[T any](in []T) []T {
 	return out
 }
 
+// copyMap copies a map whose values carry no reference fields of their own (the pipeline constants are
+// float64). A value type with references would need a typed copy, as the slice helpers below do.
 func copyMap[K comparable, V any](in map[K]V) map[K]V {
 	if in == nil {
 		return nil
@@ -197,7 +213,8 @@ func copyMap[K comparable, V any](in map[K]V) map[K]V {
 	return out
 }
 
-func copyUint32Ptr(in *uint32) *uint32 {
+// copyValuePtr copies the pointed-to value, so a mutation through the output never reaches the mirror.
+func copyValuePtr[T any](in *T) *T {
 	if in == nil {
 		return nil
 	}
@@ -208,6 +225,56 @@ func copyUint32Ptr(in *uint32) *uint32 {
 func copyBoolPtr(in bool) *bool {
 	value := in
 	return &value
+}
+
+// copyBindGroupLayoutEntries deep-copies the entry slice, including each entry's binding-layout pointer.
+func copyBindGroupLayoutEntries(in []gputypes.BindGroupLayoutEntry) []gputypes.BindGroupLayoutEntry {
+	if in == nil {
+		return nil
+	}
+	out := make([]gputypes.BindGroupLayoutEntry, len(in))
+	for i, entry := range in {
+		out[i] = entry
+		out[i].Buffer = copyValuePtr(entry.Buffer)
+		out[i].Sampler = copyValuePtr(entry.Sampler)
+		out[i].Texture = copyValuePtr(entry.Texture)
+		out[i].StorageTexture = copyValuePtr(entry.StorageTexture)
+		out[i].AccelerationStructure = copyValuePtr(entry.AccelerationStructure)
+	}
+	return out
+}
+
+// copyVertexBufferLayouts deep-copies the buffer layouts, including each layout's attribute slice.
+func copyVertexBufferLayouts(in []gputypes.VertexBufferLayout) []gputypes.VertexBufferLayout {
+	if in == nil {
+		return nil
+	}
+	out := make([]gputypes.VertexBufferLayout, len(in))
+	for i, layout := range in {
+		out[i] = layout
+		out[i].Attributes = copySlice(layout.Attributes)
+	}
+	return out
+}
+
+// copyColorTargetStates deep-copies the color targets, including each target's blend pointer.
+func copyColorTargetStates(in []gputypes.ColorTargetState) []gputypes.ColorTargetState {
+	if in == nil {
+		return nil
+	}
+	out := make([]gputypes.ColorTargetState, len(in))
+	for i, target := range in {
+		out[i] = target
+		out[i].Blend = copyValuePtr(target.Blend)
+	}
+	return out
+}
+
+// copyPrimitiveState deep-copies the primitive state, including its optional strip index format pointer.
+func copyPrimitiveState(in gputypes.PrimitiveState) gputypes.PrimitiveState {
+	out := in
+	out.StripIndexFormat = copyValuePtr(in.StripIndexFormat)
+	return out
 }
 
 func extent3DFromHAL(h *hal.Extent3D) Extent3D {
@@ -277,7 +344,7 @@ func commandEncoderDescriptorFromHAL(h *hal.CommandEncoderDescriptor) CommandEnc
 }
 
 func bindGroupLayoutDescriptorFromHAL(h *hal.BindGroupLayoutDescriptor) BindGroupLayoutDescriptor {
-	return BindGroupLayoutDescriptor{Label: h.Label, Entries: copySlice(h.Entries)}
+	return BindGroupLayoutDescriptor{Label: h.Label, Entries: copyBindGroupLayoutEntries(h.Entries)}
 }
 
 func stencilFaceStateFromHAL(h *hal.StencilFaceState) StencilFaceState {
@@ -308,9 +375,9 @@ func renderPipelineDescriptorFromHAL(h *hal.RenderPipelineDescriptor) RenderPipe
 		Vertex: VertexState{
 			EntryPoint: h.Vertex.EntryPoint,
 			Constants:  copyMap(h.Vertex.Constants),
-			Buffers:    copySlice(h.Vertex.Buffers),
+			Buffers:    copyVertexBufferLayouts(h.Vertex.Buffers),
 		},
-		Primitive:    h.Primitive,
+		Primitive:    copyPrimitiveState(h.Primitive),
 		DepthStencil: depthStencilStateFromHAL(h.DepthStencil),
 		Multisample:  h.Multisample,
 	}
@@ -318,7 +385,7 @@ func renderPipelineDescriptorFromHAL(h *hal.RenderPipelineDescriptor) RenderPipe
 		descriptor.Fragment = &FragmentState{
 			EntryPoint: h.Fragment.EntryPoint,
 			Constants:  copyMap(h.Fragment.Constants),
-			Targets:    copySlice(h.Fragment.Targets),
+			Targets:    copyColorTargetStates(h.Fragment.Targets),
 		}
 	}
 	return descriptor
@@ -340,7 +407,7 @@ func renderPassDescriptorFromHAL(h *hal.RenderPassDescriptor) RenderPassDescript
 		for i := range h.ColorAttachments {
 			source := &h.ColorAttachments[i]
 			descriptor.ColorAttachments[i] = RenderPassColorAttachment{
-				DepthSlice: copyUint32Ptr(source.DepthSlice),
+				DepthSlice: copyValuePtr(source.DepthSlice),
 				LoadOp:     source.LoadOp,
 				StoreOp:    source.StoreOp,
 				ClearValue: source.ClearValue,
@@ -352,8 +419,8 @@ func renderPassDescriptorFromHAL(h *hal.RenderPassDescriptor) RenderPassDescript
 	}
 	if h.TimestampWrites != nil {
 		descriptor.TimestampWrites = &RenderPassTimestampWrites{
-			BeginningOfPassWriteIndex: copyUint32Ptr(h.TimestampWrites.BeginningOfPassWriteIndex),
-			EndOfPassWriteIndex:       copyUint32Ptr(h.TimestampWrites.EndOfPassWriteIndex),
+			BeginningOfPassWriteIndex: copyValuePtr(h.TimestampWrites.BeginningOfPassWriteIndex),
+			EndOfPassWriteIndex:       copyValuePtr(h.TimestampWrites.EndOfPassWriteIndex),
 		}
 	}
 	return descriptor
@@ -376,8 +443,8 @@ func computePassDescriptorFromHAL(h *hal.ComputePassDescriptor) ComputePassDescr
 	descriptor := ComputePassDescriptor{Label: h.Label}
 	if h.TimestampWrites != nil {
 		descriptor.TimestampWrites = &ComputePassTimestampWrites{
-			BeginningOfPassWriteIndex: copyUint32Ptr(h.TimestampWrites.BeginningOfPassWriteIndex),
-			EndOfPassWriteIndex:       copyUint32Ptr(h.TimestampWrites.EndOfPassWriteIndex),
+			BeginningOfPassWriteIndex: copyValuePtr(h.TimestampWrites.BeginningOfPassWriteIndex),
+			EndOfPassWriteIndex:       copyValuePtr(h.TimestampWrites.EndOfPassWriteIndex),
 		}
 	}
 	return descriptor
@@ -408,10 +475,13 @@ func imageCopyTextureFromHAL(h *hal.ImageCopyTexture) *ImageCopyTexture {
 // --- aliasing: the reverse conversions must not share memory ----------------
 
 // TestReverseConversionDoesNotAlias mutates each mutable field of a reverse
-// conversion's output and asserts the mirror input is unchanged. The forward
-// toHAL is a read-only projection and deliberately shares slice, map and
-// pointer backing with its input (descriptor.go); the reverse conversion is a
-// copy, so a roundtrip result never aliases the mirror it was built from.
+// conversion's output — top-level and nested — and asserts the mirror input is
+// unchanged. The forward toHAL is a read-only projection and deliberately
+// shares slice, map and pointer backing with its input (descriptor.go); the
+// reverse conversion is a copy, deep over the reference fields the public
+// descriptors carry, so a roundtrip result never aliases the mirror it was
+// built from. The nested cases are the ones a shallow element copy would have
+// left shared (Attributes, Blend, a binding layout, the strip index format).
 func TestReverseConversionDoesNotAlias(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -472,6 +542,45 @@ func TestReverseConversionDoesNotAlias(t *testing.T) {
 				t.Error("a pointer field aliases the mirror")
 			}
 		}},
+		{"RenderPipelineDescriptor.VertexBuffers.Attributes", func() {
+			mirror := &hal.RenderPipelineDescriptor{Vertex: hal.VertexState{Buffers: []gputypes.VertexBufferLayout{{
+				Attributes: []gputypes.VertexAttribute{{ShaderLocation: 1}},
+			}}}}
+			public := renderPipelineDescriptorFromHAL(mirror)
+			public.Vertex.Buffers[0].Attributes[0].ShaderLocation = 2
+			if mirror.Vertex.Buffers[0].Attributes[0].ShaderLocation != 1 {
+				t.Error("a nested Attributes slice aliases the mirror")
+			}
+		}},
+		{"RenderPipelineDescriptor.FragmentTargets.Blend", func() {
+			blend := &gputypes.BlendState{Color: gputypes.BlendComponent{SrcFactor: gputypes.BlendFactorOne}}
+			mirror := &hal.RenderPipelineDescriptor{Fragment: &hal.FragmentState{Targets: []gputypes.ColorTargetState{{Blend: blend}}}}
+			public := renderPipelineDescriptorFromHAL(mirror)
+			public.Fragment.Targets[0].Blend.Color.SrcFactor = gputypes.BlendFactorZero
+			if mirror.Fragment.Targets[0].Blend.Color.SrcFactor != gputypes.BlendFactorOne {
+				t.Error("a nested Blend pointer aliases the mirror")
+			}
+		}},
+		{"BindGroupLayoutDescriptor.Entries.Buffer", func() {
+			mirror := &hal.BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+				Binding: 1,
+				Buffer:  &gputypes.BufferBindingLayout{MinBindingSize: 4},
+			}}}
+			public := bindGroupLayoutDescriptorFromHAL(mirror)
+			public.Entries[0].Buffer.MinBindingSize = 8
+			if mirror.Entries[0].Buffer.MinBindingSize != 4 {
+				t.Error("a nested binding-layout pointer aliases the mirror")
+			}
+		}},
+		{"RenderPipelineDescriptor.Primitive.StripIndexFormat", func() {
+			strip := gputypes.IndexFormatUint32
+			mirror := &hal.RenderPipelineDescriptor{Primitive: gputypes.PrimitiveState{StripIndexFormat: &strip}}
+			public := renderPipelineDescriptorFromHAL(mirror)
+			*public.Primitive.StripIndexFormat = gputypes.IndexFormatUint16
+			if *mirror.Primitive.StripIndexFormat != gputypes.IndexFormatUint32 {
+				t.Error("the strip index format pointer aliases the mirror")
+			}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -479,6 +588,50 @@ func TestReverseConversionDoesNotAlias(t *testing.T) {
 			tc.mutate()
 		})
 	}
+}
+
+// TestReverseConversionConcurrent is the signed Amendment 2.3 adoption, "-race for shared-slice mirrors":
+// the forward toHAL shares slice, map and pointer backing with its input, so several goroutines must be
+// able to convert one shared mirror at the same time without touching it. Without -race this test proves
+// the values stay right under concurrency; the memory question belongs to the race detector, and that leg
+// runs in CI and in WSL — this Windows host cannot run -race at all (no gcc).
+func TestReverseConversionConcurrent(t *testing.T) {
+	t.Parallel()
+	blend := &gputypes.BlendState{Color: gputypes.BlendComponent{SrcFactor: gputypes.BlendFactorOne}}
+	strip := gputypes.IndexFormatUint32
+	texture := &hal.TextureDescriptor{ViewFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}}
+	layout := &hal.BindGroupLayoutDescriptor{Entries: []gputypes.BindGroupLayoutEntry{{
+		Binding: 1,
+		Buffer:  &gputypes.BufferBindingLayout{MinBindingSize: 4},
+	}}}
+	pipeline := &hal.RenderPipelineDescriptor{
+		Vertex:    hal.VertexState{Buffers: []gputypes.VertexBufferLayout{{Attributes: []gputypes.VertexAttribute{{ShaderLocation: 1}}}}},
+		Primitive: gputypes.PrimitiveState{StripIndexFormat: &strip},
+		Fragment:  &hal.FragmentState{Targets: []gputypes.ColorTargetState{{Blend: blend}}},
+	}
+	wantTexture := textureDescriptorFromHAL(texture)
+	wantLayout := bindGroupLayoutDescriptorFromHAL(layout)
+	wantPipeline := renderPipelineDescriptorFromHAL(pipeline)
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for round := 0; round < 32; round++ {
+				if problems := diffValue(wantTexture, textureDescriptorFromHAL(texture)); len(problems) != 0 {
+					t.Errorf("worker %d: TextureDescriptor round %d differs: %v", worker, round, problems)
+				}
+				if problems := diffValue(wantLayout, bindGroupLayoutDescriptorFromHAL(layout)); len(problems) != 0 {
+					t.Errorf("worker %d: BindGroupLayoutDescriptor round %d differs: %v", worker, round, problems)
+				}
+				if problems := diffValue(wantPipeline, renderPipelineDescriptorFromHAL(pipeline)); len(problems) != 0 {
+					t.Errorf("worker %d: RenderPipelineDescriptor round %d differs: %v", worker, round, problems)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // --- committed zero-value expectations -------------------------------------

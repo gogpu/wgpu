@@ -1383,9 +1383,63 @@ func (t *Trace) each(f func(Pass)) {
 	}
 }
 
+// publicLayerMapFixture declares the banned package-scope map in every form the language offers: the
+// explicit type, an inferred composite literal, the inferred make call with and without a size, the
+// parenthesized literal (gofmt keeps the parentheses) and a conversion to a map type.
+func publicLayerMapFixture() string {
+	return `package wgputest
+
+var explicit map[string]int
+
+var inferredLiteral = map[string]int{"a": 1}
+
+var inferredMake = make(map[string]int)
+
+var inferredMakeSized = make(map[string]int, 4)
+
+var parenthesizedLiteral = (map[string]int{"b": 2})
+
+var convertedMap = map[string]int(nil)
+`
+}
+
+// TestPublicLayerPackageScopeMapForms proves the ban reads every form of the construct. Before F-A2 of the
+// S13 trial review only the explicit type was flagged: the inferred initializers — the most idiomatic way to
+// write the declaration — passed silently. Each declaration now reports one finding at its own line, and
+// the delta check's residuals (the parenthesized literal and the map conversion) are covered here.
+func TestPublicLayerPackageScopeMapForms(t *testing.T) {
+	src := publicLayerMapFixture()
+	root := writeTree(t, map[string]string{publicLayerFixturePath: src})
+	rep := &Report{Summary: map[string]int{}}
+	checkPublicLayer(rep, root, true)
+
+	want := make([]int, 0, 6)
+	want = append(want, linesWith(t, src, "var explicit map[string]int")...)
+	want = append(want, linesWith(t, src, "var inferredLiteral")...)
+	want = append(want, linesWith(t, src, "var inferredMake ")...)
+	want = append(want, linesWith(t, src, "var inferredMakeSized")...)
+	want = append(want, linesWith(t, src, "var parenthesizedLiteral")...)
+	want = append(want, linesWith(t, src, "var convertedMap")...)
+	if len(rep.Failures) != len(want) {
+		t.Fatalf("phase final reports %d findings, want the %d map declarations: %v", len(rep.Failures), len(want), rep.Failures)
+	}
+	flagged := map[int]bool{}
+	for _, f := range rep.Failures {
+		if f.File != publicLayerFixturePath || !strings.Contains(f.Message, "package-scope map") {
+			t.Fatalf("the finding %q does not describe a package-scope map in %s", f.Message, f.File)
+		}
+		flagged[f.Line] = true
+	}
+	for _, line := range want {
+		if !flagged[line] {
+			t.Errorf("the map declaration at %s:%d is not flagged", publicLayerFixturePath, line)
+		}
+	}
+}
+
 // TestPublicLayerWaiverFile pins the committed waiver file's shape: the recorded limit, the entry count, and
 // the card groups the review approved (6 wgputest P2-API-032, 31 conversion P2-API-034/P2-API-035, 4 factory
-// ADR-070 §15.10). A changed count is a reviewed decision, not a drive-by edit.
+// ADR-070 §15.13). A changed count is a reviewed decision, not a drive-by edit.
 func TestPublicLayerWaiverFile(t *testing.T) {
 	listed, err := loadAllowlist(filepath.Join("..", ".."))
 	if err != nil {
@@ -1404,7 +1458,7 @@ func TestPublicLayerWaiverFile(t *testing.T) {
 			t.Errorf("entry %q has owner %q, want wgpu", allowKey(e.path, e.symbol, e.construct), e.owner)
 		}
 	}
-	want := map[string]int{"P2-API-032": 6, "P2-API-034/P2-API-035": 31, "ADR-070 §15.10": 4}
+	want := map[string]int{"P2-API-032": 6, "P2-API-034/P2-API-035": 31, "ADR-070 §15.13": 4}
 	for card, n := range want {
 		if groups[card] != n {
 			t.Errorf("card %q carries %d entries, want %d (groups: %v)", card, groups[card], n, groups)

@@ -572,7 +572,7 @@ func collectLayerGenDecl(rel string, d *ast.GenDecl, fset *token.FileSet, counte
 		if !ok {
 			continue
 		}
-		if _, isMap := vs.Type.(*ast.MapType); !isMap {
+		if !isPackageMap(vs) {
 			continue
 		}
 		out = append(out, layerFinding{
@@ -583,6 +583,64 @@ func collectLayerGenDecl(rel string, d *ast.GenDecl, fset *token.FileSet, counte
 		})
 	}
 	return out
+}
+
+// isPackageMap reports whether a var spec declares a map, in any of the three forms the ban covers: the
+// explicit type (`var x map[K]V`), an inferred composite literal (`var x = map[K]V{...}`) and an inferred
+// make call (`var x = make(map[K]V)` or `make(map[K]V, n)`). Reading only the explicit type let the inferred
+// forms — the most idiomatic way to write the declaration — pass silently (F-A2 of the S13 trial review).
+// The inferred forms are read through parentheses and map conversions too; isMapInitializer states the
+// closed set and the two forms that deliberately stay out of scope. The values are read only when the type
+// is omitted, because a typed spec names the map itself and carries no initializer.
+func isPackageMap(vs *ast.ValueSpec) bool {
+	if _, isMap := vs.Type.(*ast.MapType); isMap {
+		return true
+	}
+	if vs.Type != nil {
+		return false
+	}
+	for _, value := range vs.Values {
+		if isMapInitializer(value) {
+			return true
+		}
+	}
+	return false
+}
+
+// isMapInitializer reports whether an inferred initializer produces a map: a composite literal whose type is
+// `map[K]V`, a make call for a map type, a conversion to a map type (`map[K]V(nil)`), or any of those
+// parenthesized (gofmt keeps the parentheses, so the parenthesized literal is a stable bypass if it passes).
+// The closed set is deliberate: a named map type (`type R map[K]V; var r R`) cannot be recognised without
+// go/types and stays out of scope for this AST rule, and `new(map[K]V)` declares a pointer variable, not a map.
+func isMapInitializer(expr ast.Expr) bool {
+	switch v := expr.(type) {
+	case *ast.ParenExpr:
+		return isMapInitializer(v.X)
+	case *ast.CompositeLit:
+		_, isMap := v.Type.(*ast.MapType)
+		return isMap
+	case *ast.CallExpr:
+		if _, isMapConversion := v.Fun.(*ast.MapType); isMapConversion {
+			return true
+		}
+		return isMakeMapCall(v)
+	}
+	return false
+}
+
+// isMakeMapCall reports whether a call is `make(map[K]V)` or `make(map[K]V, n)`. The builtin is matched by the
+// plain identifier "make": a package that shadows make with its own function is a conservative false
+// positive, accepted here because the rule must never exempt the idiomatic form of the banned declaration.
+func isMakeMapCall(call *ast.CallExpr) bool {
+	if len(call.Args) == 0 {
+		return false
+	}
+	ident, ok := call.Fun.(*ast.Ident)
+	if !ok || ident.Name != "make" {
+		return false
+	}
+	_, isMap := call.Args[0].(*ast.MapType)
+	return isMap
 }
 
 // packageMapSymbol names the declaration a package-scope map belongs to: its first variable name.
