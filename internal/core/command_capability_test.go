@@ -230,8 +230,79 @@ func TestCommandEncoder_BudgetErrorIsInternalClass(t *testing.T) {
 	}
 }
 
-// A Validation scope must not capture the budget error: it is not a
-// validation failure, and the device is healthy.
+// A surface-qualified adapter is a request-local wrapper over the cached
+// physical adapter. #429 made the render-pass split depend on
+// RecordsTransitions, so the wrapper must carry that physical capability: with
+// it dropped, a Vulkan or GLES device opened through the windowed path (a new
+// surface re-qualifying the cached adapter) silently lost its intra-pass
+// barriers (issue #429).
+func TestSurfaceQualifiedAdapterKeepsRecordsTransitions(t *testing.T) {
+	GetGlobal().Clear()
+
+	gles := &fakeGLInstance{}
+	instance := &Instance{backends: gputypes.BackendsAll, deferredGLES: []hal.Instance{gles}}
+	t.Cleanup(instance.Destroy)
+
+	first := &fakeGLSurface{ctx: &fakeGLContext{name: "window 1"}}
+	firstID, err := instance.RequestAdapterWithSurface(nil, first)
+	if err != nil {
+		t.Fatalf("first RequestAdapterWithSurface: %v", err)
+	}
+
+	// A second request with a new surface re-qualifies the cached adapter: the
+	// request-local wrapper is the adapter this test is about.
+	second := &fakeGLSurface{ctx: &fakeGLContext{name: "window 2"}}
+	qualifiedID, err := instance.RequestAdapterWithSurface(nil, second)
+	if err != nil {
+		t.Fatalf("second RequestAdapterWithSurface: %v", err)
+	}
+	if qualifiedID == firstID {
+		t.Fatal("no request-local wrapper was registered for the new surface")
+	}
+
+	hub := GetGlobal().Hub()
+	cached, err := hub.GetAdapter(firstID)
+	if err != nil {
+		t.Fatalf("GetAdapter(cached): %v", err)
+	}
+	qualified, err := hub.GetAdapter(qualifiedID)
+	if err != nil {
+		t.Fatalf("GetAdapter(qualified): %v", err)
+	}
+	if qualified.halCapabilities == nil {
+		t.Fatal("the surface-qualified adapter lost the physical adapter's capabilities")
+	}
+	if qualified.halCapabilities == cached.halCapabilities {
+		t.Error("the wrapper aliases the cached capabilities pointer; it must carry a value copy")
+	}
+
+	device := NewDevice(&mockHALDevice{}, &qualified, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+	rec := newCountingEncoder()
+	if err := rec.BeginEncoding("surface-qualified"); err != nil {
+		t.Fatalf("BeginEncoding: %v", err)
+	}
+	enc, err := device.CreateCommandEncoderWithHAL(rec, "surface-qualified")
+	if err != nil {
+		t.Fatalf("CreateCommandEncoderWithHAL: %v", err)
+	}
+	if !enc.multiRecording {
+		t.Fatal("the pooled encoder of a transitions backend does not split: intra-pass barriers would be dropped")
+	}
+
+	storage := newPassUsageTestTexture(device, "storage")
+	recordBarrierNeedingPasses(t, enc, storage, 40)
+
+	if _, err := enc.Finish(); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if rec.begins <= 1 {
+		t.Errorf("recording was never split: BeginEncoding calls = %d", rec.begins)
+	}
+	if got := transitRecordings(rec); got != 40 {
+		t.Errorf("transit recordings = %d, want 40", got)
+	}
+}
+
 func TestCommandEncoder_BudgetErrorSkipsValidationScope(t *testing.T) {
 	t.Parallel()
 
