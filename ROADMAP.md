@@ -19,7 +19,9 @@
 
 ---
 
-## Current State: v0.34.15
+## Current State: v0.35.0
+
+✅ **The internal-layout release (v0.35.0, ADR-070)** — the implementation moves into `internal/`; the public package set is three packages — the root declaration layer, a thin `hal` (`BackendKind` + `Handles`: 16 names, no functions, no imports) and `wgputest`; four `HAL()` accessors on every build tag return the native handles; the Pure Go software backend registers by default and is selected explicitly (`BackendsSoftware`, or `ForceFallbackAdapter`), the default adapter mask stays hardware-only; the backends register themselves, so the per-backend blank imports go away; gputypes v0.9.1, naga v0.22.4; behaviour is unchanged outside the migration notes in the [CHANGELOG](CHANGELOG.md)
 
 ✅ **Vulkan presents what it acquired and survives device loss (v0.34.15)** — present barriers are tracked submissions whose fence is waited before the command pool is reset, every acquired surface presents, a surface is configured only on a queue family that can present to it and answers capabilities from any surface, and Unconfigure on a lost device destroys its swapchain; DX12 `ClearBuffer` clears its range; naga v0.21.12
 
@@ -144,7 +146,13 @@ Before v1.0, a MINOR release is reserved for a large new capability. Bug fixes, 
 spec never allowed, small features, and features that were already claimed but not implemented ship as PATCH
 releases.
 
-**Next patch release, v0.34.15:**
+**Release v0.35.0** (2026-11-17, MINOR — internal layout, ADR-070):
+- [x] Implementation moves into `internal/`; three public packages remain — the root declaration layer, a thin 16-name `hal` and `wgputest` (ADR-070)
+- [x] Four `HAL()` accessors on every build tag; the five `New*FromHAL` constructors, `HalDevice`, `SetPrepareFrame` and the backend registrars leave the public API
+- [x] Software backend registers by default (outside the default hardware adapter set) with the `wgpu_nosoftware` opt-out; `ErrNoBackendRegistered` / `ErrNoHardwareAdapter` / `ErrNoFallbackAdapter` wired (ADR-083)
+- [x] gputypes v0.9.1, naga v0.22.4; the map-tracker race fix and the Vulkan 3D-texture barrier fix (#412)
+
+**Next patch release, after v0.35.0:**
 - [ ] GLES: compute blit for non-renderable copy sources; snorm readback without EXT_render_snorm; vertex-storage flag tightened against Mesa d3d12 (P2-GLES-023, P1-GLES-025 items 2 and 4)
 - [ ] Metal: compressed small mips and HDR formats (P2-MTL-001)
 - [ ] Software: ASTC sampling (P1-SW-029 step 2)
@@ -310,6 +318,7 @@ Patch releases between these rows are listed in [CHANGELOG.md](CHANGELOG.md).
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v0.35.0** | 2026-11 | **BREAKING (imports):** implementation moves into `internal/` — three public packages (root declaration layer, thin 16-name `hal`, `wgputest`); four `HAL()` accessors; the software backend registers by default and is selected explicitly, the default adapter mask stays hardware-only; every backend registers itself; gputypes v0.9.1, naga v0.22.4; behaviour unchanged outside the migration notes |
 | **v0.34.10** | 2026-11 | `Queue.Submit` accepts resources released after recording (`Release()` is a drop); samplers reference counted and held by their bind groups; naga v0.21.5 (WGSL out-of-memory fix) |
 | **v0.34.9** | 2026-11 | Software backend renders like the GPU backends: commands at `Queue.Submit`, clip-space clipping, viewport, perspective-correct interpolation, quad derivatives and implicit LOD, two-sided stencil, exact integers, BC/ETC2 sampling; GLES integer vertex attributes and first-vertex flat varyings; compressed texture shape validation; naga v0.21.4 |
 | **v0.34.8** | 2026-11 | GLES on Wayland: no segfault on exit (#379), EGL display refcount, `InstanceDescriptor.Display`, `ErrContextReleased`; `RenderPassColorAttachment.DepthSlice` on every backend; render-stage pipeline constants; software: shared workgroup memory and barriers, every mip level, array layer, cube face and 3D slice, color formats and sRGB views; GLES format table from Rust, compressed textures, stencil uploads by draw blit, integer clears and sRGB targets; spec defaults for zero-value descriptor fields; WARP as a CPU adapter, adapters ranked hardware → CPU → software; `LodMaxClamp` zero = 32 everywhere; naga v0.21.3 (security and DXIL fixes) |
