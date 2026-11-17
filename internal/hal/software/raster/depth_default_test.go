@@ -25,11 +25,11 @@ func TestDrawWithoutDepthStateWritesNoDepth(t *testing.T) {
 	)
 	p.DrawTriangles([]Triangle{tri}, [4]float32{1, 0, 0, 1})
 
-	// Sanity: the triangle covered the centre, so the colour was written.
+	// Sanity: the triangle covered the center, so the color was written.
 	if r, _, _, _ := p.GetPixel(40, 35); r != 255 {
-		t.Fatalf("centre pixel not painted: r = %d, want 255", r)
+		t.Fatalf("center pixel not painted: r = %d, want 255", r)
 	}
 	if depth := p.GetDepthBuffer().Get(40, 35); depth != 1.0 {
-		t.Errorf("depth at centre = %v after a draw with no depth state, want 1.0: nothing may write depth without a depth attachment", depth)
+		t.Errorf("depth at center = %v after a draw with no depth state, want 1.0: nothing may write depth without a depth attachment", depth)
 	}
 }
