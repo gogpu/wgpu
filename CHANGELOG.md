@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`CommandEncoder.TransitionTextures` refuses a barrier whose `Range` selects a mip level or array layer its
   texture does not have.** Such a range reached the backend's barrier as it was; `Finish` now returns a validation
   error, and none of the call's barriers is recorded.
+- **Metal: an encoder with many render passes no longer deadlocks.** Since v0.34.7 the encoder split one Metal
+  command buffer per render pass, and one more for every pass whose barriers needed a transit pass; a Metal queue
+  allows 64 uncompleted command buffers, so a frame recording roughly 30 barrier-needing passes (or 60 of any kind)
+  blocked forever inside Metal with no error. Backends whose encoders record no transitions — Metal and software —
+  now record the whole encoder into one command buffer, the shape Dawn uses; Metal's queue is created with a larger
+  command-buffer budget, and an exhausted budget fails the encoder with a clear error instead of blocking. Issue
+  #428.
 
 ### Migration
 

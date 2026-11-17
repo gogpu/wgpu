@@ -103,6 +103,15 @@ func (e *GPUError) Error() string {
 	return fmt.Sprintf("GPU %s error: %s", e.Type, e.Message)
 }
 
+// Unwrap returns the sentinel that identifies the error's category, so
+// errors.Is(gpuErr, ErrInternal) (and ErrValidation / the HAL out-of-memory
+// sentinel) classifies a captured error here and in every layer above. The
+// public GPUError delegates to SentinelForFilter too, so both layers share one
+// class mapping (error-scope reshape).
+func (e *GPUError) Unwrap() error {
+	return SentinelForFilter(e.Type)
+}
+
 // errorScope represents a single entry in the error scope stack.
 //
 // Each scope captures the first error that matches its filter.

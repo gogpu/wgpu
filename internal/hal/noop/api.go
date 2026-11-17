@@ -51,7 +51,9 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 			},
 			Features: 0, // No features supported
 			Capabilities: hal.Capabilities{
-				Limits: gputypes.DefaultLimits(),
+				// The noop backend has no transitions to record.
+				RecordsTransitions: false,
+				Limits:             gputypes.DefaultLimits(),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,

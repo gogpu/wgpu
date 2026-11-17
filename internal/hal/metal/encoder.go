@@ -49,6 +49,33 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 	e.label = label
 	e.recordErr = nil
 
+	// Fail fast when the queue's command-buffer budget is exhausted instead of
+	// blocking inside [MTLCommandQueue commandBuffer], which is how Metal
+	// reacts to a full budget (issue #428). The budget counts command buffers
+	// that are created and not yet submitted or dropped — a subset of Apple's
+	// uncompleted count, so refusing here fires no later than Metal would block
+	// (Rust wgpu-hal parity, metal/command.rs begin_encoding).
+	//
+	// The refusal is an operation-level failure that wraps
+	// hal.ErrCommandBufferBudget, NOT a device loss: the device is healthy, and
+	// submitting or dropping an outstanding encoder frees the budget. Rust
+	// classifies the same condition as DeviceError::Lost; this backend departs
+	// from it deliberately (the sentinel's doc comment carries the reason and
+	// the device-lost idiom is D2/P1-API-039's).
+	budget := e.budget()
+	if budget == nil {
+		return fmt.Errorf("BUG: command encoder has no device command-buffer budget — Metal device construction gap")
+	}
+	outstanding, ok := budget.TryAcquire()
+	if !ok {
+		hal.Logger().Warn("metal: command buffer budget exhausted; refusing to create another command buffer",
+			"outstanding", outstanding,
+			"limit", maxCommandBuffers,
+		)
+		return fmt.Errorf("metal: command buffer budget exhausted (%d command buffers created and not submitted, limit %d): %w",
+			outstanding, maxCommandBuffers, hal.ErrCommandBufferBudget)
+	}
+
 	// Scoped autorelease pool — drain immediately after creating the command buffer.
 	// The command buffer is Retained so it survives the pool drain.
 	// This prevents LIFO violations when pools from different frames overlap
@@ -57,6 +84,7 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 	defer pool.Drain()
 	e.cmdBuffer = MsgSend(e.device.commandQueue, Sel("commandBuffer"))
 	if e.cmdBuffer == 0 {
+		e.releaseBudget()
 		return fmt.Errorf("metal: failed to create command buffer")
 	}
 	Retain(e.cmdBuffer)
@@ -81,9 +109,13 @@ func (e *CommandEncoder) EndEncoding() (hal.CommandBuffer, error) {
 		Release(e.cmdBuffer)
 		e.cmdBuffer = 0
 		e.releaseICBOwners()
+		e.releaseBudget()
 		return nil, err
 	}
-	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device, icbOwners: e.icbOwners}
+	// The command buffer takes ownership of the budget unit: it is released
+	// exactly once when the buffer is committed (Queue.Submit) or destroyed
+	// without having been committed (CommandBuffer.releaseBudget).
+	cb := &CommandBuffer{raw: e.cmdBuffer, device: e.device, icbOwners: e.icbOwners, budget: e.budget()}
 	e.cmdBuffer = 0 // Recording state becomes false
 	e.icbOwners = nil
 	e.finished = cb
@@ -98,6 +130,7 @@ func (e *CommandEncoder) DiscardEncoding() {
 		hal.Logger().Debug("metal: encoding discarded")
 		Release(e.cmdBuffer)
 		e.cmdBuffer = 0 // Recording state becomes false
+		e.releaseBudget()
 	}
 	e.releaseICBOwners()
 	e.recordErr = nil
@@ -130,12 +163,33 @@ func (e *CommandEncoder) Destroy() {
 	if e.cmdBuffer != 0 {
 		Release(e.cmdBuffer)
 		e.cmdBuffer = 0
+		e.releaseBudget()
 	}
 	e.releaseICBOwners()
 	e.recordErr = nil
 	if e.finished != nil {
 		e.finished.Destroy()
 		e.finished = nil
+	}
+}
+
+// budget returns the device's command-buffer budget, or nil when the encoder
+// has no Metal device (device-free tests construct encoders without one).
+func (e *CommandEncoder) budget() *commandBudget {
+	if e.device == nil {
+		return nil
+	}
+	return e.device.cmdBudget
+}
+
+// releaseBudget returns the encoder's unit to the command-buffer budget. The
+// caller invokes it exactly once per unit that BeginEncoding acquired and that
+// has not passed to a CommandBuffer: a recording that is discarded or
+// destroyed, a buffer creation that failed, or an encoding that ended with a
+// recording error.
+func (e *CommandEncoder) releaseBudget() {
+	if b := e.budget(); b != nil {
+		b.Release()
 	}
 }
 
@@ -529,6 +583,10 @@ type CommandBuffer struct {
 	drawable  ID // Attached drawable for presentation
 	icbOwners []*indexedICBOwnership
 	destroy   sync.Once
+	// budget is the queue's command-buffer budget the buffer was created
+	// against; budgetOnce makes the matching release happen exactly once.
+	budget     *commandBudget
+	budgetOnce sync.Once
 }
 
 // Destroy releases the command buffer.
@@ -545,7 +603,20 @@ func (cb *CommandBuffer) Destroy() {
 			owner.release()
 		}
 		cb.icbOwners = nil
+		cb.releaseBudget()
 	})
+}
+
+// releaseBudget returns the command buffer's unit to the queue budget. A
+// created command buffer stops counting as created-not-submitted when it is
+// committed (Queue.Submit) or when it is destroyed without ever being
+// committed; whichever comes first releases the unit, and the second call is a
+// no-op (sync.Once).
+func (cb *CommandBuffer) releaseBudget() {
+	if cb == nil || cb.budget == nil {
+		return
+	}
+	cb.budgetOnce.Do(func() { cb.budget.Release() })
 }
 
 // SetDrawable attaches a drawable for presentation.

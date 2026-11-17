@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -231,9 +232,13 @@ type CoreCommandEncoder struct {
 	// multiRecording is true when the HAL encoder may begin several
 	// recordings before ResetAll: pool-managed encoders
 	// (CreateCommandEncoderWithHAL), whose command buffers ResetAll
-	// reclaims. For a standalone encoder render passes never split the
-	// recording, so barriers for resources first bound inside a render pass
-	// are left to the submit-time barrier.
+	// reclaims, on a backend whose encoder records transitions
+	// (hal.Capabilities.RecordsTransitions). A backend that records none
+	// (Metal, software, noop) never splits, because a transit recording would
+	// hold nothing and each recording costs an uncompleted command buffer on
+	// such a backend (P1-MTL-008, issue #428). For a standalone encoder render
+	// passes never split the recording either, so barriers for resources first
+	// bound inside a render pass are left to the submit-time barrier.
 	multiRecording bool
 }
 
@@ -294,6 +299,10 @@ func (d *Device) CreateCommandEncoder(label string) (*CoreCommandEncoder, error)
 		},
 		label:   label,
 		halOpen: true,
+		// A standalone encoder is never split whatever the backend records:
+		// nothing reclaims its intermediate command buffers (only pooled
+		// encoders go through the pool's ResetAll).
+		multiRecording: false,
 	}
 	enc.status.Store(int32(CommandEncoderStatusRecording))
 
@@ -322,14 +331,28 @@ func (d *Device) CreateCommandEncoderWithHAL(halEncoder hal.CommandEncoder, labe
 			usedBuffers:    make(map[*Buffer]BufferUses),
 			usedTextures:   make(map[*Texture]TextureUses),
 		},
-		label:          label,
-		halOpen:        true,
-		multiRecording: true,
+		label:   label,
+		halOpen: true,
+		// Pooled, so its command buffers are reclaimed by ResetAll; it still
+		// splits only on a backend whose encoder records transitions.
+		multiRecording: d.recordsTransitions(),
 	}
 	enc.status.Store(int32(CommandEncoderStatusRecording))
 
 	trackResource(uintptr(unsafe.Pointer(enc)), "CommandEncoder") //nolint:gosec // debug tracking uses pointer as unique ID
 	return enc, nil
+}
+
+// recordsTransitions reports whether this device's HAL command encoder records
+// buffer and texture transitions into the command buffer (hal.Capabilities.
+// RecordsTransitions). When it does not, a transit recording would hold
+// nothing, so the core keeps one recording per encoder (P1-MTL-008, issue
+// #428). Mock adapters without HAL capabilities record nothing.
+func (d *Device) recordsTransitions() bool {
+	if d == nil || d.adapter == nil || d.adapter.halCapabilities == nil {
+		return false
+	}
+	return d.adapter.halCapabilities.RecordsTransitions
 }
 
 // TakeHALEncoder extracts the HAL command encoder from this core encoder,
@@ -1056,14 +1079,27 @@ func (e *CoreCommandEncoder) SetError(err error) {
 func (e *CoreCommandEncoder) setError(err error) {
 	e.error = err
 	e.status.Store(int32(CommandEncoderStatusError))
-	// Report the deferred validation error to the device's error scope sink
+	// Report the deferred error to the device's error scope sink
 	// (error-scope reshape, stage A2): the operation fails NOW while recording,
 	// even though the error is surfaced by Finish later. The scope manager keeps
 	// the first matching error per open scope; errors raised outside any scope
 	// stay uncaptured by design.
 	if e.device != nil {
-		e.device.reportError(ErrorFilterValidation, err.Error())
+		e.device.reportError(deferredEncoderErrorFilter(err), err.Error())
 	}
+}
+
+// deferredEncoderErrorFilter classifies an encoding error for the device's
+// error scope sink. Almost every encoding error is a validation error. A HAL
+// command-buffer budget exhaustion is internal-class: the device is healthy,
+// only this encoder ran out of its backend's budget, and submitting or
+// dropping the encoder frees it (P1-MTL-008, issue #428). The device-lost
+// idiom is a separate, deliberate classification and is never borrowed here.
+func deferredEncoderErrorFilter(err error) ErrorFilter {
+	if errors.Is(err, hal.ErrCommandBufferBudget) {
+		return ErrorFilterInternal
+	}
+	return ErrorFilterValidation
 }
 
 // statusError returns an error for invalid status.

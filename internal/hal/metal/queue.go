@@ -91,6 +91,12 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 
 		// Commit the command buffer
 		_ = MsgSend(cb.raw, Sel("commit"))
+
+		// The buffer left the created-not-submitted set the command-buffer
+		// budget guards. Apple keeps counting it until it completes; the
+		// budget deliberately does not (see commandBudget), so that submitting
+		// frees the encoder-side budget for the next recording.
+		cb.releaseBudget()
 	}
 
 	// If there were no valid command buffers but we acquired a semaphore slot,

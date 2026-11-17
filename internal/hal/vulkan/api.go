@@ -282,7 +282,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			},
 			Features: featuresFromPhysicalDevice(&features, props.ApiVersion) | adapter.extendedWebGPUFeatures(queueFamily),
 			Capabilities: hal.Capabilities{
-				Limits: limitsFromProps(&props),
+				// Vulkan records pipeline barriers in the command buffer.
+				RecordsTransitions: true,
+				Limits:             limitsFromProps(&props),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,

@@ -89,7 +89,7 @@ type namedTexture struct {
 
 func newPassUsageTestEncoder(t *testing.T) (*CoreCommandEncoder, *recordingEncoder, *Device) {
 	t.Helper()
-	device := NewDevice(&mockHALDevice{}, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+	device := NewDevice(&mockHALDevice{}, transitionsTestAdapter(), gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
 	rec := newRecordingEncoder()
 	enc, err := device.CreateCommandEncoderWithHAL(rec, "pass-usage")
 	if err != nil {

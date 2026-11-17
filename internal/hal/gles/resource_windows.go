@@ -68,7 +68,9 @@ func (s *Surface) GetAdapterInfo() (adapter hal.ExposedAdapter, ok bool) {
 		Capabilities: hal.Capabilities{
 			// GL has no stencil-only upload into a DEPTH_STENCIL texture.
 			StencilCopyNeedsBlit: true,
-			Limits:               caps.Limits,
+			// GL records glMemoryBarrier transitions in the context.
+			RecordsTransitions: true,
+			Limits:             caps.Limits,
 			AlignmentsMask: hal.Alignments{
 				BufferCopyOffset: 4,
 				BufferCopyPitch:  4,

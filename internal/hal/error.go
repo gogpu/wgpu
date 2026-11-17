@@ -119,4 +119,14 @@ var (
 	// range that exceeds the buffer, or the buffer has no host-visible memory
 	// so it cannot be mapped on the CPU.
 	ErrInvalidMapRange = errors.New("hal: invalid buffer map range or non-mappable buffer")
+
+	// ErrCommandBufferBudget indicates the backend's encoder ran out of its
+	// command-buffer budget (Metal's queue allows a fixed number of
+	// uncompleted command buffers; see the queue's maxCommandBufferCount).
+	// It is an OPERATION-level failure, not a device loss: the device is
+	// healthy, and submitting or dropping the open encoder frees the budget
+	// (P1-MTL-008, issue #428). The core reports it to the error scope as an
+	// internal-class GPU error; the device-lost idiom (D2/P1-API-039) is a
+	// separate, deliberate classification and must not be borrowed for this.
+	ErrCommandBufferBudget = errors.New("hal: command buffer budget exhausted; submit or drop the encoder")
 )

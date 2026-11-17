@@ -98,7 +98,9 @@ func (i *Instance) EnumerateAdapters(_ hal.Surface) []hal.ExposedAdapter {
 			Features: gputypes.Features(gputypes.FeatureTextureCompressionBC) |
 				gputypes.Features(gputypes.FeatureTextureCompressionETC2),
 			Capabilities: hal.Capabilities{
-				Limits: softwareLimits(),
+				// The CPU rasterizer has no transitions to record.
+				RecordsTransitions: false,
+				Limits:             softwareLimits(),
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,

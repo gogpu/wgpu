@@ -84,6 +84,20 @@ type Capabilities struct {
 	// a render pass on the destination (the frontend creates every
 	// depth/stencil texture render-attachable). Only GLES sets it.
 	StencilCopyNeedsBlit bool
+
+	// RecordsTransitions reports that the HAL command encoder records buffer
+	// and texture transitions into the command buffer it is recording.
+	// Vulkan, DX12 and GLES do. Metal, software and noop transition implicitly
+	// (their TransitionBuffers/TransitionTextures calls are no-ops), so a
+	// transit command buffer holding only barriers would record nothing.
+	//
+	// When false the core keeps ONE recording per encoder: render passes never
+	// split the recording and no "(wgpu internal) Pre Pass" transit command
+	// buffer is created. Splitting pays with no utility there, and a backend
+	// that turns each recording into an uncompleted command buffer (Metal's
+	// queue allows a fixed number of them) would deadlock (P1-MTL-008,
+	// issue #428).
+	RecordsTransitions bool
 }
 
 // Alignments specifies buffer alignment requirements.

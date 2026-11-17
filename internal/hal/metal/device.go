@@ -28,13 +28,28 @@ const maxVertexBuffers = 31
 // unknownError is the default error message when Metal returns a nil NSError.
 const unknownError = "unknown error"
 
+// maxCommandBuffers is the maximum number of uncompleted command buffers the
+// device's command queue may have outstanding. The queue is created from an
+// MTLCommandQueueDescriptor that sets it (the value of Rust wgpu-hal's
+// MAX_COMMAND_BUFFERS, wgpu-hal/src/metal/adapter.rs); Apple's default for a
+// queue created with -newCommandQueue is 64. When the limit is reached,
+// -commandBuffer does not fail: it blocks the calling CPU thread until a
+// command buffer completes, which deadlocks a core that commits only at Submit
+// (issue #428).
+//
+// The same constant is the limit of the created-not-submitted guard in
+// CommandEncoder.BeginEncoding: one source of truth for the queue's budget and
+// for the fail-fast (see commandBudget).
+const maxCommandBuffers = 4096
+
 // Device implements hal.Device for Metal.
 type Device struct {
 	raw           ID // id<MTLDevice>
 	commandQueue  ID // id<MTLCommandQueue>
 	adapter       *Adapter
-	eventListener ID     // id<MTLSharedEventListener> — created lazily, reused
-	queue         *Queue // back-reference for WaitIdle semaphore draining
+	eventListener ID             // id<MTLSharedEventListener> — created lazily, reused
+	queue         *Queue         // back-reference for WaitIdle semaphore draining
+	cmdBudget     *commandBudget // created-not-submitted command buffers of commandQueue
 	// hasUnifiedMemory is true on Apple Silicon (UMA). On UMA, MTLStorageModeShared
 	// textures are physically identical to Private but allow setPurgeableState(empty)
 	// and direct CPU writes without a staging blit, which eliminates the main source
@@ -56,7 +71,26 @@ func newDevice(adapter *Adapter) (*Device, error) {
 		return nil, fmt.Errorf("metal: adapter has no device")
 	}
 
-	queue := MsgSend(adapter.raw, Sel("newCommandQueue"))
+	// Create the command queue with an explicit budget. -newCommandQueue gives
+	// Apple's default of 64 uncompleted command buffers, which one encoder's
+	// per-pass recordings can spend before Submit ever runs (issue #428);
+	// maxCommandBuffers matches Rust wgpu-hal (metal/adapter.rs).
+	//
+	// There is no fallback to -newCommandQueue: a queue created without the
+	// descriptor would keep the default budget, so the guard's limit could never
+	// fire before Metal blocks. A device that cannot provide the descriptor gets
+	// an explicit error instead of a silently smaller budget.
+	// MTLCommandQueueDescriptor and -newCommandQueueWithDescriptor: require
+	// macOS 10.15 / iOS 13.
+	pool := NewAutoreleasePool()
+	defer pool.Drain()
+	queueDesc := MsgSend(MsgSend(ID(GetClass("MTLCommandQueueDescriptor")), Sel("alloc")), Sel("init"))
+	if queueDesc == 0 {
+		return nil, fmt.Errorf("metal: failed to create MTLCommandQueueDescriptor")
+	}
+	_ = MsgSend(queueDesc, Sel("setMaxCommandBufferCount:"), uintptr(maxCommandBuffers))
+	queue := MsgSend(adapter.raw, Sel("newCommandQueueWithDescriptor:"), uintptr(queueDesc))
+	Release(queueDesc)
 	if queue == 0 {
 		return nil, fmt.Errorf("metal: failed to create command queue")
 	}
@@ -77,12 +111,14 @@ func newDevice(adapter *Adapter) (*Device, error) {
 		"name", DeviceName(adapter.raw),
 		"hasUnifiedMemory", hasUMA,
 		"isAppleGPU", isApple,
+		"maxCommandBuffers", maxCommandBuffers,
 	)
 
 	return &Device{
 		raw:              adapter.raw,
 		commandQueue:     queue,
 		adapter:          adapter,
+		cmdBudget:        newCommandBudget(maxCommandBuffers),
 		hasUnifiedMemory: hasUMA,
 		isAppleGPU:       isApple,
 	}, nil
