@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
@@ -338,8 +339,13 @@ func TestRenderPass_AttachmentAndBindGroupConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginRenderPass: %v", err)
 	}
-	if err := pass.MergeBindGroup(textureUses(target, track.TextureUsesResource)); err == nil {
-		t.Fatal("expected a usage conflict between color attachment and sampled")
+	err = pass.MergeBindGroup(textureUses(target, track.TextureUsesResource))
+	var conflict *track.TextureUsageConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("MergeBindGroup = %v, want a usage conflict between color attachment and sampled", err)
+	}
+	if conflict.Label != "target" {
+		t.Errorf("conflict label = %q, want the texture's, %q", conflict.Label, "target")
 	}
 }
 
@@ -392,5 +398,45 @@ func TestRenderPass_StandaloneEncoderDoesNotSplit(t *testing.T) {
 	}
 	if got := len(cb.HalBufferList()); got != 1 {
 		t.Errorf("command buffers = %d, want 1", got)
+	}
+}
+
+// TestRenderPassUsageScopeResolvesAttachments checks that a render pass's
+// usage scope resolves the texture of each attachment through the
+// descriptor's ResolveAttachmentTexture, so a subresource of an attachment's
+// texture bound in the pass gets its barrier, and that a texture which is no
+// attachment resolves to nothing.
+func TestRenderPassUsageScopeResolvesAttachments(t *testing.T) {
+	t.Parallel()
+	device := NewDevice(&mockHALDevice{}, &Adapter{}, gputypes.Features(0), gputypes.DefaultLimits(), "TestDevice")
+	target := newPassUsageTestTexture(device, "target")
+	other := newPassUsageTestTexture(device, "other")
+	resolved := namedTexture{name: "resolved"}
+	view := &TextureView{Parent: target, Dimension: gputypes.TextureViewDimension2D, MipLevelCount: 1, ArrayLayerCount: 1}
+	attachments, err := buildRenderPassAttachmentScope(&RenderPassDescriptor{
+		ColorAttachments: []RenderPassColorAttachment{{View: view}},
+		ResolveAttachmentTexture: func(attached *TextureView) hal.Texture {
+			if attached == view {
+				return resolved
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildRenderPassAttachmentScope: %v", err)
+	}
+	scope := newRenderPassUsageScope(attachments)
+	guard := device.snatchLock.Read()
+	defer guard.Release()
+
+	index := target.TrackingData().Index()
+	if got := scope.resolveTexture(index, guard); got != resolved {
+		t.Errorf("pass scope resolves the attachment's texture to %v, want the descriptor's", got)
+	}
+	if got := attachments.resolveTexture(index, guard); got != resolved {
+		t.Errorf("attachment scope resolves the attachment's texture to %v, want the descriptor's", got)
+	}
+	if got := attachments.resolveTexture(other.TrackingData().Index(), guard); got != nil {
+		t.Errorf("a texture that is no attachment resolves to %v, want nil", got)
 	}
 }

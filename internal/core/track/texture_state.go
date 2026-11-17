@@ -104,7 +104,8 @@ func (s *textureState) collapse() {
 
 // merge adds usage of the subresources selector selects, as a usage scope
 // does. Returns an error, and changes nothing, if one of them already has an
-// incompatible usage.
+// incompatible usage. The error selects the subresources the conflict
+// covers, as TextureUsageConflictError.Selector says.
 //
 // Reference: wgpu-core track/texture.rs TextureUsageScope::merge_single
 func (s *textureState) merge(index TrackerIndex, selector TextureSelector, usage TextureUses) error {
@@ -125,7 +126,15 @@ func (s *textureState) merge(index TrackerIndex, selector TextureSelector, usage
 		for arrayLayer := layerStart; arrayLayer < layerEnd; arrayLayer++ {
 			existing := s.subresourceUsage(mipLevel, arrayLayer)
 			if combined := existing | usage; !combined.IsCompatible(combined) {
-				return &TextureUsageConflictError{Index: index, Existing: existing, New: usage}
+				conflicting := TextureSelector{
+					TextureMipLevelCount: mipLevelCount, TextureArrayLayerCount: arrayLayerCount,
+					BaseMipLevel: mipStart, MipLevelCount: mipEnd - mipStart,
+					BaseArrayLayer: layerStart, ArrayLayerCount: layerEnd - layerStart,
+				}
+				if !s.isWhole() {
+					conflicting = s.layersSharingUsage(mipLevelCount, arrayLayerCount, mipLevel, arrayLayer, layerEnd)
+				}
+				return &TextureUsageConflictError{Index: index, Selector: conflicting, Existing: existing, New: usage}
 			}
 		}
 	}
@@ -264,6 +273,22 @@ func useSubresource(transitions *textureTransitionList, index TrackerIndex, star
 		transitions.addSubresource(index, mipLevelCount, arrayLayerCount, mipLevel, arrayLayer, *endUsage, usage)
 	}
 	*endUsage = usage
+}
+
+// layersSharingUsage selects the array layers from arrayLayer up to layerEnd
+// on mip level mipLevel that share arrayLayer's usage, of a split state of
+// mipLevelCount mip levels and arrayLayerCount array layers.
+func (s *textureState) layersSharingUsage(mipLevelCount, arrayLayerCount, mipLevel, arrayLayer, layerEnd uint32) TextureSelector {
+	usage := s.subresourceUsage(mipLevel, arrayLayer)
+	end := arrayLayer + 1
+	for end < layerEnd && s.subresourceUsage(mipLevel, end) == usage {
+		end++
+	}
+	return TextureSelector{
+		TextureMipLevelCount: mipLevelCount, TextureArrayLayerCount: arrayLayerCount,
+		BaseMipLevel: mipLevel, MipLevelCount: 1,
+		BaseArrayLayer: arrayLayer, ArrayLayerCount: end - arrayLayer,
+	}
 }
 
 // subresourceCounts returns the mip level and array layer counts that

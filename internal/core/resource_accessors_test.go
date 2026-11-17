@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
@@ -464,4 +465,39 @@ func TestDestroy_NilDevice(t *testing.T) {
 
 	qs := &QuerySet{}
 	qs.Destroy()
+}
+
+// TestTexture_Subresources checks a texture's array layer count and the
+// selector of a range of its subresources: the zero selector for a range of
+// every subresource.
+func TestTexture_Subresources(t *testing.T) {
+	t.Parallel()
+	newTexture := func(dimension gputypes.TextureDimension, depthOrLayers, mips uint32) *Texture {
+		return NewTexture(&mockTexture{}, nil, gputypes.TextureFormatRGBA8Unorm, dimension,
+			gputypes.TextureUsageTextureBinding, gputypes.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: depthOrLayers},
+			mips, 1, "subresources")
+	}
+	layered := newTexture(gputypes.TextureDimension2D, 6, 3)
+	if got := layered.ArrayLayerCount(); got != 6 {
+		t.Errorf("2D texture of 6 layers: ArrayLayerCount = %d, want 6", got)
+	}
+	if got := newTexture(gputypes.TextureDimension3D, 8, 1).ArrayLayerCount(); got != 1 {
+		t.Errorf("3D texture of depth 8: ArrayLayerCount = %d, want 1", got)
+	}
+	if got := newTexture(gputypes.TextureDimension2D, 0, 1).ArrayLayerCount(); got != 1 {
+		t.Errorf("texture of no stated layers: ArrayLayerCount = %d, want 1", got)
+	}
+
+	for _, whole := range []track.TextureSelector{layered.Subresources(0, 0, 0, 0), layered.Subresources(0, 3, 0, 6)} {
+		if whole != (track.TextureSelector{}) {
+			t.Errorf("range of every subresource = %+v, want the zero selector", whole)
+		}
+	}
+	want := track.TextureSelector{
+		TextureMipLevelCount: 3, TextureArrayLayerCount: 6,
+		BaseMipLevel: 1, MipLevelCount: 1, BaseArrayLayer: 2, ArrayLayerCount: 1,
+	}
+	if got := layered.Subresources(1, 1, 2, 1); got != want {
+		t.Errorf("level 1, layer 2 = %+v, want %+v", got, want)
+	}
 }

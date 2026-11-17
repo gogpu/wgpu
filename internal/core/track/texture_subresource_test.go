@@ -55,9 +55,15 @@ func TestTextureUsageScope_SubresourcesDoNotConflict(t *testing.T) {
 		name          string
 		drawn, sample TextureSelector
 		overlap       TextureSelector
+		conflictAt    TextureSelector
 	}{
-		{"mip levels", selectMipLevel(1), selectMipLevel(0), selectMipLevel(1)},
-		{"array layers", selectArrayLayer(1), selectArrayLayer(0), TextureSelector{}},
+		// The conflict names the drawn layers of the first conflicting
+		// level: both layers of level 1, or layer 1 of level 0.
+		{"mip levels", selectMipLevel(1), selectMipLevel(0), selectMipLevel(1), TextureSelector{
+			TextureMipLevelCount: 3, TextureArrayLayerCount: 2,
+			BaseMipLevel: 1, MipLevelCount: 1, BaseArrayLayer: 0, ArrayLayerCount: 2,
+		}},
+		{"array layers", selectArrayLayer(1), selectArrayLayer(0), TextureSelector{}, subresourceSelector(3, 2, 0, 1)},
 	} {
 		scope := NewTextureUsageScope()
 		if err := scope.SetSubresourceUsage(4, c.drawn, TextureUsesColorTarget); err != nil {
@@ -77,6 +83,25 @@ func TestTextureUsageScope_SubresourcesDoNotConflict(t *testing.T) {
 		if conflict.Existing != TextureUsesColorTarget || conflict.New != TextureUsesResource {
 			t.Errorf("%s: conflict = %+v, want ColorTarget against Resource", c.name, conflict)
 		}
+		if conflict.Selector != c.conflictAt {
+			t.Errorf("%s: conflict on %+v, want %+v", c.name, conflict.Selector, c.conflictAt)
+		}
+	}
+
+	// A usage of part of a texture whose subresources share one usage
+	// conflicts on every subresource it covers.
+	whole := NewTextureUsageScope()
+	_ = whole.SetSubresourceUsage(2, TextureSelector{}, TextureUsesColorTarget)
+	lowerLevels := TextureSelector{
+		TextureMipLevelCount: 3, TextureArrayLayerCount: 2,
+		BaseMipLevel: 1, MipLevelCount: 2, BaseArrayLayer: 0, ArrayLayerCount: 2,
+	}
+	var conflict *TextureUsageConflictError
+	if err := whole.SetSubresourceUsage(2, lowerLevels, TextureUsesResource); !errors.As(err, &conflict) {
+		t.Fatalf("sampling two levels of a drawn texture: err = %v, want a conflict", err)
+	}
+	if want := lowerLevels; conflict.Selector != want {
+		t.Errorf("conflict on %v, want %v", conflict.Selector, want)
 	}
 
 	// A refused usage changes nothing, even on the subresources it does
@@ -229,6 +254,35 @@ func TestTextureTracker_MergeEncoderPerSubresource(t *testing.T) {
 	}
 	if usage := device.GetUsage(5); usage != TextureUsesCopyDst {
 		t.Errorf("GetUsage after the write = %v, want CopyDst for every subresource", usage)
+	}
+}
+
+// TestTextureTransitionList_MergesWithinOneMipLevel checks that a
+// subresource's transition is merged only into a transition of that mip
+// level alone: merged into one over several levels, it would move the
+// layers it adds on every one of them.
+func TestTextureTransitionList_MergesWithinOneMipLevel(t *testing.T) {
+	t.Parallel()
+	var transitions textureTransitionList
+	levels := TextureSelector{
+		TextureMipLevelCount: 3, TextureArrayLayerCount: 2,
+		BaseMipLevel: 0, MipLevelCount: 2, BaseArrayLayer: 0, ArrayLayerCount: 1,
+	}
+	transitions.addSelected(1, levels, TextureUsesResource, TextureUsesColorTarget)
+	transitions.addSubresource(1, 3, 2, 0, 1, TextureUsesResource, TextureUsesColorTarget)
+	if len(transitions) != 2 {
+		t.Fatalf("transitions = %v, want the levels' and the subresource's apart", transitions)
+	}
+	if transitions[0].Selector != levels {
+		t.Errorf("first transition covers %v, want %v", transitions[0].Selector, levels)
+	}
+
+	// On one mip level, the next layer's transition is merged.
+	transitions = transitions[:0]
+	transitions.addSubresource(1, 3, 2, 1, 0, TextureUsesResource, TextureUsesColorTarget)
+	transitions.addSubresource(1, 3, 2, 1, 1, TextureUsesResource, TextureUsesColorTarget)
+	if len(transitions) != 1 || transitions[0].Selector.ArrayLayerCount != 2 {
+		t.Errorf("transitions = %v, want one over both layers of level 1", transitions)
 	}
 }
 

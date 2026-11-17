@@ -338,7 +338,10 @@ func TestTextureUsageScope_SetUsage(t *testing.T) {
 	}
 	var tuce *TextureUsageConflictError
 	if !errors.As(err, &tuce) {
-		t.Errorf("Error should be TextureUsageConflictError, got %T", err)
+		t.Fatalf("Error should be TextureUsageConflictError, got %T", err)
+	}
+	if !tuce.Selector.SelectsAll() {
+		t.Errorf("Selector = %+v, want the whole texture", tuce.Selector)
 	}
 }
 
@@ -576,15 +579,48 @@ func TestTexturePendingTransition_IntoHAL(t *testing.T) {
 func TestTextureUsageConflictError(t *testing.T) {
 	t.Parallel()
 
-	err := &TextureUsageConflictError{
-		Index:    TrackerIndex(5),
-		Existing: TextureUsesResource,
-		New:      TextureUsesCopyDst,
+	for _, c := range []struct {
+		label    string
+		selector TextureSelector
+		want     string
+	}{
+		{"", TextureSelector{},
+			"track: texture 5 usage conflict on the whole texture: existing Resource incompatible with CopyDst"},
+		{"albedo", subresourceSelector(3, 2, 1, 0),
+			`track: texture "albedo" usage conflict on mip level 1, array layer 0: existing Resource incompatible with CopyDst`},
+		{"albedo", TextureSelector{
+			TextureMipLevelCount: 3, TextureArrayLayerCount: 6,
+			BaseMipLevel: 1, MipLevelCount: 2, BaseArrayLayer: 2, ArrayLayerCount: 3,
+		}, `track: texture "albedo" usage conflict on mip levels 1 to 2, array layers 2 to 4: existing Resource incompatible with CopyDst`},
+	} {
+		err := &TextureUsageConflictError{
+			Index:    TrackerIndex(5),
+			Label:    c.label,
+			Selector: c.selector,
+			Existing: TextureUsesResource,
+			New:      TextureUsesCopyDst,
+		}
+		if got := err.Error(); got != c.want {
+			t.Errorf("Error() = %q, want %q", got, c.want)
+		}
 	}
+}
 
-	msg := err.Error()
-	if msg == "" {
-		t.Error("Error message should not be empty")
+func TestTextureUses_String(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		uses TextureUses
+		want string
+	}{
+		{TextureUsesNone, "None"},
+		{TextureUsesColorTarget, "ColorTarget"},
+		{TextureUsesResource | TextureUsesStorageRead, "Resource|StorageRead"},
+		{TextureUsesCopyDst | 1<<12, "CopyDst|0x1000"},
+	} {
+		if got := c.uses.String(); got != c.want {
+			t.Errorf("TextureUses(%#x).String() = %q, want %q", uint32(c.uses), got, c.want)
+		}
 	}
 }
 

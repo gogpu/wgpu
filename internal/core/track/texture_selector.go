@@ -2,6 +2,8 @@
 
 package track
 
+import "fmt"
+
 // TextureSelector selects the subresources of one texture a usage covers:
 // MipLevelCount mip levels from BaseMipLevel and ArrayLayerCount array layers
 // from BaseArrayLayer, of a texture of TextureMipLevelCount mip levels and
@@ -29,6 +31,25 @@ func (s TextureSelector) SelectsAll() bool {
 		layerStart == 0 && layerEnd == s.TextureArrayLayerCount
 }
 
+// String names the subresources the selector selects, as "the whole
+// texture" or "mip level 1, array layers 0 to 5".
+func (s TextureSelector) String() string {
+	if s.SelectsAll() {
+		return "the whole texture"
+	}
+	mipStart, mipEnd, layerStart, layerEnd := s.bounds(s.TextureMipLevelCount, s.TextureArrayLayerCount)
+	return subresourceRange("mip level", mipStart, mipEnd) + ", " + subresourceRange("array layer", layerStart, layerEnd)
+}
+
+// subresourceRange names the items [start, end) called name, as "mip level
+// 1" or "mip levels 1 to 3".
+func subresourceRange(name string, start, end uint32) string {
+	if end <= start+1 {
+		return fmt.Sprintf("%s %d", name, start)
+	}
+	return fmt.Sprintf("%ss %d to %d", name, start, end-1)
+}
+
 // bounds returns the selected mip levels [mipStart, mipEnd) and array layers
 // [layerStart, layerEnd) of a texture of mipLevelCount levels and
 // arrayLayerCount layers. A selector whose texture counts are not known
@@ -39,6 +60,19 @@ func (s TextureSelector) bounds(mipLevelCount, arrayLayerCount uint32) (mipStart
 	}
 	return min(s.BaseMipLevel, mipLevelCount), selectedEnd(s.BaseMipLevel, s.MipLevelCount, mipLevelCount),
 		min(s.BaseArrayLayer, arrayLayerCount), selectedEnd(s.BaseArrayLayer, s.ArrayLayerCount, arrayLayerCount)
+}
+
+// subresourceSelector selects mip level mipLevel and array layer arrayLayer
+// of a texture of mipLevelCount mip levels and arrayLayerCount array layers.
+func subresourceSelector(mipLevelCount, arrayLayerCount, mipLevel, arrayLayer uint32) TextureSelector {
+	return TextureSelector{
+		TextureMipLevelCount:   mipLevelCount,
+		TextureArrayLayerCount: arrayLayerCount,
+		BaseMipLevel:           mipLevel,
+		MipLevelCount:          1,
+		BaseArrayLayer:         arrayLayer,
+		ArrayLayerCount:        1,
+	}
 }
 
 // selectedEnd returns the end of count items from base among total, every

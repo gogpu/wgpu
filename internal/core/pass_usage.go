@@ -3,6 +3,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/gogpu/wgpu/internal/core/track"
@@ -16,11 +17,13 @@ type BindGroupBufferUse struct {
 	Usage  track.BufferUses
 }
 
-// BindGroupTextureUse is one texture binding of a bind group and the usage
-// the binding implies (sampled, or storage with the layout's access mode).
+// BindGroupTextureUse is one texture binding of a bind group, the
+// subresources its view covers and the usage the binding implies (sampled,
+// or storage with the layout's access mode).
 type BindGroupTextureUse struct {
-	Texture *Texture
-	Usage   track.TextureUses
+	Texture      *Texture
+	Subresources track.TextureSelector
+	Usage        track.TextureUses
 
 	// Resolve returns the texture's current HAL texture, or nil if it is
 	// gone. When nil, Texture.Raw is used.
@@ -52,14 +55,29 @@ type passUsageScope struct {
 }
 
 func newPassUsageScope() *passUsageScope {
-	return newPassUsageScopeWithTextures(track.NewTextureUsageScope())
-}
-
-func newPassUsageScopeWithTextures(textures *track.TextureUsageScope) *passUsageScope {
 	return &passUsageScope{
 		buffers:  track.NewBufferUsageScope(),
-		textures: textures,
+		textures: track.NewTextureUsageScope(),
 	}
+}
+
+// newRenderPassUsageScope returns the usage scope of a render pass, holding
+// the usages of its attachments and how to resolve their textures, so a
+// subresource of an attachment's texture bound in the pass is resolved too.
+func newRenderPassUsageScope(attachments *renderPassAttachmentScope) *passUsageScope {
+	scope := &passUsageScope{
+		buffers:     track.NewBufferUsageScope(),
+		textures:    attachments.scope,
+		textureRefs: make([]BindGroupTextureUse, 0, len(attachments.views)),
+	}
+	for _, view := range attachments.views {
+		use := BindGroupTextureUse{Texture: view.Parent}
+		if resolveView := attachments.resolveView; resolveView != nil {
+			use.Resolve = func() hal.Texture { return resolveView(view) }
+		}
+		scope.textureRefs = append(scope.textureRefs, use)
+	}
+	return scope
 }
 
 // clear empties the scope for reuse by the next dispatch.
@@ -89,7 +107,7 @@ func (s *passUsageScope) addBuffer(buffer *Buffer, usage track.BufferUses) error
 
 // addTexture merges one texture usage into the scope. Textures without valid
 // tracking data are skipped. Returns an error if the texture already has an
-// incompatible usage in this scope.
+// incompatible usage of one of the same subresources in this scope.
 func (s *passUsageScope) addTexture(use BindGroupTextureUse) error {
 	if use.Texture == nil {
 		return nil
@@ -101,7 +119,17 @@ func (s *passUsageScope) addTexture(use BindGroupTextureUse) error {
 	if !s.textures.IsUsed(td.Index()) {
 		s.textureRefs = append(s.textureRefs, use)
 	}
-	return s.textures.SetUsage(td.Index(), use.Usage)
+	return withTextureLabel(s.textures.SetSubresourceUsage(td.Index(), use.Subresources, use.Usage), use.Texture)
+}
+
+// withTextureLabel puts texture's label in err if err is a texture usage
+// conflict, so its message names the texture, and returns err.
+func withTextureLabel(err error, texture *Texture) error {
+	var conflict *track.TextureUsageConflictError
+	if errors.As(err, &conflict) {
+		conflict.Label = texture.Label()
+	}
+	return err
 }
 
 // mergeBindGroup merges every usage of a bind group into the scope.
@@ -126,8 +154,7 @@ func (s *passUsageScope) mergeBindGroup(usages *BindGroupUsages) error {
 
 // scopeBarriersLocked applies a finished usage scope to the command buffer
 // trackers and returns the barriers that must execute before the scope's
-// commands. Entries that cannot be resolved to a HAL resource (render pass
-// attachments, which BeginRenderPass transitions itself, or destroyed
+// commands. Entries that cannot be resolved to a HAL resource (destroyed
 // resources) are skipped. Caller must hold e.mu.
 //
 // Reference: wgpu-core track/mod.rs Tracker::set_from_usage_scope +
@@ -149,9 +176,16 @@ func (e *CoreCommandEncoder) scopeBarriersLocked(
 	}
 	var textureBarriers []hal.TextureBarrier
 	if tracker := e.mutable.textureTracker; tracker != nil {
+		// The transitions of one texture's subresources come together.
+		resolvedIndex := track.InvalidTrackerIndex
+		var resolvedTexture hal.Texture
 		for _, transition := range tracker.SetFromScope(scope.textures) {
-			if raw := scope.resolveTexture(transition.Index, guard); raw != nil {
-				textureBarriers = append(textureBarriers, transition.IntoHAL(raw))
+			if transition.Index != resolvedIndex {
+				resolvedIndex = transition.Index
+				resolvedTexture = scope.resolveTexture(transition.Index, guard)
+			}
+			if resolvedTexture != nil {
+				textureBarriers = append(textureBarriers, transition.IntoHAL(resolvedTexture))
 			}
 		}
 	}

@@ -4,7 +4,8 @@ package track
 
 // textureTransitionList collects the transitions of textures' subresources,
 // merging each into the one before it when that one covers the array layers
-// just before it on the same mip level with the same states.
+// just before it on the same mip level, and no other mip level, with the
+// same states.
 //
 // Reference: wgpu-core track/texture.rs barrier (one PendingTransition per
 // mip level and layer range)
@@ -15,23 +16,16 @@ func (t *textureTransitionList) addSubresource(index TrackerIndex, mipLevelCount
 	if last := len(*t) - 1; last >= 0 {
 		previous := &(*t)[last]
 		if previous.Index == index && previous.Usage.From == from && previous.Usage.To == to &&
-			previous.Selector.BaseMipLevel == mipLevel &&
+			previous.Selector.MipLevelCount == 1 && previous.Selector.BaseMipLevel == mipLevel &&
 			previous.Selector.BaseArrayLayer+previous.Selector.ArrayLayerCount == arrayLayer {
 			previous.Selector.ArrayLayerCount++
 			return
 		}
 	}
 	*t = append(*t, TexturePendingTransition{
-		Index: index,
-		Selector: TextureSelector{
-			TextureMipLevelCount:   mipLevelCount,
-			TextureArrayLayerCount: arrayLayerCount,
-			BaseMipLevel:           mipLevel,
-			MipLevelCount:          1,
-			BaseArrayLayer:         arrayLayer,
-			ArrayLayerCount:        1,
-		},
-		Usage: TextureStateTransition{From: from, To: to},
+		Index:    index,
+		Selector: subresourceSelector(mipLevelCount, arrayLayerCount, mipLevel, arrayLayer),
+		Usage:    TextureStateTransition{From: from, To: to},
 	})
 }
 

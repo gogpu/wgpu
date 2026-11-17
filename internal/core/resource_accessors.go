@@ -6,6 +6,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
@@ -36,6 +37,36 @@ func (t *Texture) Size() gputypes.Extent3D {
 // MipLevelCount returns the number of mip levels.
 func (t *Texture) MipLevelCount() uint32 {
 	return t.mipLevelCount
+}
+
+// ArrayLayerCount returns the number of array layers: the size's depth or
+// array layer count, but 1 for a 3D texture, whose depth slices are not
+// layers.
+func (t *Texture) ArrayLayerCount() uint32 {
+	if t.dimension == gputypes.TextureDimension3D || t.size.DepthOrArrayLayers == 0 {
+		return 1
+	}
+	return t.size.DepthOrArrayLayers
+}
+
+// Subresources returns the selector of mipLevelCount mip levels from
+// baseMipLevel and arrayLayerCount array layers from baseArrayLayer of the
+// texture, a count of 0 meaning every level or layer from the base on. A
+// range of every subresource is the zero selector, which the trackers take
+// the shortest way.
+func (t *Texture) Subresources(baseMipLevel, mipLevelCount, baseArrayLayer, arrayLayerCount uint32) track.TextureSelector {
+	selector := track.TextureSelector{
+		TextureMipLevelCount:   t.mipLevelCount,
+		TextureArrayLayerCount: t.ArrayLayerCount(),
+		BaseMipLevel:           baseMipLevel,
+		MipLevelCount:          mipLevelCount,
+		BaseArrayLayer:         baseArrayLayer,
+		ArrayLayerCount:        arrayLayerCount,
+	}
+	if selector.SelectsAll() {
+		return track.TextureSelector{}
+	}
+	return selector
 }
 
 // SampleCount returns the number of samples per pixel.
