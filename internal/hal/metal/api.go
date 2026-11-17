@@ -113,6 +113,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			},
 			Features: features,
 			Capabilities: hal.Capabilities{
+				// Metal has no explicit transitions: MTLCommandEncoder orders
+				// them implicitly, so the core keeps one recording per encoder.
+				RecordsTransitions: false,
 				Limits: gputypes.Limits{
 					MaxTextureDimension1D:                     16384,
 					MaxTextureDimension2D:                     16384,

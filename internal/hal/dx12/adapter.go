@@ -303,7 +303,9 @@ func dxilEnabled() bool {
 // Capabilities returns detailed adapter capabilities.
 func (a *Adapter) Capabilities() hal.Capabilities {
 	return hal.Capabilities{
-		Limits: a.limits(),
+		// DX12 records resource barriers in the command list.
+		RecordsTransitions: true,
+		Limits:             a.limits(),
 		AlignmentsMask: hal.Alignments{
 			BufferCopyOffset: 512, // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
 			BufferCopyPitch:  256, // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
@@ -652,7 +654,9 @@ func (a *AdapterLegacy) Capabilities() hal.Capabilities {
 	limits.MaxTextureDimension3D = a.capabilities.MaxTexture3D
 
 	return hal.Capabilities{
-		Limits: limits,
+		// DX12 records resource barriers in the command list.
+		RecordsTransitions: true,
+		Limits:             limits,
 		AlignmentsMask: hal.Alignments{
 			BufferCopyOffset: 512,
 			BufferCopyPitch:  256,
