@@ -257,6 +257,35 @@ func TestTextureTracker_MergeEncoderPerSubresource(t *testing.T) {
 	}
 }
 
+// TestTextureTransitionList_MergesWithinOneMipLevel checks that a
+// subresource's transition is merged only into a transition of that mip
+// level alone: merged into one over several levels, it would move the
+// layers it adds on every one of them.
+func TestTextureTransitionList_MergesWithinOneMipLevel(t *testing.T) {
+	t.Parallel()
+	var transitions textureTransitionList
+	levels := TextureSelector{
+		TextureMipLevelCount: 3, TextureArrayLayerCount: 2,
+		BaseMipLevel: 0, MipLevelCount: 2, BaseArrayLayer: 0, ArrayLayerCount: 1,
+	}
+	transitions.addSelected(1, levels, TextureUsesResource, TextureUsesColorTarget)
+	transitions.addSubresource(1, 3, 2, 0, 1, TextureUsesResource, TextureUsesColorTarget)
+	if len(transitions) != 2 {
+		t.Fatalf("transitions = %v, want the levels' and the subresource's apart", transitions)
+	}
+	if transitions[0].Selector != levels {
+		t.Errorf("first transition covers %v, want %v", transitions[0].Selector, levels)
+	}
+
+	// On one mip level, the next layer's transition is merged.
+	transitions = transitions[:0]
+	transitions.addSubresource(1, 3, 2, 1, 0, TextureUsesResource, TextureUsesColorTarget)
+	transitions.addSubresource(1, 3, 2, 1, 1, TextureUsesResource, TextureUsesColorTarget)
+	if len(transitions) != 1 || transitions[0].Selector.ArrayLayerCount != 2 {
+		t.Errorf("transitions = %v, want one over both layers of level 1", transitions)
+	}
+}
+
 func TestTexturePendingTransition_IntoHALRange(t *testing.T) {
 	t.Parallel()
 	whole := TexturePendingTransition{Usage: TextureStateTransition{From: TextureUsesCopyDst, To: TextureUsesResource}}
