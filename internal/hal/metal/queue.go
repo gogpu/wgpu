@@ -156,6 +156,47 @@ func (q *Queue) registerFrameCompletionHandler(cmdBuffer ID) {
 	_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
 }
 
+// newBudgetedCommandBuffer creates one command buffer and charges it to the
+// device's command-buffer budget. Every [MTLCommandQueue commandBuffer]
+// creation site in this backend goes through it — the encoder's per-recording
+// buffer as well as the internal one-shots (the staging blits of WriteBuffer
+// and WriteTexture, Present, and WaitIdle's empty flush).
+//
+// Charging every site is deliberate: Apple counts ALL created-but-uncompleted
+// command buffers, so a creation that bypassed the counter could still block
+// on Apple's limit, and a creation that bypasses the accounting could not be
+// refused. Rust wgpu-hal exempts the internal one-shots because it commits
+// them immediately; this backend counts them too (issue #428 cross-check).
+//
+// The caller owns the acquired unit and must return it with budget.Release()
+// exactly once: when it sends commit, or on any failure path that drops the
+// buffer without committing. A committed buffer stays uncompleted for Apple
+// until the GPU finishes it, but it no longer counts here (see commandBudget),
+// so the next recording can proceed. On the encoder path the unit passes to
+// the CommandBuffer, whose releaseBudget makes the matching call.
+func newBudgetedCommandBuffer(queue ID, budget *commandBudget, op string) (ID, error) {
+	if budget == nil {
+		return 0, fmt.Errorf("BUG: %s: no device command-buffer budget — Metal device construction gap", op)
+	}
+	outstanding, ok := budget.TryAcquire()
+	if !ok {
+		hal.Logger().Warn("metal: command buffer budget exhausted; refusing to create another command buffer",
+			"op", op,
+			"outstanding", outstanding,
+			"limit", maxCommandBuffers,
+		)
+		return 0, fmt.Errorf("metal: %s: command buffer budget exhausted (%d command buffers created and not submitted, limit %d): %w",
+			op, outstanding, maxCommandBuffers, hal.ErrCommandBufferBudget)
+	}
+	cmdBuffer := MsgSend(queue, Sel("commandBuffer"))
+	if cmdBuffer == 0 {
+		budget.Release()
+		return 0, fmt.Errorf("metal: %s: command buffer creation failed", op)
+	}
+	Retain(cmdBuffer)
+	return cmdBuffer, nil
+}
+
 // WriteBuffer writes data to a buffer immediately.
 //
 // Fast path: if the buffer is CPU-mappable (Shared/Managed storage), copies
@@ -207,16 +248,17 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 		return fmt.Errorf("metal: WriteBuffer: staging buffer creation failed (size=%d)", len(data))
 	}
 
-	// Create a one-shot command buffer for the blit.
-	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
-	if cmdBuffer == 0 {
+	// Create a one-shot command buffer for the blit, charged to the queue's
+	// command-buffer budget (see newBudgetedCommandBuffer).
+	cmdBuffer, err := newBudgetedCommandBuffer(q.commandQueue, q.device.cmdBudget, "WriteBuffer")
+	if err != nil {
 		Release(staging)
-		return fmt.Errorf("metal: WriteBuffer: command buffer creation failed")
+		return err
 	}
-	Retain(cmdBuffer)
 
 	blitEncoder := MsgSend(cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
+		q.device.cmdBudget.Release()
 		Release(staging)
 		Release(cmdBuffer)
 		return fmt.Errorf("metal: WriteBuffer: blit encoder creation failed")
@@ -237,6 +279,7 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 	if blockPtr != 0 {
 		_ = MsgSend(cmdBuffer, Sel("addCompletedHandler:"), blockPtr)
 		_ = MsgSend(cmdBuffer, Sel("commit"))
+		q.device.cmdBudget.Release()
 		Release(cmdBuffer)
 		// Block is pinned via blockPinRegistry until the completion callback
 		// fires and unpins it. No runtime.KeepAlive needed.
@@ -245,6 +288,7 @@ func (q *Queue) writeBufferStaged(buf *Buffer, offset uint64, data []byte) error
 
 	// Fallback: synchronous path.
 	_ = MsgSend(cmdBuffer, Sel("commit"))
+	q.device.cmdBudget.Release()
 	_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
 	Release(staging)
 	Release(cmdBuffer)
@@ -317,16 +361,17 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 	// Do NOT defer Release(stagingBuffer) — it will be released either by
 	// the completion handler (async path) or explicitly (sync fallback).
 
-	// Create a one-shot command buffer for the blit operation.
-	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
-	if cmdBuffer == 0 {
+	// Create a one-shot command buffer for the blit operation, charged to the
+	// queue's command-buffer budget (see newBudgetedCommandBuffer).
+	cmdBuffer, err := newBudgetedCommandBuffer(q.commandQueue, q.device.cmdBudget, "WriteTexture")
+	if err != nil {
 		Release(stagingBuffer)
-		return fmt.Errorf("metal: WriteTexture: command buffer creation failed")
+		return err
 	}
-	Retain(cmdBuffer)
 
 	blitEncoder := MsgSend(cmdBuffer, Sel("blitCommandEncoder"))
 	if blitEncoder == 0 {
+		q.device.cmdBudget.Release()
 		Release(stagingBuffer)
 		Release(cmdBuffer)
 		return fmt.Errorf("metal: WriteTexture: blit encoder creation failed")
@@ -363,6 +408,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 		// Commit — GPU will execute the blit asynchronously.
 		_ = MsgSend(cmdBuffer, Sel("commit"))
+		q.device.cmdBudget.Release()
 
 		// Release our reference to the command buffer. The Metal runtime
 		// retains it until the completion handler fires.
@@ -382,6 +428,7 @@ func (q *Queue) WriteTexture(dst *hal.ImageCopyTexture, data []byte, layout *hal
 
 	// Fallback: block creation failed — use synchronous path.
 	_ = MsgSend(cmdBuffer, Sel("commit"))
+	q.device.cmdBudget.Release()
 	_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
 	Release(stagingBuffer)
 	Release(cmdBuffer)
@@ -458,17 +505,21 @@ func (q *Queue) Present(surface hal.Surface, texture hal.SurfaceTexture, _ []ima
 		useTransaction = ms.presentsWithTransaction
 	}
 
-	cmdBuffer := MsgSend(q.commandQueue, Sel("commandBuffer"))
-	if cmdBuffer == 0 {
+	// The empty present command buffer is charged like every other creation
+	// site (see newBudgetedCommandBuffer); a refused or failed creation drops
+	// the frame with the error instead of blocking.
+	cmdBuffer, err := newBudgetedCommandBuffer(q.commandQueue, q.device.cmdBudget, "Present")
+	if err != nil {
 		Release(st.drawable)
 		st.drawable = 0
-		return nil
+		return err
 	}
 
 	if !useTransaction {
 		_ = MsgSend(cmdBuffer, Sel("presentDrawable:"), uintptr(st.drawable))
 	}
 	_ = MsgSend(cmdBuffer, Sel("commit"))
+	q.device.cmdBudget.Release()
 
 	if useTransaction {
 		_ = MsgSend(cmdBuffer, Sel("waitUntilScheduled"))

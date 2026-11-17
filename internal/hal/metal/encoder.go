@@ -61,19 +61,10 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 	// submitting or dropping an outstanding encoder frees the budget. Rust
 	// classifies the same condition as DeviceError::Lost; this backend departs
 	// from it deliberately (the sentinel's doc comment carries the reason and
-	// the device-lost idiom is D2/P1-API-039's).
-	budget := e.budget()
-	if budget == nil {
-		return fmt.Errorf("BUG: command encoder has no device command-buffer budget — Metal device construction gap")
-	}
-	outstanding, ok := budget.TryAcquire()
-	if !ok {
-		hal.Logger().Warn("metal: command buffer budget exhausted; refusing to create another command buffer",
-			"outstanding", outstanding,
-			"limit", maxCommandBuffers,
-		)
-		return fmt.Errorf("metal: command buffer budget exhausted (%d command buffers created and not submitted, limit %d): %w",
-			outstanding, maxCommandBuffers, hal.ErrCommandBufferBudget)
+	// the device-lost idiom is D2/P1-API-039's). newBudgetedCommandBuffer
+	// acquires the unit and produces the WARN and the error.
+	if e.device == nil {
+		return fmt.Errorf("BUG: command encoder has no device — Metal device construction gap")
 	}
 
 	// Scoped autorelease pool — drain immediately after creating the command buffer.
@@ -82,12 +73,11 @@ func (e *CommandEncoder) BeginEncoding(label string) error {
 	// on the ObjC autorelease pool stack (macOS Tahoe SIGABRT fix).
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
-	e.cmdBuffer = MsgSend(e.device.commandQueue, Sel("commandBuffer"))
-	if e.cmdBuffer == 0 {
-		e.releaseBudget()
-		return fmt.Errorf("metal: failed to create command buffer")
+	cmdBuffer, err := newBudgetedCommandBuffer(e.device.commandQueue, e.device.cmdBudget, "BeginEncoding")
+	if err != nil {
+		return err
 	}
-	Retain(e.cmdBuffer)
+	e.cmdBuffer = cmdBuffer
 	if label != "" {
 		nsLabel := NSString(label)
 		_ = MsgSend(e.cmdBuffer, Sel("setLabel:"), uintptr(nsLabel))
