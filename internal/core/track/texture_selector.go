@@ -41,6 +41,19 @@ func (s TextureSelector) bounds(mipLevelCount, arrayLayerCount uint32) (mipStart
 		min(s.BaseArrayLayer, arrayLayerCount), selectedEnd(s.BaseArrayLayer, s.ArrayLayerCount, arrayLayerCount)
 }
 
+// subresourceSelector selects mip level mipLevel and array layer arrayLayer
+// of a texture of mipLevelCount mip levels and arrayLayerCount array layers.
+func subresourceSelector(mipLevelCount, arrayLayerCount, mipLevel, arrayLayer uint32) TextureSelector {
+	return TextureSelector{
+		TextureMipLevelCount:   mipLevelCount,
+		TextureArrayLayerCount: arrayLayerCount,
+		BaseMipLevel:           mipLevel,
+		MipLevelCount:          1,
+		BaseArrayLayer:         arrayLayer,
+		ArrayLayerCount:        1,
+	}
+}
+
 // selectedEnd returns the end of count items from base among total, every
 // item from base on when count is 0, clamped to total.
 func selectedEnd(base, count, total uint32) uint32 {

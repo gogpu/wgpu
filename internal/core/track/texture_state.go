@@ -104,7 +104,8 @@ func (s *textureState) collapse() {
 
 // merge adds usage of the subresources selector selects, as a usage scope
 // does. Returns an error, and changes nothing, if one of them already has an
-// incompatible usage.
+// incompatible usage: the error selects the first such subresource, or every
+// subresource when both usages cover the whole texture.
 //
 // Reference: wgpu-core track/texture.rs TextureUsageScope::merge_single
 func (s *textureState) merge(index TrackerIndex, selector TextureSelector, usage TextureUses) error {
@@ -125,7 +126,12 @@ func (s *textureState) merge(index TrackerIndex, selector TextureSelector, usage
 		for arrayLayer := layerStart; arrayLayer < layerEnd; arrayLayer++ {
 			existing := s.subresourceUsage(mipLevel, arrayLayer)
 			if combined := existing | usage; !combined.IsCompatible(combined) {
-				return &TextureUsageConflictError{Index: index, Existing: existing, New: usage}
+				return &TextureUsageConflictError{
+					Index:    index,
+					Selector: subresourceSelector(mipLevelCount, arrayLayerCount, mipLevel, arrayLayer),
+					Existing: existing,
+					New:      usage,
+				}
 			}
 		}
 	}

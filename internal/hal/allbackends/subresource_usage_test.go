@@ -133,6 +133,14 @@ func TestRenderPassRefusesSampledAndDrawnSubresource(t *testing.T) {
 				if !errors.As(err, &conflict) {
 					t.Fatalf("Finish error = %v, want a *track.TextureUsageConflictError from SetBindGroup", err)
 				}
+				wantMipLevel, wantArrayLayer := uint32(0), uint32(1)
+				if c.mipLevels > 1 {
+					wantMipLevel, wantArrayLayer = 1, 0
+				}
+				if conflict.Selector.BaseMipLevel != wantMipLevel || conflict.Selector.BaseArrayLayer != wantArrayLayer {
+					t.Errorf("conflict on mip level %d, array layer %d, want the drawn subresource, mip level %d, array layer %d",
+						conflict.Selector.BaseMipLevel, conflict.Selector.BaseArrayLayer, wantMipLevel, wantArrayLayer)
+				}
 			})
 		})
 	}

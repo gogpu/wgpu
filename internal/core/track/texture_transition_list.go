@@ -22,16 +22,9 @@ func (t *textureTransitionList) addSubresource(index TrackerIndex, mipLevelCount
 		}
 	}
 	*t = append(*t, TexturePendingTransition{
-		Index: index,
-		Selector: TextureSelector{
-			TextureMipLevelCount:   mipLevelCount,
-			TextureArrayLayerCount: arrayLayerCount,
-			BaseMipLevel:           mipLevel,
-			MipLevelCount:          1,
-			BaseArrayLayer:         arrayLayer,
-			ArrayLayerCount:        1,
-		},
-		Usage: TextureStateTransition{From: from, To: to},
+		Index:    index,
+		Selector: subresourceSelector(mipLevelCount, arrayLayerCount, mipLevel, arrayLayer),
+		Usage:    TextureStateTransition{From: from, To: to},
 	})
 }
 

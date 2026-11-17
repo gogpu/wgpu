@@ -443,13 +443,21 @@ func (p TexturePendingTransition) IntoHAL(texture hal.Texture) hal.TextureBarrie
 // TextureUsageConflictError is returned when incompatible texture usages
 // are detected within the same scope.
 type TextureUsageConflictError struct {
-	Index    TrackerIndex
+	Index TrackerIndex
+	// Selector selects the subresource the usages conflict on, one mip level
+	// and one array layer, the first found. It is the zero selector, every
+	// subresource, when both usages cover the whole texture.
+	Selector TextureSelector
 	Existing TextureUses
 	New      TextureUses
 }
 
 // Error implements the error interface.
 func (e *TextureUsageConflictError) Error() string {
-	return fmt.Sprintf("track: texture %d usage conflict: existing %d incompatible with %d",
-		e.Index, e.Existing, e.New)
+	if e.Selector.SelectsAll() {
+		return fmt.Sprintf("track: texture %d usage conflict on the whole texture: existing %d incompatible with %d",
+			e.Index, e.Existing, e.New)
+	}
+	return fmt.Sprintf("track: texture %d usage conflict on mip level %d, array layer %d: existing %d incompatible with %d",
+		e.Index, e.Selector.BaseMipLevel, e.Selector.BaseArrayLayer, e.Existing, e.New)
 }

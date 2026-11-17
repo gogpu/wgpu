@@ -55,9 +55,10 @@ func TestTextureUsageScope_SubresourcesDoNotConflict(t *testing.T) {
 		name          string
 		drawn, sample TextureSelector
 		overlap       TextureSelector
+		conflictAt    TextureSelector
 	}{
-		{"mip levels", selectMipLevel(1), selectMipLevel(0), selectMipLevel(1)},
-		{"array layers", selectArrayLayer(1), selectArrayLayer(0), TextureSelector{}},
+		{"mip levels", selectMipLevel(1), selectMipLevel(0), selectMipLevel(1), subresourceSelector(3, 2, 1, 0)},
+		{"array layers", selectArrayLayer(1), selectArrayLayer(0), TextureSelector{}, subresourceSelector(3, 2, 0, 1)},
 	} {
 		scope := NewTextureUsageScope()
 		if err := scope.SetSubresourceUsage(4, c.drawn, TextureUsesColorTarget); err != nil {
@@ -76,6 +77,9 @@ func TestTextureUsageScope_SubresourcesDoNotConflict(t *testing.T) {
 		}
 		if conflict.Existing != TextureUsesColorTarget || conflict.New != TextureUsesResource {
 			t.Errorf("%s: conflict = %+v, want ColorTarget against Resource", c.name, conflict)
+		}
+		if conflict.Selector != c.conflictAt {
+			t.Errorf("%s: conflict on %+v, want %+v", c.name, conflict.Selector, c.conflictAt)
 		}
 	}
 
