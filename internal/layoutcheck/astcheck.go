@@ -610,7 +610,7 @@ func isPackageMap(vs *ast.ValueSpec) bool {
 // isMapInitializer reports whether an inferred initializer produces a map: a composite literal whose type is
 // `map[K]V`, a make call for a map type, a conversion to a map type (`map[K]V(nil)`), or any of those
 // parenthesized (gofmt keeps the parentheses, so the parenthesized literal is a stable bypass if it passes).
-// The closed set is deliberate: a named map type (`type R map[K]V; var r R`) cannot be recognised without
+// The closed set is deliberate: a named map type (`type R map[K]V; var r R`) cannot be recognized without
 // go/types and stays out of scope for this AST rule, and `new(map[K]V)` declares a pointer variable, not a map.
 func isMapInitializer(expr ast.Expr) bool {
 	switch v := expr.(type) {
