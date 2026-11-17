@@ -68,40 +68,43 @@ func (q *Queue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
 	pool := NewAutoreleasePool()
 	defer pool.Drain()
 
-	lastIdx := len(commandBuffers) - 1
+	// Build the platform-neutral batch the accounting loop consumes. A slot
+	// that is not a Metal command buffer stays zero and is skipped there.
+	batch := make([]budgetedSubmit, len(commandBuffers))
 	for i, buf := range commandBuffers {
 		cb, ok := buf.(*CommandBuffer)
 		if !ok || cb == nil {
 			continue
 		}
+		batch[i] = budgetedSubmit{raw: uintptr(cb.raw), unit: &cb.budgetUnit}
+	}
 
-		// On the last command buffer, register completion handlers.
-		if i == lastIdx {
+	// runSubmit registers completion tracking on the last command buffer,
+	// commits every buffer and returns its command-buffer budget unit at the
+	// commit instant (see commandBudget: a committed buffer stops counting as
+	// created-not-submitted here, while Apple keeps counting it until it
+	// completes).
+	runSubmit(batch, submitHooks{
+		onLast: func(raw uintptr, subIdx uint64) {
 			// Track actual GPU completion for PollCompleted().
 			// Uses addCompletedHandler to atomically store the submission index
 			// when the GPU finishes, matching Rust wgpu-hal Fence.completed_value.
-			q.registerSubmissionCompletionHandler(cb.raw, subIdx)
+			q.registerSubmissionCompletionHandler(ID(raw), subIdx)
 
 			// Release frame semaphore slot for CPU-ahead throttling.
 			if q.frameSemaphore != nil {
-				q.registerFrameCompletionHandler(cb.raw)
+				q.registerFrameCompletionHandler(ID(raw))
 				hal.Logger().Debug("metal: frame completion handler registered")
 			}
-		}
-
-		// Commit the command buffer
-		_ = MsgSend(cb.raw, Sel("commit"))
-
-		// The buffer left the created-not-submitted set the command-buffer
-		// budget guards. Apple keeps counting it until it completes; the
-		// budget deliberately does not (see commandBudget), so that submitting
-		// frees the encoder-side budget for the next recording.
-		cb.releaseBudget()
-	}
+		},
+		commit: func(raw uintptr) {
+			_ = MsgSend(ID(raw), Sel("commit"))
+		},
+	}, subIdx)
 
 	// If there were no valid command buffers but we acquired a semaphore slot,
 	// release it immediately to avoid deadlock.
-	if lastIdx < 0 && q.frameSemaphore != nil {
+	if len(batch) == 0 && q.frameSemaphore != nil {
 		q.frameSemaphore <- struct{}{}
 	}
 

@@ -196,3 +196,111 @@ func TestCommandBudgetConcurrentNeverExceedsLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandBudgetUnitReleasesOnce pins the exactly-once release of a command
+// buffer's unit, whether it is the commit path (Submit) or a drop path
+// (Destroy/discard) that calls it first.
+func TestCommandBudgetUnitReleasesOnce(t *testing.T) {
+	b := newCommandBudget(2)
+	if _, ok := b.TryAcquire(); !ok {
+		t.Fatal("TryAcquire = false, want true")
+	}
+	u := newCommandBudgetUnit(b)
+	u.release()
+	u.release()
+	if got := b.Outstanding(); got != 0 {
+		t.Fatalf("Outstanding after a double release = %d, want 0", got)
+	}
+
+	// The zero unit (a command buffer of a device-free test) is a no-op.
+	var zero commandBudgetUnit
+	zero.release()
+	if got := b.Outstanding(); got != 0 {
+		t.Fatalf("Outstanding after releasing a zero unit = %d, want 0", got)
+	}
+}
+
+// TestSubmitLoopReleasesEveryUnit pins the Submit decrement: runSubmit must
+// commit every command buffer and return each unit to the budget, and it must
+// register completion tracking on the batch's last command buffer only. This
+// test goes RED if the unit release is removed from the loop — the regression
+// that leaves the budget leaking over a session.
+func TestSubmitLoopReleasesEveryUnit(t *testing.T) {
+	const buffers = 3
+	b := newCommandBudget(buffers)
+	batch := make([]budgetedSubmit, buffers)
+	for i := range batch {
+		if _, ok := b.TryAcquire(); !ok {
+			t.Fatalf("TryAcquire #%d = false, want true", i+1)
+		}
+		unit := newCommandBudgetUnit(b)
+		batch[i] = budgetedSubmit{raw: uintptr(100 + i), unit: &unit}
+	}
+
+	var commits, lastCalls int
+	var lastRaw uintptr
+	runSubmit(batch, submitHooks{
+		onLast: func(raw uintptr, subIdx uint64) {
+			lastCalls++
+			lastRaw = raw
+			if subIdx != 7 {
+				t.Errorf("onLast subIdx = %d, want 7", subIdx)
+			}
+		},
+		commit: func(raw uintptr) {
+			commits++
+		},
+	}, 7)
+
+	if commits != buffers {
+		t.Fatalf("commits = %d, want %d", commits, buffers)
+	}
+	if lastCalls != 1 || lastRaw != 102 {
+		t.Fatalf("completion registration = (%d calls, raw %d), want (1 call, raw 102)", lastCalls, lastRaw)
+	}
+	if got := b.Outstanding(); got != 0 {
+		t.Fatalf("Outstanding after Submit = %d, want 0 (a unit was not returned)", got)
+	}
+}
+
+// TestSubmitLoopSkipsEmptySlots checks that slots of the caller's list that
+// held no Metal command buffer are skipped, and that completion registration
+// follows the original last slot: a zero last slot registers nothing, as
+// Queue.Submit's loop did before the batch split.
+func TestSubmitLoopSkipsEmptySlots(t *testing.T) {
+	b := newCommandBudget(2)
+	var commits, lastCalls int
+
+	// Valid slot before a zero last slot: commit happens, no registration.
+	if _, ok := b.TryAcquire(); !ok {
+		t.Fatal("TryAcquire = false, want true")
+	}
+	unit := newCommandBudgetUnit(b)
+	runSubmit([]budgetedSubmit{{raw: 5, unit: &unit}, {}}, submitHooks{
+		onLast: func(uintptr, uint64) { lastCalls++ },
+		commit: func(uintptr) { commits++ },
+	}, 1)
+	if commits != 1 || lastCalls != 0 {
+		t.Fatalf("commit/last calls = %d/%d, want 1/0 for a zero last slot", commits, lastCalls)
+	}
+	if got := b.Outstanding(); got != 0 {
+		t.Fatalf("Outstanding = %d, want 0", got)
+	}
+
+	// Zero slot before a valid last slot: commit and registration both happen.
+	commits, lastCalls = 0, 0
+	if _, ok := b.TryAcquire(); !ok {
+		t.Fatal("TryAcquire = false, want true")
+	}
+	unit = newCommandBudgetUnit(b)
+	runSubmit([]budgetedSubmit{{}, {raw: 6, unit: &unit}}, submitHooks{
+		onLast: func(uintptr, uint64) { lastCalls++ },
+		commit: func(uintptr) { commits++ },
+	}, 1)
+	if commits != 1 || lastCalls != 1 {
+		t.Fatalf("commit/last calls = %d/%d, want 1/1", commits, lastCalls)
+	}
+	if got := b.Outstanding(); got != 0 {
+		t.Fatalf("Outstanding = %d, want 0", got)
+	}
+}
