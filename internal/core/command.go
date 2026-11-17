@@ -1056,6 +1056,14 @@ func (e *CoreCommandEncoder) SetError(err error) {
 func (e *CoreCommandEncoder) setError(err error) {
 	e.error = err
 	e.status.Store(int32(CommandEncoderStatusError))
+	// Report the deferred validation error to the device's error scope sink
+	// (error-scope reshape, stage A2): the operation fails NOW while recording,
+	// even though the error is surfaced by Finish later. The scope manager keeps
+	// the first matching error per open scope; errors raised outside any scope
+	// stay uncaptured by design.
+	if e.device != nil {
+		e.device.reportError(ErrorFilterValidation, err.Error())
+	}
 }
 
 // statusError returns an error for invalid status.
