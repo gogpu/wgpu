@@ -31,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented exception the 0.x version rules allow, stated here so nobody discovers it through a compiler error;
   the migration section says what to change.
 
+### Fixed
+
+- **A failed `Poll(PollWait)` wait is no longer swallowed.** `Device.Poll` discarded the HAL wait's error and then
+  drained the pending maps as if everything had completed, so a device-loss class failure resolved every pending map
+  and left no trace. The failure now reaches the error-scope stack as an internal error, and the poll claims no
+  completion. The lost-device class becomes first-class with the uncaptured-error idiom (P1-API-039).
+- **The software backend no longer writes depth for pipelines without a depth-stencil state.** The raster pipeline
+  defaulted depth writes on, and a pipeline with no `DepthStencil` keeps the defaults, so every 2D draw paid a
+  per-fragment write into a depth buffer nothing tested against. Depth writes now match WebGPU — enabled only by a
+  `depthWriteEnabled` depth-stencil state. Rendered output is unchanged; the per-fragment work is gone.
+
 ### Migration
 
 - `gpuErr := device.PopErrorScope()` → `gpuErr, err := device.PopErrorScope()`. An empty stack is now the spec's
