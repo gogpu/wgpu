@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"syscall/js"
+	"time"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
@@ -69,8 +71,8 @@ func main() {
 	bgl, err := device.CreateBindGroupLayout(&wgpu.BindGroupLayoutDescriptor{
 		Label: "compute-bgl",
 		Entries: []gputypes.BindGroupLayoutEntry{
-			{Binding: 0, Visibility: wgpu.ShaderStagesCompute, Buffer: &wgpu.BufferBindingLayout{Type: wgpu.BufferBindingTypeReadOnlyStorage}},
-			{Binding: 1, Visibility: wgpu.ShaderStagesCompute, Buffer: &wgpu.BufferBindingLayout{Type: wgpu.BufferBindingTypeStorage}},
+			{Binding: 0, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage}},
+			{Binding: 1, Visibility: wgpu.ShaderStageCompute, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeStorage}},
 		},
 	})
 	if err != nil {
@@ -90,12 +92,10 @@ func main() {
 
 	// Create compute pipeline
 	pipeline, err := device.CreateComputePipeline(&wgpu.ComputePipelineDescriptor{
-		Label:  "double-pipeline",
-		Layout: pipelineLayout,
-		Compute: wgpu.ProgrammableStageDescriptor{
-			Module:     shader,
-			EntryPoint: "main",
-		},
+		Label:      "double-pipeline",
+		Layout:     pipelineLayout,
+		Module:     shader,
+		EntryPoint: "main",
 	})
 	if err != nil {
 		log("FAIL: CreateComputePipeline: " + err.Error())
@@ -145,10 +145,14 @@ func main() {
 
 	// Dispatch compute
 	encoder, _ := device.CreateCommandEncoder(nil)
-	pass := encoder.BeginComputePass(nil)
+	pass, err := encoder.BeginComputePass(nil)
+	if err != nil {
+		log("FAIL: BeginComputePass: " + err.Error())
+		return
+	}
 	pass.SetPipeline(pipeline)
 	pass.SetBindGroup(0, bg, nil)
-	pass.DispatchWorkgroups(1, 1, 1)
+	pass.Dispatch(1, 1, 1)
 	pass.End()
 
 	// Copy output → readback
@@ -163,41 +167,46 @@ func main() {
 	log("OK: Compute dispatched + submitted")
 
 	// Read back results
-	err = readBuf.MapAsync(wgpu.MapModeRead, 0, uint64(len(inputData)), func(status wgpu.BufferMapAsyncStatus) {
-		if status != wgpu.BufferMapAsyncStatusSuccess {
-			log(fmt.Sprintf("FAIL: MapAsync status=%d", status))
-			return
-		}
-
-		mapped := readBuf.GetMappedRange(0, uint64(len(inputData)))
-		results := make([]float32, 4)
-		for i := range results {
-			results[i] = math.Float32frombits(binary.LittleEndian.Uint32(mapped[i*4:]))
-		}
-		readBuf.Unmap()
-
-		log(fmt.Sprintf("Results: %v", results))
-
-		// Verify: input * 2.0
-		expected := []float32{2.0, 4.0, 6.0, 8.0}
-		pass := true
-		for i := range expected {
-			if results[i] != expected[i] {
-				log(fmt.Sprintf("FAIL: results[%d] = %f, expected %f", i, results[i], expected[i]))
-				pass = false
-			}
-		}
-		if pass {
-			log("")
-			log("ALL COMPUTE TESTS PASSED — browser WebGPU compute works!")
-			log("Born ML can run inference in browser via WASM + WebGPU.")
-		}
-	})
+	pending, err := readBuf.MapAsync(wgpu.MapModeRead, 0, uint64(len(inputData)))
 	if err != nil {
 		log("FAIL: MapAsync: " + err.Error())
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := pending.Wait(ctx); err != nil {
+		log("FAIL: MapAsync wait: " + err.Error())
+		return
+	}
+	mapped, err := readBuf.MappedRange(0, uint64(len(inputData)))
+	if err != nil {
+		log("FAIL: MappedRange: " + err.Error())
+		return
+	}
+	mappedBytes := mapped.Bytes()
+	results := make([]float32, 4)
+	for i := range results {
+		results[i] = math.Float32frombits(binary.LittleEndian.Uint32(mappedBytes[i*4:]))
+	}
+	readBuf.Unmap()
 
-	// Keep alive for async callback
+	log(fmt.Sprintf("Results: %v", results))
+
+	// Verify: input * 2.0
+	expected := []float32{2.0, 4.0, 6.0, 8.0}
+	ok := true
+	for i := range expected {
+		if results[i] != expected[i] {
+			log(fmt.Sprintf("FAIL: results[%d] = %f, expected %f", i, results[i], expected[i]))
+			ok = false
+		}
+	}
+	if ok {
+		log("")
+		log("ALL COMPUTE TESTS PASSED — browser WebGPU compute works!")
+		log("Born ML can run inference in browser via WASM + WebGPU.")
+	}
+
+	// Keep alive
 	select {}
 }
