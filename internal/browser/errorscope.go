@@ -44,6 +44,37 @@ func (f ErrorFilter) String() string {
 // root package binds this value as wgpu.ErrErrorScopeEmpty (per-build identity).
 var ErrErrorScopeEmpty = errors.New("wgpu: PopErrorScope: error scope stack is empty (no matching PushErrorScope)")
 
+// Error-scope category sentinels: GPUError.Unwrap answers with these on the
+// js/wasm build, so errors.Is classifies a captured error. They live here so
+// the public Unwrap is one delegation with no logic (the public-layer gate's
+// rule); the root names bind these values.
+var (
+	// ErrValidation is the category identity of a captured validation error.
+	ErrValidation = errors.New("wgpu: validation error")
+	// ErrInternal is the category identity of a captured internal error.
+	ErrInternal = errors.New("wgpu: internal error")
+)
+
+// ErrOutOfMemory is the category identity for a captured out-of-memory error;
+// the root package binds wgpu.ErrOutOfMemory to this value (per-build identity).
+var ErrOutOfMemory = errors.New("wgpu: out of memory")
+
+// SentinelForFilter maps a filter to its category sentinel. The js/wasm
+// declaration layer has no HAL sentinel for OutOfMemory, so that category
+// answers with this package's value, which the root binds.
+func SentinelForFilter(f ErrorFilter) error {
+	if f == ErrorFilterValidation {
+		return ErrValidation
+	}
+	if f == ErrorFilterOutOfMemory {
+		return ErrOutOfMemory
+	}
+	if f == ErrorFilterInternal {
+		return ErrInternal
+	}
+	return nil
+}
+
 // FilterToJSName maps an ErrorFilter to the JS pushErrorScope filter string.
 func FilterToJSName(f ErrorFilter) (string, bool) {
 	switch f {

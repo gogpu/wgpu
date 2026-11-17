@@ -45,8 +45,10 @@ var (
 	// never returns it. It wraps ErrDeviceLost there and here.
 	ErrContextReleased = fmt.Errorf("wgpu: the native context was released with the last surface and device that used it: %w", ErrDeviceLost)
 
-	// ErrOutOfMemory is returned when the GPU is out of memory.
-	ErrOutOfMemory = errors.New("wgpu: out of memory")
+	// ErrOutOfMemory is returned when the GPU is out of memory. It binds the
+	// browser backend's own value so GPUError.Unwrap's OutOfMemory category is
+	// the same error (per-build identity; the scope reshape, issue #421).
+	ErrOutOfMemory = browser.ErrOutOfMemory
 
 	// ErrSurfaceLost is returned when the surface is lost.
 	ErrSurfaceLost = errors.New("wgpu: surface lost")
@@ -90,16 +92,16 @@ var (
 )
 
 // Error-scope sentinels (the error-scope reshape, issue #421; the js/wasm
-// context). Per-build identity by construction.
+// context). They bind the browser backend's own values, so Unwrap's answers and
+// these names are the same values (per-build identity, no copies).
 var (
 	// ErrValidation is the category identity of a captured validation GPUError.
-	ErrValidation = errors.New("wgpu: validation error")
+	ErrValidation = browser.ErrValidation
 	// ErrInternal is the category identity of a captured internal GPUError.
-	ErrInternal = errors.New("wgpu: internal error")
+	ErrInternal = browser.ErrInternal
 	// ErrErrorScopeEmpty is the PopErrorScope answer for an empty scope stack —
-	// it binds the browser backend's own sentinel (per-build identity): the JS
-	// popErrorScope promise's OperationError rejection maps to that value in
-	// internal/browser, and the root name is the same error, never a copy.
+	// the JS popErrorScope promise's OperationError rejection maps to that
+	// value in internal/browser, and the root name is the same error.
 	ErrErrorScopeEmpty = browser.ErrErrorScopeEmpty
 )
 
@@ -120,17 +122,10 @@ func (e *GPUError) Error() string { return e.Message }
 
 // Unwrap returns the sentinel that identifies the error's category, so
 // errors.Is(err, wgpu.ErrValidation) (and ErrOutOfMemory / ErrInternal) works
-// on a captured GPUError.
+// on a captured GPUError. The mapping lives in internal/browser: a public
+// method is one delegation, and identity is per build by construction.
 func (e *GPUError) Unwrap() error {
-	switch e.Type {
-	case ErrorFilterValidation:
-		return ErrValidation
-	case ErrorFilterOutOfMemory:
-		return ErrOutOfMemory
-	case ErrorFilterInternal:
-		return ErrInternal
-	}
-	return nil
+	return browser.SentinelForFilter(browser.ErrorFilter(e.Type))
 }
 
 // ErrorFilter selects which errors an error scope captures.

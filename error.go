@@ -216,13 +216,14 @@ var (
 
 // Error-scope sentinels (the error-scope reshape, issue #421). Identity is per
 // build by construction: the empty-stack sentinel binds the core value the
-// device returns on native, and the two category sentinels are produced by
-// GPUError.Unwrap only — nothing assumes one global sentinel across builds.
+// device returns, and the two category sentinels bind the core values
+// GPUError.Unwrap answers with — nothing assumes one global sentinel across
+// builds.
 var (
 	// ErrValidation is the category identity of a captured validation GPUError.
-	ErrValidation = errors.New("wgpu: validation error")
+	ErrValidation = core.ErrValidation
 	// ErrInternal is the category identity of a captured internal GPUError.
-	ErrInternal = errors.New("wgpu: internal error")
+	ErrInternal = core.ErrInternal
 	// ErrErrorScopeEmpty is the PopErrorScope answer for an empty scope stack
 	// (the WebGPU spec's OperationError case) — never a panic.
 	ErrErrorScopeEmpty = core.ErrErrorScopeEmpty
@@ -247,17 +248,10 @@ func (e *GPUError) Error() string {
 
 // Unwrap returns the sentinel that identifies the error's category, so
 // errors.Is(err, wgpu.ErrValidation) (and ErrOutOfMemory / ErrInternal) works
-// on a captured GPUError. Identity is per build by construction.
+// on a captured GPUError. The mapping lives in internal/core: a public method
+// is one delegation, and identity is per build by construction.
 func (e *GPUError) Unwrap() error {
-	switch e.Type {
-	case ErrorFilterValidation:
-		return ErrValidation
-	case ErrorFilterOutOfMemory:
-		return ErrOutOfMemory
-	case ErrorFilterInternal:
-		return ErrInternal
-	}
-	return nil
+	return core.SentinelForFilter(core.ErrorFilter(e.Type))
 }
 
 // ErrorFilter selects which errors an error scope captures.

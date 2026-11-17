@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // ErrErrorScopeEmpty is returned by PopErrorScope when no scope is on the
@@ -14,6 +16,34 @@ import (
 // can answer; identity is per build (native binds this value, rust and browser
 // declare their own), never across builds.
 var ErrErrorScopeEmpty = errors.New("wgpu: PopErrorScope: error scope stack is empty (no matching PushErrorScope)")
+
+// Error-scope category sentinels (the error-scope reshape): GPUError.Unwrap
+// answers with these, so errors.Is classifies a captured error. The public
+// root names bind these values on the builds that carry core (native and
+// rust); the browser build declares its own in internal/browser.
+var (
+	// ErrValidation is the category identity of a captured validation error.
+	ErrValidation = errors.New("wgpu: validation error")
+	// ErrInternal is the category identity of a captured internal error.
+	ErrInternal = errors.New("wgpu: internal error")
+)
+
+// SentinelForFilter maps an error filter to its category sentinel. It lives
+// here, not in the public declaration layer, so the public Unwrap is one
+// delegation with no logic (the public-layer gate's rule). OutOfMemory maps to
+// the HAL sentinel the root binds as ErrOutOfMemory.
+func SentinelForFilter(f ErrorFilter) error {
+	if f == ErrorFilterValidation {
+		return ErrValidation
+	}
+	if f == ErrorFilterOutOfMemory {
+		return hal.ErrDeviceOutOfMemory
+	}
+	if f == ErrorFilterInternal {
+		return ErrInternal
+	}
+	return nil
+}
 
 // ErrorFilter specifies which error types to capture in an error scope.
 //
