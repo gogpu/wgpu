@@ -401,6 +401,10 @@ func TestPipelineMultipleTriangles(t *testing.T) {
 	p := NewPipeline(100, 100)
 	p.Clear(0, 0, 0, 1)
 	p.SetDepthTest(true, CompareLess)
+	// Depth writes are explicit since the default became false (WebGPU: writes
+	// exist only through a depth-write-enabled state); this test needs them to
+	// keep the first-drawn nearer fragment on top.
+	p.SetDepthWrite(true)
 	p.ClearDepth(1.0)
 
 	// Draw two triangles - red in front, blue behind

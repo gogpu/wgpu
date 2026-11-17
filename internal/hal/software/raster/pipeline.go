@@ -84,8 +84,13 @@ func NewPipeline(width, height int) *Pipeline {
 			MinDepth: 0.0,
 			MaxDepth: 1.0,
 		},
-		depthTest:       false,
-		depthWrite:      true,
+		depthTest: false,
+		// No depth writes by default, matching WebGPU: depth writes exist only
+		// through a depthWriteEnabled depth-stencil state, and a pipeline with
+		// no attachment (the 2D case) must not pay a throwaway per-fragment
+		// write into a buffer nothing tests against. Rust's DepthStencilState
+		// default is depth_write_enabled = false for the same reason.
+		depthWrite:      false,
 		depthCompare:    CompareLess,
 		cullMode:        CullNone,
 		frontFace:       FrontFaceCCW,
