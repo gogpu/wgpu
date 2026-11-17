@@ -27,6 +27,12 @@ var (
 
 	initOnce sync.Once
 	errInit  error
+
+	// objcOnce guards the Objective-C runtime symbols separately from the full
+	// Metal framework init, because the symbol accessors (GetClass/Sel) may be
+	// reached before an explicit Init. See ensureObjCRuntime.
+	objcOnce sync.Once
+	objcErr  error
 )
 
 // Init initializes the Metal framework.
@@ -38,9 +44,27 @@ func Init() error {
 	return errInit
 }
 
+// ensureObjCRuntime loads libobjc and resolves its symbols, idempotently.
+//
+// GetClass and RegisterSelector may run before an explicit Init: a library
+// path or a test can touch an encoder first. With the symbols still nil, goffi
+// returns zeros silently (the FFI contract), and RegisterSelector would then
+// cache a zero selector for the whole process — every later message using that
+// selector goes out with a nil SEL, which is how the #429 CI SIGABRT happened
+// ("source must not be nil" inside newLibraryWithSource: an NSString allocation
+// had used a zero-cached "alloc"). The accessors call this first, so the
+// runtime is resolved whenever a symbol is used; an explicit Init calls it too
+// and then continues with the framework.
+func ensureObjCRuntime() error {
+	objcOnce.Do(func() {
+		objcErr = initObjCRuntime()
+	})
+	return objcErr
+}
+
 func doInit() error {
 	// Initialize Objective-C runtime first
-	if err := initObjCRuntime(); err != nil {
+	if err := ensureObjCRuntime(); err != nil {
 		return err
 	}
 

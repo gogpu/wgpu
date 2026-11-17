@@ -178,6 +178,11 @@ func prepareObjCCallInterfaces() error {
 
 // GetClass returns the Class for a given name.
 func GetClass(name string) Class {
+	// The accessor may run before Init; resolve the runtime first, or goffi
+	// calls a nil symbol and returns zeros silently.
+	if err := ensureObjCRuntime(); err != nil {
+		return 0
+	}
 	cname := append([]byte(name), 0)
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values).
 	// ptr is an unsafe.Pointer, not a uintptr, so the GC keeps cname alive and the stack copier
@@ -195,6 +200,15 @@ func RegisterSelector(name string) SEL {
 		return cached.(SEL)
 	}
 
+	// The accessor may run before Init; resolve the runtime first. A zero
+	// result means the runtime could not be resolved: do not cache it, so a
+	// later call after a successful Init can still register the selector (a
+	// zero cached here poisons the name for the whole process — the #429 CI
+	// SIGABRT).
+	if err := ensureObjCRuntime(); err != nil {
+		return 0
+	}
+
 	cname := append([]byte(name), 0)
 	// goffi API requires pointer TO pointer value (avalue is slice of pointers to argument values).
 	// ptr is an unsafe.Pointer, not a uintptr (see GetClass, P1-VK-012).
@@ -203,7 +217,11 @@ func RegisterSelector(name string) SEL {
 	args := [1]unsafe.Pointer{unsafe.Pointer(&ptr)}
 	_, _ = ffi.CallFunction(&cifSelRegister, symSelRegisterName, unsafe.Pointer(&result), args[:])
 
-	selectorCache.Store(name, result)
+	// Cache only a resolved selector: a zero stored here would keep returning
+	// zero long after the runtime became available.
+	if result != 0 {
+		selectorCache.Store(name, result)
+	}
 	return result
 }
 
