@@ -1661,7 +1661,7 @@ func (d *Device) PushErrorScope(filter core.ErrorFilter) error {
 }
 
 // PopErrorScope pops the most recently pushed error scope.
-func (d *Device) PopErrorScope() *core.GPUError {
+func (d *Device) PopErrorScope() (*core.GPUError, error) {
 	return d.core.PopErrorScope()
 }
 

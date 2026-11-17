@@ -311,8 +311,9 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 }
 
 // PopErrorScope pops the most recently pushed error scope.
-// Phase 2 — not yet implemented for browser.
-func (d *Device) PopErrorScope() *GPUError {
+// Phase 2 — not yet implemented for browser (arrives in stage A4 of the
+// error-scope reshape; until then it panics and the contract test records it).
+func (d *Device) PopErrorScope() (*GPUError, error) {
 	panic("wgpu: browser PopErrorScope not yet implemented (Phase 2)")
 }
 

@@ -88,12 +88,47 @@ var (
 	ErrDispatchIndirectBufferOverrun   = errors.New("wgpu: indirect dispatch args exceed buffer size")
 )
 
+// Error-scope sentinels (the error-scope reshape, issue #421; the js/wasm
+// context). Per-build identity by construction.
+var (
+	// ErrValidation is the category identity of a captured validation GPUError.
+	ErrValidation = errors.New("wgpu: validation error")
+	// ErrInternal is the category identity of a captured internal GPUError.
+	ErrInternal = errors.New("wgpu: internal error")
+	// ErrErrorScopeEmpty is the PopErrorScope answer for an empty scope stack —
+	// produced by the browser implementation in stage A4, never a panic.
+	ErrErrorScopeEmpty = errors.New("wgpu: PopErrorScope: error scope stack is empty (no matching PushErrorScope)")
+)
+
 // GPUError represents a GPU error.
+//
+// The Type field is unified across builds by the error-scope reshape (issue
+// #421): a public type whose fields differed by target was a trap, and the
+// js/wasm golden carries this field addition as a named hunk.
 type GPUError struct {
+	// Type identifies the category of the error.
+	Type ErrorFilter
+
+	// Message provides a human-readable description of the error.
 	Message string
 }
 
 func (e *GPUError) Error() string { return e.Message }
+
+// Unwrap returns the sentinel that identifies the error's category, so
+// errors.Is(err, wgpu.ErrValidation) (and ErrOutOfMemory / ErrInternal) works
+// on a captured GPUError.
+func (e *GPUError) Unwrap() error {
+	switch e.Type {
+	case ErrorFilterValidation:
+		return ErrValidation
+	case ErrorFilterOutOfMemory:
+		return ErrOutOfMemory
+	case ErrorFilterInternal:
+		return ErrInternal
+	}
+	return nil
+}
 
 // ErrorFilter selects which errors an error scope captures.
 type ErrorFilter int

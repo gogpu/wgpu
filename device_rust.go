@@ -302,15 +302,23 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 }
 
 // PopErrorScope pops the most recently pushed error scope.
-func (d *Device) PopErrorScope() *GPUError {
+//
+// Contract (at most one side is non-nil): a captured error, or (nil, nil) when
+// the scope captured nothing, or an error when the binding reports one (the
+// empty-stack case is delegated to wgpu-native; its error is returned wrapped,
+// the per-build limit documented in the rust contract test).
+func (d *Device) PopErrorScope() (*GPUError, error) {
 	if d == nil || d.impl == nil {
-		return nil
+		return nil, nil
 	}
-	e := d.impl.PopErrorScope()
+	e, err := d.impl.PopErrorScope()
+	if err != nil {
+		return nil, err
+	}
 	if e == nil {
-		return nil
+		return nil, nil
 	}
-	return &GPUError{Type: ErrorFilter(e.Type), Message: e.Message}
+	return &GPUError{Type: ErrorFilter(e.Type), Message: e.Message}, nil
 }
 
 // WaitIdle waits for all GPU work to complete.

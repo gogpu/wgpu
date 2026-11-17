@@ -615,7 +615,10 @@ func TestErrorScopeNestedFilters(t *testing.T) {
 
 	// Pop in reverse order. All should be nil since no errors were generated.
 	for i, name := range []string{"Internal", "OutOfMemory", "Validation"} {
-		gpuErr := device.PopErrorScope()
+		gpuErr, err := device.PopErrorScope()
+		if err != nil {
+			t.Fatalf("PopErrorScope[%d] (%s): unexpected error: %v", i, name, err)
+		}
 		if gpuErr != nil {
 			t.Errorf("PopErrorScope[%d] (%s): got non-nil error: %v", i, name, gpuErr)
 		}

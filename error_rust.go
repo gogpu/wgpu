@@ -98,6 +98,21 @@ var (
 	ErrDispatchIndirectBufferOverrun   = errors.New("wgpu: indirect dispatch args exceed buffer size")
 )
 
+// Error-scope sentinels (the error-scope reshape, issue #421). Per-build
+// identity by construction: on rust these are local values; the binding's own
+// errors are mapped into our GPUError by the device wrapper and never equal
+// these sentinels directly.
+var (
+	// ErrValidation is the category identity of a captured validation GPUError.
+	ErrValidation = errors.New("wgpu: validation error")
+	// ErrInternal is the category identity of a captured internal GPUError.
+	ErrInternal = errors.New("wgpu: internal error")
+	// ErrErrorScopeEmpty names the empty-scope-stack case. On rust the empty
+	// stack is reported by wgpu-native itself and comes back wrapped by the
+	// device wrapper — the rust contract test documents that per-build limit.
+	ErrErrorScopeEmpty = errors.New("wgpu: PopErrorScope: error scope stack is empty (no matching PushErrorScope)")
+)
+
 // GPUError represents a captured GPU error from an error scope.
 // Matches the core.GPUError structure used by the native backend.
 type GPUError struct {
@@ -111,6 +126,21 @@ type GPUError struct {
 // Error implements the error interface.
 func (e *GPUError) Error() string {
 	return fmt.Sprintf("GPU %s error: %s", e.Type, e.Message)
+}
+
+// Unwrap returns the sentinel that identifies the error's category, so
+// errors.Is(err, wgpu.ErrValidation) (and ErrOutOfMemory / ErrInternal) works
+// on a captured GPUError. Identity is per build by construction.
+func (e *GPUError) Unwrap() error {
+	switch e.Type {
+	case ErrorFilterValidation:
+		return ErrValidation
+	case ErrorFilterOutOfMemory:
+		return ErrOutOfMemory
+	case ErrorFilterInternal:
+		return ErrInternal
+	}
+	return nil
 }
 
 // ErrorFilter selects which errors an error scope captures.
