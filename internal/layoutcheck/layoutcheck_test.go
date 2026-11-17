@@ -954,15 +954,16 @@ func waiverFile(limit int, rows ...string) string {
 }
 
 // fixtureWaiverRows names the six constructs of the fixture, in source order: the two Option closures, the
-// two mutex defers and the two ranges in clone.
+// two mutex defers and the two ranges in clone. The symbols are receiver-qualified where the declaration is a
+// method (Trace, Counts and clone), matching the key the checker builds (declSymbol).
 func fixtureWaiverRows() []string {
 	return []string{
 		waiverRow(publicLayerFixturePath, "WithRecorder", "closure", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
 		waiverRow(publicLayerFixturePath, "WithFaults", "closure", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
-		waiverRow(publicLayerFixturePath, "Trace", "defer", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
-		waiverRow(publicLayerFixturePath, "Counts", "defer", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
-		waiverRow(publicLayerFixturePath, "clone", "range", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
-		waiverRow(publicLayerFixturePath, "clone", "range#2", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "(*Recorder).Trace", "defer", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "(*Recorder).Counts", "defer", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "(*Trace).clone", "range", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
+		waiverRow(publicLayerFixturePath, "(*Trace).clone", "range#2", publicLayerAllowReason, "wgpu", "P2-API-032", "permanent"),
 	}
 }
 
@@ -1145,18 +1146,125 @@ func TestPublicLayerWaiverLineShiftKeepsEntry(t *testing.T) {
 // waiver does not exempt a range on the same symbol, and is itself reported unused.
 func TestPublicLayerWaiverDifferentConstructNotExempted(t *testing.T) {
 	rows := fixtureWaiverRows()
-	rows = append(rows, waiverRow(publicLayerFixturePath, "Extra", "switch", "wrong kind", "wgpu", "P2-API-032", "permanent"))
+	rows = append(rows, waiverRow(publicLayerFixturePath, "(*Trace).Extra", "switch", "wrong kind", "wgpu", "P2-API-032", "permanent"))
 	root := writeTree(t, map[string]string{
 		publicLayerFixturePath:                  publicLayerFixture() + publicLayerExtra(),
 		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
 	})
 	rep := &Report{Summary: map[string]int{}}
 	checkPublicLayer(rep, root, true)
-	if !failureContains(rep.Failures, "range loop in Extra") {
+	if !failureContains(rep.Failures, "range loop in (*Trace).Extra") {
 		t.Fatalf("a switch waiver exempted a range: %v", rep.Failures)
 	}
 	if !failureContains(rep.Failures, publicLayerUnusedCheck) {
 		t.Fatalf("the wrong-kind waiver was not reported unused: %v", rep.Failures)
+	}
+}
+
+// TestPublicLayerWaiverSameNameDifferentReceiver is the Amendment-3 P1 regression (consolidated deep review).
+// descriptor.go declares eighteen toHAL methods, and the key's symbol used to be the bare method name, so all
+// of them shared one key space and one type's reviewed waiver exempted a construct inserted in another. The
+// fixture plants M on two receivers: a key on (*A).M must exempt only A's construct, and the bare name M must
+// exempt neither, because no declaration's symbol is the bare name any more.
+func TestPublicLayerWaiverSameNameDifferentReceiver(t *testing.T) {
+	const fixture = "package wgpu\n\n" +
+		"type A struct{ N []int }\n\n" +
+		"type B struct{ N []int }\n\n" +
+		"func (a *A) M() int {\n" +
+		"\tfor range a.N {\n" +
+		"\t\treturn 1\n" +
+		"\t}\n" +
+		"\treturn 0\n" +
+		"}\n\n" +
+		"func (b *B) M() int {\n" +
+		"\tfor range b.N {\n" +
+		"\t\treturn 1\n" +
+		"\t}\n" +
+		"\treturn 0\n" +
+		"}\n"
+	aLine := linesWith(t, fixture, "for range a.N")[0]
+	bLine := linesWith(t, fixture, "for range b.N")[0]
+
+	sites := func(findings []Finding) []Finding {
+		out := make([]Finding, 0, len(findings))
+		for _, f := range findings {
+			if f.Check == publicLayerCheck {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+
+	t.Run("a qualified key exempts only its receiver", func(t *testing.T) {
+		rows := []string{waiverRow("same_receiver.go", "(*A).M", "range",
+			"the A receiver's projection", "wgpu", "P2-API-032", "permanent")}
+		root := writeTree(t, map[string]string{
+			"same_receiver.go":                      fixture,
+			"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
+		})
+		rep := &Report{Summary: map[string]int{}}
+		checkPublicLayer(rep, root, true)
+		got := sites(rep.Failures)
+		if len(got) != 1 || got[0].Line != bLine {
+			t.Fatalf("a key on (*A).M reports %v, want only (*B).M's range at line %d (A's is line %d)", got, bLine, aLine)
+		}
+	})
+
+	t.Run("the bare method name is no key", func(t *testing.T) {
+		rows := []string{waiverRow("same_receiver.go", "M", "range",
+			"the old bare-name shape", "wgpu", "P2-API-032", "permanent")}
+		root := writeTree(t, map[string]string{
+			"same_receiver.go":                      fixture,
+			"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
+		})
+		rep := &Report{Summary: map[string]int{}}
+		checkPublicLayer(rep, root, true)
+		if got := sites(rep.Failures); len(got) != 2 {
+			t.Fatalf("a bare-name key exempted a method: %d site findings, want both receivers: %v", len(got), got)
+		}
+		if !failureContains(rep.Failures, publicLayerUnusedCheck) {
+			t.Fatalf("the bare-name waiver was not reported unused: %v", rep.Failures)
+		}
+	})
+}
+
+// TestPublicLayerWaiverRepeatedInit pins the documented ordinal scheme for the one declaration name that may
+// legally repeat in a file: two func init() bodies each carry a range. A waiver on the first body's construct
+// (init, range) must leave the second body's construct (init, range#2) reported — the per-file, per-kind
+// ordinal in AST order is what keeps two init bodies from sharing one slot.
+func TestPublicLayerWaiverRepeatedInit(t *testing.T) {
+	const fixture = "package wgpu\n\n" +
+		"var firstPad = 0\n\n" +
+		"func init() {\n" +
+		"\tfor range []int{1} {\n" +
+		"\t\tfirstPad = 1\n" +
+		"\t}\n" +
+		"}\n\n" +
+		"var secondPad = 0\n\n" +
+		"func init() {\n" +
+		"\tfor range []int{2} {\n" +
+		"\t\tsecondPad = 2\n" +
+		"\t}\n" +
+		"}\n"
+	first := linesWith(t, fixture, "for range []int{1}")[0]
+	second := linesWith(t, fixture, "for range []int{2}")[0]
+	rows := []string{waiverRow("two_inits.go", "init", "range",
+		"the first init's registration loop", "wgpu", "P2-API-032", "permanent")}
+	root := writeTree(t, map[string]string{
+		"two_inits.go":                          fixture,
+		"internal/layoutcheck/" + allowlistFile: waiverFile(len(rows), rows...),
+	})
+	rep := &Report{Summary: map[string]int{}}
+	checkPublicLayer(rep, root, true)
+	var got []Finding
+	for _, f := range rep.Failures {
+		if f.Check == publicLayerCheck {
+			got = append(got, f)
+		}
+	}
+	if len(got) != 1 || got[0].Line != second {
+		t.Fatalf("a waiver on the first init reports %v, want only the second init's range at line %d (first is %d)",
+			got, second, first)
 	}
 }
 
@@ -1268,7 +1376,7 @@ func (t *Trace) each(f func(Pass)) {
 		messages = append(messages, f.Message)
 	}
 	joined := strings.Join(messages, "\n")
-	for _, want := range []string{"loop in peek", "closure in each"} {
+	for _, want := range []string{"loop in (*Trace).peek", "closure in (*Trace).each"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("the findings %q do not name %q", joined, want)
 		}

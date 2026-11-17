@@ -6,10 +6,16 @@ name: Waiver audit
 #
 # It is its own file, not a job in ci.yml, because a workflow-level `schedule` trigger would run every job in
 # ci.yml nightly, and the existing jobs are deliberately left untouched. The scheduled run only needs the
-# expiry check; the pull_request run adds the growth check against the merge-base.
+# expiry check; the pull_request run adds the growth check against the merge-base; and the push run on the
+# default branch adds it against the previous head, which closes the admin-bypass/merge path: a merge that
+# bypasses the required check (or whose PR run never saw the final tree) still lands on main, and this run
+# diffs exactly what that push added.
 
 on:
   pull_request:
+    branches:
+      - main
+  push:
     branches:
       - main
   schedule:
@@ -49,3 +55,16 @@ jobs:
       run: |
         base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
         "$RUNNER_TEMP/waiveraudit" growth -file internal/layoutcheck/publiclayer_allow.txt -base "$base"
+
+    # The path the PR-only check cannot see: an admin merge (ruleset bypass) or a merge whose PR run never
+    # saw the final tree. github.event.before is the branch's previous head, so base..HEAD is exactly what
+    # this push added. A branch-creation push has no previous head (all zeroes) and nothing to diff.
+    - name: Waiver growth against the pushed-from head
+      if: github.event_name == 'push'
+      run: |
+        before="${{ github.event.before }}"
+        if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+          echo "no previous head on this branch: nothing to diff"
+          exit 0
+        fi
+        "$RUNNER_TEMP/waiveraudit" growth -file internal/layoutcheck/publiclayer_allow.txt -base "$before"

@@ -219,8 +219,9 @@ const allowlistFile = "publiclayer_allow.txt"
 // CI annotation opens the file that exists.
 const allowlistRel = dirInternal + "/layoutcheck/" + allowlistFile
 
-// allowEntry is one parsed waiver row. The key is path + symbol + construct; the other columns carry the
-// review evidence the gate prints and the CI audit reads (owner, card, expires).
+// allowEntry is one parsed waiver row. The key is path + symbol + construct, where symbol is the enclosing
+// declaration (receiver-qualified for a method, see declSymbol); the other columns carry the review evidence
+// the gate prints and the CI audit reads (owner, card, expires).
 type allowEntry struct {
 	path      string
 	symbol    string
@@ -238,10 +239,11 @@ type allowlist struct {
 	hasLimit bool
 }
 
-// allowKey builds the waiver key: path + symbol + construct. The LINE is deliberately not part of it: an edit
-// above a flagged construct shifts its line, and a line-keyed entry would then either go stale undetected or
-// exempt whatever lands on the old line (PRACTICES-CONSENSUS O1; eco-architect F2). The checker prints the
-// live file:line as evidence in its report instead.
+// allowKey builds the waiver key: path + symbol + construct, the symbol being the enclosing declaration as
+// declSymbol renders it. The LINE is deliberately not part of it: an edit above a flagged construct shifts its
+// line, and a line-keyed entry would then either go stale undetected or exempt whatever lands on the old line
+// (PRACTICES-CONSENSUS O1; eco-architect F2). The checker prints the live file:line as evidence in its report
+// instead.
 func allowKey(path, symbol, construct string) string {
 	return path + "\t" + symbol + "\t" + construct
 }
@@ -420,10 +422,13 @@ func validExpires(s string) bool {
 // F3). The rule is a note until the claims phase turns final, when it fails (§15.2).
 //
 // A waiver names one construct, never a site or a file. Its key is `path<TAB>symbol<TAB>construct[#n]`: the
-// enclosing declaration plus the construct kind, with an ordinal when one symbol carries several constructs
-// of the same kind. The line is not the key, so an unrelated edit above a construct does not invalidate the
-// review, and a different construct landing on the old line is not exempted (PRACTICES-CONSENSUS O1;
-// eco-architect F2).
+// enclosing declaration — receiver-qualified for a method (`(*T).M` for a pointer receiver, `(T).M` for a
+// value one), the bare name for a package-level function and init — plus the construct kind, with an ordinal
+// when one symbol carries several constructs of the same kind. The receiver is part of the symbol because a
+// public package holds many methods of one name on different types (descriptor.go's eighteen toHAL), and a
+// bare method name would let one type's waiver exempt another's construct (Amendment 3). The line is not the
+// key, so an unrelated edit above a construct does not invalidate the review, and a different construct
+// landing on the old line is not exempted (PRACTICES-CONSENSUS O1; eco-architect F2).
 //
 // The waiver list is a reviewed set, not a no-go area. An entry whose key matches no finding is a failure in
 // every phase — the "consumed set" F1 asked for and F4's "every entry fires" in one mechanism — and the list
@@ -588,21 +593,26 @@ func packageMapSymbol(vs *ast.ValueSpec) string {
 	return ""
 }
 
-// collectLayerFunc collects every construct of a public method that is logic rather than a projection.
+// collectLayerFunc collects every construct of a public method that is logic rather than a projection. The
+// waiver symbol is the enclosing declaration (declSymbol), receiver-qualified for a method: descriptor.go
+// declares eighteen toHAL methods, so a bare method name would share one key space across all of them and one
+// type's reviewed waiver would exempt a construct inserted in another (Amendment 3, the consolidated deep
+// review's P1).
 func collectLayerFunc(rel string, d *ast.FuncDecl, fset *token.FileSet, counters map[string]int) []layerFinding {
 	if d.Body == nil {
 		return nil
 	}
+	symbol := declSymbol(d)
 	var out []layerFinding
 	ast.Inspect(d.Body, func(n ast.Node) bool {
-		kind, msg := layerViolation(n, d.Name.Name)
+		kind, msg := layerViolation(n, symbol)
 		if kind == "" {
 			return true
 		}
 		out = append(out, layerFinding{
 			rel:     rel,
 			line:    fset.Position(n.Pos()).Line,
-			key:     countingKey(counters, rel, d.Name.Name, kind),
+			key:     countingKey(counters, rel, symbol, kind),
 			message: msg,
 		})
 		return true
@@ -610,8 +620,60 @@ func collectLayerFunc(rel string, d *ast.FuncDecl, fset *token.FileSet, counters
 	return out
 }
 
+// declSymbol names a declaration for the waiver key: receiver-qualified for a method — `(*T).M` for a
+// pointer receiver, `(T).M` for a value one — and the bare name for a package-level function and for init.
+// The receiver is part of the identity because a public package declares many methods of the same name on
+// different types (descriptor.go's eighteen toHAL): a bare method name would let one type's waiver exempt a
+// construct inserted in another (Amendment 3; PRACTICES-CONSENSUS O1's symbol, corrected, not reinterpreted).
+// init may legally repeat in one file; countingKey's per-file ordinal, assigned per construct kind in AST
+// order, keeps two init bodies apart.
+func declSymbol(d *ast.FuncDecl) string {
+	if d.Recv == nil || len(d.Recv.List) == 0 {
+		return d.Name.Name
+	}
+	return receiverPrefix(d.Recv.List[0].Type) + "." + d.Name.Name
+}
+
+// receiverPrefix renders a method receiver's type as the key prefix: `(*T)` for a pointer receiver and `(T)`
+// for a value receiver. Parentheses around the whole receiver are unwrapped first, so `(*T)` and `*T` agree;
+// the star is read before the type name is unwrapped, so the pointer and value forms stay distinct keys.
+func receiverPrefix(expr ast.Expr) string {
+	for {
+		p, ok := expr.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		expr = p.X
+	}
+	if _, isPtr := expr.(*ast.StarExpr); isPtr {
+		return "(*" + receiverTypeName(expr) + ")"
+	}
+	return "(" + receiverTypeName(expr) + ")"
+}
+
+// receiverTypeName returns a receiver's bare type name, unwrapping a leading star and parentheses: `T`,
+// `*T`, `(T)` and `(*T)` all yield `T`, and an instantiated generic receiver yields its base type name. Go
+// admits only these receiver forms (a defined type of the same package), so the switch is exhaustive.
+func receiverTypeName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.StarExpr:
+		return receiverTypeName(t.X)
+	case *ast.ParenExpr:
+		return receiverTypeName(t.X)
+	case *ast.Ident:
+		return t.Name
+	case *ast.IndexExpr: // T[P]
+		return receiverTypeName(t.X)
+	case *ast.IndexListExpr: // T[P1, P2]
+		return receiverTypeName(t.X)
+	}
+	return ""
+}
+
 // countingKey assigns the waiver key: path + symbol + construct, with `#2`, `#3`… when the same symbol
-// carries several flagged constructs of the same kind, numbered in AST order.
+// carries several flagged constructs of the same kind. The counter lives per file (collectPublicLayerFile),
+// so ordinals are assigned per file and per construct kind in AST order; the symbol is the enclosing
+// declaration from declSymbol.
 func countingKey(counters map[string]int, path, symbol, construct string) string {
 	id := allowKey(path, symbol, construct)
 	counters[id]++
@@ -631,28 +693,30 @@ const publicLayerAllowCheck = "public-layer-allow"
 const publicLayerUnusedCheck = "public-layer-unused"
 
 // layerViolation describes the construct if it may not appear in a public method, and returns the empty kind
-// otherwise. The kind is the waiver construct identifier; the second return is the finding text.
-func layerViolation(n ast.Node, funcName string) (kind, msg string) {
+// otherwise. The kind is the waiver construct identifier; the second return is the finding text, which names
+// the enclosing declaration (symbol, receiver-qualified for a method) so the reader sees which type's method
+// was flagged.
+func layerViolation(n ast.Node, symbol string) (kind, msg string) {
 	switch node := n.(type) {
 	case *ast.ForStmt:
-		return "for", fmt.Sprintf("loop in %s; a public method is one delegation, no logic", funcName)
+		return "for", fmt.Sprintf("loop in %s; a public method is one delegation, no logic", symbol)
 	case *ast.RangeStmt:
-		return "range", fmt.Sprintf("range loop in %s; a public method is one delegation, no logic", funcName)
+		return "range", fmt.Sprintf("range loop in %s; a public method is one delegation, no logic", symbol)
 	case *ast.SwitchStmt:
-		return "switch", fmt.Sprintf("switch in %s; a public method is one delegation, no logic", funcName)
+		return "switch", fmt.Sprintf("switch in %s; a public method is one delegation, no logic", symbol)
 	case *ast.TypeSwitchStmt:
-		return "typeswitch", fmt.Sprintf("type switch in %s; a public method is one delegation, no logic", funcName)
+		return "typeswitch", fmt.Sprintf("type switch in %s; a public method is one delegation, no logic", symbol)
 	case *ast.SelectStmt:
-		return "select", fmt.Sprintf("select in %s; a public method is one delegation, no logic", funcName)
+		return "select", fmt.Sprintf("select in %s; a public method is one delegation, no logic", symbol)
 	case *ast.DeferStmt:
-		return "defer", fmt.Sprintf("defer in %s; cleanup registration belongs to internal/**", funcName)
+		return "defer", fmt.Sprintf("defer in %s; cleanup registration belongs to internal/**", symbol)
 	case *ast.GoStmt:
-		return "go", fmt.Sprintf("go statement in %s; concurrency belongs to internal/**", funcName)
+		return "go", fmt.Sprintf("go statement in %s; concurrency belongs to internal/**", symbol)
 	case *ast.FuncLit:
-		return "closure", fmt.Sprintf("closure in %s; a public method is one delegation, no logic", funcName)
+		return "closure", fmt.Sprintf("closure in %s; a public method is one delegation, no logic", symbol)
 	case *ast.CompositeLit:
 		if _, isMap := node.Type.(*ast.MapType); isMap {
-			return "mapliteral", fmt.Sprintf("map literal in %s; maps and registries belong to internal/**", funcName)
+			return "mapliteral", fmt.Sprintf("map literal in %s; maps and registries belong to internal/**", symbol)
 		}
 	}
 	return "", ""

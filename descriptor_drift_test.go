@@ -39,10 +39,13 @@ package wgpu
 //  6. A type already on the current recursion path is a leaf (cycle guard).
 //  7. Interfaces and function types are leaves.
 //
-// The same generic check runs in the reverse direction over invertDrift, so
-// the test-only reverse conversions in descriptor_roundtrip_test.go are
-// enumerated too: a reverse conversion that forgets a mirror leaf fails here
-// exactly as the forward conversion does.
+// The same generic check runs in the reverse direction over invertDrift, so the test-only reverse
+// conversions in descriptor_roundtrip_test.go are enumerated too. This table proves COVERAGE, in both
+// directions: every leaf is mapped or ignored with a justification, and a leaf added later has no row and
+// fails here. It does not prove VALUES: a conversion that leaves a mapped field unassigned still has its row
+// and passes here. Values are proved by the roundtrip property in descriptor_fuzz_test.go — a fromHAL that
+// forgets a field fails that roundtrip, not this table — and the concrete per-field values are pinned by
+// descriptor_test.go (ImageCopyTexture Origin included).
 //
 // This test classifies paths; it says nothing about VALUE semantics. nil vs
 // empty identity is decided by the fuzz comparator in
@@ -515,7 +518,9 @@ var imageCopyTextureDrift = DriftSpec{
 
 // TestDescriptorProjection checks every pair in both directions. The reverse
 // direction enumerates the test-only fromHAL conversion (descriptor_roundtrip_test.go),
-// so a reverse conversion cannot silently skip a mirror leaf.
+// so a mirror leaf no reverse conversion maps has no row and fails here. That is
+// coverage, not values: a field the conversion merely forgets to assign passes
+// this table and is caught by the roundtrip property.
 func TestDescriptorProjection(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

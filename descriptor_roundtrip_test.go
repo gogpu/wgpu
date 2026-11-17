@@ -11,9 +11,12 @@ package wgpu
 // idempotent in the normalized domain where it normalizes (NORMALIZING pairs).
 //
 // They are enumerated by the projection test: TestDescriptorProjection runs
-// AssertNoDrift[hal.X, wgpu.X] over invertDrift(spec), so every mirror leaf
-// must be mapped or ignored with a justification. A mirror field added later
-// fails there until the reverse conversion and its table follow.
+// AssertNoDrift[hal.X, wgpu.X] over invertDrift(spec), so every mirror leaf is
+// mapped or ignored with a justification and a mirror field added later has no
+// row until the table follows. That enumeration is COVERAGE. The VALUES are what
+// the fuzz targets prove: a reverse conversion that forgets to assign a mapped
+// field passes the table and fails the roundtrip. The concrete values are pinned
+// by descriptor_test.go (ImageCopyTexture Origin included).
 //
 // Identity semantics. This comparator is deliberately STRICTER than
 // Kubernetes' apiequality.Semantic.DeepEqual, which treats nil and empty

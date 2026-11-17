@@ -24,7 +24,10 @@ package wgpu
 // both sides. The adapters below say, per pair, which handle is dropped and why
 // the property still holds on what remains; the projection test in
 // descriptor_drift_test.go is the coverage proof for the fields no fuzz value
-// can reach.
+// can reach — it proves every leaf is mapped or justified, not that a
+// conversion assigns it. Values are the property below: a fromHAL that forgets
+// a field fails the roundtrip rather than the table. The concrete values are
+// pinned by descriptor_test.go (ImageCopyTexture Origin included).
 
 import (
 	"fmt"
