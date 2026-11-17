@@ -123,18 +123,18 @@ func TestBufferReleaseTrackesReleasedFlag(t *testing.T) {
 		t.Fatalf("CreateBuffer: %v", err)
 	}
 
-	if buf.TestReleased() {
+	if wgpu.BufferTestReleased(buf) {
 		t.Error("buffer should not be released before Release()")
 	}
 
 	buf.Release()
-	if !buf.TestReleased() {
+	if !wgpu.BufferTestReleased(buf) {
 		t.Error("buffer should be released after Release()")
 	}
 
 	// Double release should not change state or panic.
 	buf.Release()
-	if !buf.TestReleased() {
+	if !wgpu.BufferTestReleased(buf) {
 		t.Error("buffer should remain released after double Release()")
 	}
 }
@@ -486,7 +486,7 @@ func TestBindGroupWithBufferResource(t *testing.T) {
 	}
 	defer bg.Release()
 
-	if bg.TestBindGroupReleased() {
+	if wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should not be released immediately after creation")
 	}
 }
@@ -514,13 +514,13 @@ func TestBindGroupReleaseTrackesReleasedFlag(t *testing.T) {
 		t.Fatalf("CreateBindGroup: %v", err)
 	}
 
-	if bg.TestBindGroupReleased() {
+	if wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should not be released before Release()")
 	}
 
 	bg.Release()
 
-	if !bg.TestBindGroupReleased() {
+	if !wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should be released after Release()")
 	}
 

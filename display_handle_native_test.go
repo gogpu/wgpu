@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/software"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/software"
 )
 
 func TestCreateInstanceRejectsNilDisplay(t *testing.T) {

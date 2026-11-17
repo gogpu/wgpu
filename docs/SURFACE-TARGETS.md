@@ -45,10 +45,13 @@ and [core surface creation](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289
 
 ### Exported integration seams
 
-These packages are advanced implementation surfaces, but they are importable Go
-packages and therefore still require an explicit parity rationale. Rust's
-corresponding layers are the ordered `instance_per_backend` / `surface_per_backend`
-maps in core and the [`wgpu-hal::Instance::create_surface`](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289b6e1a38416a6ae1461a22e81/wgpu-hal/src/lib.rs#L648-L662)
+These are advanced implementation surfaces, internal to the module since ADR-070
+(v0.35.0), so they keep an explicit parity rationale for contributors. The public
+interop surface is the thin `hal` package — `BackendKind` and `Handles` behind the
+`Instance.HAL()`, `Adapter.HAL()`, `Device.HAL()` and `Surface.HAL()` accessors.
+Rust's corresponding layers are the ordered `instance_per_backend` /
+`surface_per_backend` maps in core and the
+[`wgpu-hal::Instance::create_surface`](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289b6e1a38416a6ae1461a22e81/wgpu-hal/src/lib.rs#L648-L662)
 backend trait.
 
 | Go symbol | Rust analogue or explicit Go adaptation | Ownership and error contract |
@@ -67,13 +70,13 @@ backend trait.
 | `hal.SurfaceTargetKind.String` | `Debug` formatting of raw-window-handle variants | Stable diagnostics only; unknown numeric values remain printable and unsupported |
 | `hal.PixelReader` | Go optional-capability adaptation; no `wgpu-hal` surface method analogue | Implementations return a caller-owned, tightly packed top-left RGBA8 snapshot; adding the capability does not widen the mandatory `hal.Surface` interface |
 | `hal.Instance.CreateSurface` | `wgpu_hal::Instance::create_surface` | Signature intentionally changes from two unlabelled integers to one typed borrowed target; platform failures remain backend errors |
-| `hal/dx12.(*Instance).CreateSurface` | Rust DX12 Win32 surface creation | Accepts only `WindowsHWND`; stores a borrowed HWND and rejects other kinds first |
-| `hal/gles.(*Instance).CreateSurface` | Rust GLES WGL/EGL surface creation | Windows accepts `WindowsHWND`; Linux accepts Xlib or Wayland and explicitly selects the matching EGL display; backend errors remain wrapped |
-| `hal/metal.(*Instance).CreateSurface` | Rust Metal layer creation | Accepts only `MetalLayer`, validates nonzero, then retains/releases the Objective-C layer internally |
-| `hal/noop.(*Instance).CreateSurface` | Go test-backend adaptation | Performs no native access and accepts the target without ownership; not a platform support claim |
-| `hal/software.(*Instance).CreateSurface` | Go CPU-presenter adaptation | Accepts only headless or host-appropriate kinds, stores the kind with the handles, and rejects foreign kinds before deferred blit setup |
-| `hal/vulkan.Backend.CreateInstance` | Rust Vulkan instance creation enables the loader-supported WSI set rather than selecting one ABI from session state | Enumerates extensions before instance creation, preserves deterministic candidate order, and returns loader/enumeration failures without acquiring window ownership |
-| `hal/vulkan.(*Instance).CreateSurface` | Rust Vulkan's [raw-handle match](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289b6e1a38416a6ae1461a22e81/wgpu-hal/src/vulkan/instance.rs#L879-L922) | Accepts only kinds supported by the build target; Android passes `ANativeWindow*` directly and ignores display; Vulkan errors remain wrapped |
+| `internal/hal/dx12.(*Instance).CreateSurface` | Rust DX12 Win32 surface creation | Accepts only `WindowsHWND`; stores a borrowed HWND and rejects other kinds first |
+| `internal/hal/gles.(*Instance).CreateSurface` | Rust GLES WGL/EGL surface creation | Windows accepts `WindowsHWND`; Linux accepts Xlib or Wayland and explicitly selects the matching EGL display; backend errors remain wrapped |
+| `internal/hal/metal.(*Instance).CreateSurface` | Rust Metal layer creation | Accepts only `MetalLayer`, validates nonzero, then retains/releases the Objective-C layer internally |
+| `internal/hal/noop.(*Instance).CreateSurface` | Go test-backend adaptation | Performs no native access and accepts the target without ownership; not a platform support claim |
+| `internal/hal/software.(*Instance).CreateSurface` | Go CPU-presenter adaptation | Accepts only headless or host-appropriate kinds, stores the kind with the handles, and rejects foreign kinds before deferred blit setup |
+| `internal/hal/vulkan.Backend.CreateInstance` | Rust Vulkan instance creation enables the loader-supported WSI set rather than selecting one ABI from session state | Enumerates extensions before instance creation, preserves deterministic candidate order, and returns loader/enumeration failures without acquiring window ownership |
+| `internal/hal/vulkan.(*Instance).CreateSurface` | Rust Vulkan's [raw-handle match](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289b6e1a38416a6ae1461a22e81/wgpu-hal/src/vulkan/instance.rs#L879-L922) | Accepts only kinds supported by the build target; Android passes `ANativeWindow*` directly and ignores display; Vulkan errors remain wrapped |
 | `core.HALInstanceEntry` and fields `Backend`, `Instance` | One ordered entry in Rust core's `instance_per_backend` | Core retains ownership; snapshots handed upward borrow instances until core destruction |
 | `core.(*Instance).HALInstanceEntries` | Ordered iteration over `instance_per_backend` | Returns a copied slice in backend-priority order; copying transfers no HAL ownership |
 | `core.(*Instance).RequestAdapterWithSurfaces` | Adapter selection against Rust core's backend-keyed `surface_per_backend` | Borrows the map for the call, gives each adapter only its same-backend surface, and falls back to ordinary selection only for an empty map |
@@ -136,7 +139,6 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	_ "github.com/gogpu/wgpu/hal/allbackends"
 )
 
 func capture() ([]byte, error) {

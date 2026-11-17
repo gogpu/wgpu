@@ -5,18 +5,36 @@ package wgpu
 import (
 	"errors"
 	"fmt"
+
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // Public API sentinel errors.
 var (
-	// ErrReleased is returned when operating on a released resource.
-	ErrReleased = errors.New("wgpu: resource already released")
+	// ErrReleased is returned when operating on a released resource. The value
+	// is internal/core's on every build: the extraction children return it too,
+	// and the same value on both sides is what keeps errors.Is working through
+	// the public API (§15.1). This build reaches it through the same untagged
+	// core declaration the native and rust builds use, and internal/resource's
+	// browser sentinel binds it, so one value serves the whole browser API.
+	ErrReleased = core.ErrReleased
 
-	// ErrNoAdapters is returned when no GPU adapters are found.
-	ErrNoAdapters = errors.New("wgpu: no GPU adapters available")
+	// Adapter-selection sentinels (ADR-083 §2.2). internal/core declares no
+	// adapter-selection sentinels in the js/wasm build (its released sentinel,
+	// error_released.go, is untagged and shared), and the browser's WebGPU
+	// reports its own errors, so they are declared here with the messages of the
+	// native build. This build never returns them; they exist for source
+	// compatibility.
+	//
+	// ErrNoBackendRegistered: the requested backend mask selects no registered
+	// backend (compiled out or excluded).
+	ErrNoBackendRegistered = errors.New("wgpu: no backend registered for the requested mask (compiled out or excluded)")
 
-	// ErrNoBackends is returned when no backends are registered.
-	ErrNoBackends = errors.New("wgpu: no backends registered (import a backend package)")
+	// ErrNoHardwareAdapter: backends are registered but none produced an adapter.
+	ErrNoHardwareAdapter = errors.New("wgpu: no hardware adapter available")
+
+	// ErrNoFallbackAdapter: ForceFallbackAdapter requested, no CPU adapter exists.
+	ErrNoFallbackAdapter = errors.New("wgpu: no fallback adapter available")
 
 	// ErrDeviceLost is returned when the GPU device is lost.
 	ErrDeviceLost = errors.New("wgpu: device lost")

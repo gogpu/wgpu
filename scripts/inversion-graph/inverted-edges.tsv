@@ -2,11 +2,14 @@
 # The four columns match the graph format; the last one names the field that goes.
 # Removing these from edges-all.tsv must make the native bucket acyclic — that is the
 # whole point of the plan, and graph.sh checks it in scc-after.txt.
+# Context = the field site's own build tag. Inverted rows are claims-only: the subset predicate
+# enforces the inversion (README § claims.tsv; ADR-070 §15.2). A target row may never legitimize
+# an edge an inverted row forbids.
 # src	dst	context	class	reason
-internal/queue	internal/device	all	N	queue_native.go:27 device *Device -> deviceHost interface
-internal/encoder	internal/device	all	N	encoder_native.go:22, :1089 device *Device -> deviceHost interface
-internal/resource	internal/device	all	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206 -> deviceHost
-internal/pipeline	internal/device	all	N	pipeline_native.go:62,167 (dead fields, deleted); shader_native.go:18 -> deviceHost
-internal/surface	internal/device	all	N	surface_native.go:47 -> deviceHost with HALQueue()
-internal/surface	internal/instance	all	N	surface_native.go:46 -> instanceHost interface
-internal/device	internal/instance	all	N	device_native.go:25 -> instanceHost interface (the cut is this side, not instance -> device)
+internal/queue	internal/device	native	N	queue_native.go:27 device *Device -> deviceHost interface
+internal/encoder	internal/device	native+rust	N	2026-11-16 (S11 fix round): the encoder holds no root device: it reaches the device through the DeviceHost seam (internal/encoder/seams.go:34; CommandEncoder.device, internal/encoder/encoder_native.go:24; the command buffer's device, encoder_native.go:1064). The root adapter encoder_host_native.go is deleted at S11: internal/device.Device satisfies the seam directly (Recordings device_native.go:184, EncoderPool :176, NewStencilUpload :1513, Features :192) and is assigned at encoder.CommandEncoderInit{Device: d} (device_native.go:1477, :1495), so the destination imports no internal/device
+internal/resource	internal/device	native+rust	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206 -> deviceHost
+internal/pipeline	internal/device	native+rust	N	2026-11-16: the native RenderPipeline.device field is the core.DeviceView seam (internal/pipeline/pipeline_native.go:30); the native ComputePipeline and the two rust device fields are deleted, so the destination imports no internal/device
+internal/surface	internal/device	all	N	2026-11-16: the implementation's device field is the DeviceHost seam (internal/surface/seams_native.go: core.DeviceView + HALQueue); it holds no internal/device reference, which the root declaration layer keeps until S11
+internal/surface	internal/instance	native	N	2026-11-16: the implementation holds no instance reference (ADR-070 S10 ruling A dissolved); the root declaration layer owns the instance pointer and passes the HAL instance as a parameter
+internal/device	internal/instance	native+rust	N	2026-11-16: the device holds no instance reference. The seam is declared by the child (internal/device/seams_native.go InstanceHost over *surface.Surface; seams_rust.go InstanceR) and the root host adapts at the call boundary (device_instance_host_native.go), so the destination imports no internal/instance

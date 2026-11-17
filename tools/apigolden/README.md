@@ -6,8 +6,9 @@ baseline is a reviewed delta, not a surprise at v1.0.
 
 ## What it records
 
-* **Packages**: the module's importable packages — root, `hal/**` (bindings included), `core/**` and `wgputest`.
-  Excluded: `internal/**`, `cmd/**`, `examples/**`, `tmp/**`, `tools/**`.
+* **Packages**: the module's importable packages. Since the v0.35.0 internal-layout change (ADR-070) that set is
+  three packages — the root module, the thin `hal` (declarations only) and `wgputest`. Excluded: `internal/**` (which
+  now holds the former `core/` and backend `hal/**` packages), `cmd/**`, `examples/**`, `tmp/**`, `tools/**`.
 * **Per exported identifier**, sorted and stable:
   * constants — `const Name Type = exact-value`;
   * variables — `var Name Type`;
@@ -58,28 +59,42 @@ context has its own floor, and a context that is not listed is refused:
 
 | Context | Packages | Identifiers |
 |---|---:|---:|
-| `windows/amd64` | 20 | 8200 |
-| `windows/amd64 -tags rust` | 20 | 8200 |
-| `js/wasm` | 7 | 5200 |
+| `windows/amd64` | 3 | 258 |
+| `windows/amd64 -tags rust` | 3 | 246 |
+| `js/wasm` | 3 | 241 |
 
 `-min-packages` and `-min-identifiers` override the context floor when **both** are passed (a half-set override is
-refused). They exist for the v0.35.0 window: after the internal-layout move the public set shrinks to three packages,
-and the A5 commit regenerates with the same binary and pins the post-window floors to the exact generated values; the
-layoutcheck gate then uses those.
+refused). They exist for the v0.35.0 window: after the internal-layout move the public set shrank to three packages,
+and the A5 commit regenerated with the same binary and pinned these floors to the exact generated values; the
+layoutcheck gate then uses them.
 
 ## Baselines
 
-Generated at `main` **4577b0e**.
+The current baseline is the post-A golden committed in `testdata/` on 2026-11-15 (commit `3eb1f41`, the
+regeneration after the implementation moved into `internal/`): 3 packages and 258 / 246 / 241 identifiers, the same
+numbers the Floors table pins.
 
-| File | Context | Packages | Identifiers | Bytes | Lines |
-|---|---|---:|---:|---:|---:|
-| `testdata/api_windows.txt` | windows/amd64 | 23 | 9,107 | 1,037,893 | 31,666 |
-| `testdata/api_rust.txt` | windows/amd64 `-tags rust` | 23 | 9,095 | 1,034,922 | 31,602 |
-| `testdata/api_wasm.txt` | js/wasm | 8 | 5,832 | 589,610 | 20,414 |
+| File | Context | Packages | Identifiers |
+|---|---|---:|---:|
+| `testdata/api_windows.txt` | windows/amd64 | 3 | 258 |
+| `testdata/api_rust.txt` | windows/amd64 `-tags rust` | 3 | 246 |
+| `testdata/api_wasm.txt` | js/wasm | 3 | 241 |
 
-About 7,300 of the windows identifiers are the generated binding packages `hal/vulkan/vk` (6,270 declaration lines)
-and `hal/dx12/d3d12` (1,017). They are public today and become internal in the layout change, so the first delta is
-large and expected: after it the golden describes the root package, the thin `hal` and `wgputest`.
+History: the comparison point for the v0.35.0 window was `a3705c2` (2026-11-15, the A1 re-take after the seam
+patch, PR #410; the earlier snapshot at `4577b0e` is superseded) — 23 packages and 9,109 / 9,097 / 5,834
+identifiers. Counting the same measure — exported package-scope identifiers per package, so methods and struct
+fields are not counted — 6,517 of those 9,109 identifiers sit in the two generated binding packages:
+`hal/vulkan/vk` holds 5,672 and `hal/dx12/d3d12` 845 (`git show a3705c2:tools/apigolden/testdata/api_windows.txt`,
+one `package` block per package). Both became internal in the layout change, so the first delta was large and
+expected.
+
+A hunk walk of `a3705c2` against the post-A golden gives 11 / 8 / 8 hunks with default context and 40 / 32 / 27
+with `-U0` (`-U0` splits adjacent blocks that the default context merges):
+
+```sh
+git diff a3705c2..3eb1f41 -- tools/apigolden/testdata/api_windows.txt | grep -c '^@@'    # 11 (rust 8, wasm 8)
+git diff -U0 a3705c2..3eb1f41 -- tools/apigolden/testdata/api_windows.txt | grep -c '^@@' # 40 (rust 32, wasm 27)
+```
 
 ## Honest limits
 

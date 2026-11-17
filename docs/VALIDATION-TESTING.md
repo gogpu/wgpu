@@ -1,6 +1,6 @@
 # Validation Testing Guide
 
-> How feature gates, texture usage rules, and Phase C validation are tested in `wgpu/core`.  
+> How feature gates, texture usage rules, and Phase C validation are tested in `wgpu/internal/core`.  
 > Issue: [#333](https://github.com/gogpu/wgpu/issues/333)
 
 ---
@@ -34,7 +34,7 @@ flowchart TB
 
 | Tier | Package | Backend | Use for |
 |------|---------|---------|---------|
-| **1** | `core/` + `core/testutil/` | No HAL / direct `Validate*` | Feature gates, descriptor validation, texture matrix |
+| **1** | `internal/core/` + `internal/core/testutil/` | No HAL / direct `Validate*` | Feature gates, descriptor validation, texture matrix |
 | **2** | `wgpu` (`wgpu_test`) | Real HAL (the adapter `RequestAdapter(nil)` picks) | Encode → Finish error path, `CreateQuerySet`, multi-draw |
 
 **Rule:** bulk feature coverage lives in Tier 1. Tier 2 gets **1–2 smoke tests per feature group**, not 25 duplicate cases.
@@ -43,7 +43,7 @@ flowchart TB
 
 ## `ValidationEnv` — test fixture (P9)
 
-Location: [`core/testutil/validation_env.go`](../core/testutil/validation_env.go)
+Location: [`internal/core/testutil/validation_env.go`](../internal/core/testutil/validation_env.go)
 
 Lightweight **fixture builder**, not a DI framework. One instance per `t.Run`; safe with `t.Parallel()`.
 
@@ -73,7 +73,7 @@ Each method calls the corresponding `core.Validate*` (or related) function and r
 
 ## Assertion helpers (P2)
 
-Location: [`core/testutil/assert.go`](../core/testutil/assert.go)
+Location: [`internal/core/testutil/assert.go`](../internal/core/testutil/assert.go)
 
 ```go
 testutil.AssertFeatureError(t, err, gputypes.FeaturePushConstants, "CreatePipelineLayout")
@@ -86,7 +86,7 @@ Always use typed assertions in negative tests. Avoid bare `if err == nil`.
 
 ## Registry-driven feature gates (P10)
 
-Location: [`core/feature_gate_cases_test.go`](../core/feature_gate_cases_test.go)
+Location: [`internal/core/feature_gate_cases_test.go`](../internal/core/feature_gate_cases_test.go)
 
 ```go
 type featureGateCase struct {
@@ -106,7 +106,7 @@ type featureGateCase struct {
 
 ### Feature registry
 
-Location: [`core/feature_validate.go`](../core/feature_validate.go)
+Location: [`internal/core/feature_validate.go`](../internal/core/feature_validate.go)
 
 - `RequireFeature(features, feature, resource)` — canonical gate helper (VAL-C0)
 - `AllFeatureRequirements` — documents all 25 WebGPU features with `Resource` entry point + Rust reference
@@ -116,7 +116,7 @@ Location: [`core/feature_validate.go`](../core/feature_validate.go)
 
 ## Pure `Validate*` unit tests (P1)
 
-Location: [`core/validate_test.go`](../core/validate_test.go), [`core/feature_format_test.go`](../core/feature_format_test.go), etc.
+Location: [`internal/core/validate_test.go`](../internal/core/validate_test.go), [`internal/core/feature_format_test.go`](../internal/core/feature_format_test.go), etc.
 
 For descriptor-only validation without a device:
 
@@ -131,11 +131,11 @@ Use `validTextureDesc()` / similar factories from `validate_test.go` (P1).
 
 ## Texture usage matrix (P3 + P12)
 
-Location: [`core/track/texture_compat_matrix_test.go`](../core/track/texture_compat_matrix_test.go)
+Location: [`internal/core/track/texture_compat_matrix_test.go`](../internal/core/track/texture_compat_matrix_test.go)
 
 Exhaustive combinatorial test: every non-empty `TextureUses` pair checked against `IsCompatible`, compared to an independent `referenceCompatible` function (P12 golden reference).
 
-Runtime creation-time checks: [`core/texture_usage_validate.go`](../core/texture_usage_validate.go) (VAL-C14–C18), integrated in `ValidateTextureDescriptor`.
+Runtime creation-time checks: [`internal/core/texture_usage_validate.go`](../internal/core/texture_usage_validate.go) (VAL-C14–C18), integrated in `ValidateTextureDescriptor`.
 
 ---
 
@@ -169,8 +169,8 @@ Count-buffer indirect draw APIs are split across three layers; each layer has fo
 
 | Layer | Production | Tests |
 |-------|------------|-------|
-| **HAL helper** | [`hal/indirect_count.go`](../hal/indirect_count.go) — `RecordIndirectCountMax` | [`hal/indirect_count_test.go`](../hal/indirect_count_test.go) |
-| **Core encoder** | [`core/command_indirect_count.go`](../core/command_indirect_count.go) — `indirectCountInactive`, `DrawIndirectCount` forwarding | [`core/indirect_count_test.go`](../core/indirect_count_test.go) |
+| **HAL helper** | [`internal/hal/indirect_count.go`](../internal/hal/indirect_count.go) — `RecordIndirectCountMax` | [`internal/hal/indirect_count_test.go`](../internal/hal/indirect_count_test.go) |
+| **Core encoder** | [`internal/core/command_indirect_count.go`](../internal/core/command_indirect_count.go) — `indirectCountInactive`, `DrawIndirectCount` forwarding | [`internal/core/indirect_count_test.go`](../internal/core/indirect_count_test.go) |
 | **Public API** | [`renderpass_indirect_count.go`](../renderpass_indirect_count.go) — feature gate, buffer validation, HAL record | [`renderpass_indirect_count_test.go`](../renderpass_indirect_count_test.go) |
 
 ### `NewTestBuffer` (validation-only buffers)
@@ -187,14 +187,14 @@ err := pass.validateIndirectCountBuffers(indirect, 0, count, 0, 2, drawIndirectR
 
 ### What each test file covers
 
-- **`hal/indirect_count_test.go`** — `RecordIndirectCountMax` forwards `maxDrawCount`, zero count is a no-op, count buffer is not passed to the record callback.
-- **`core/indirect_count_test.go`** — `indirectCountInactive` (ended pass / zero count); core `DrawIndirectCount` / `DrawIndexedIndirectCount` forward to HAL once and skip nil buffer, ended pass, or zero count.
+- **`internal/hal/indirect_count_test.go`** — `RecordIndirectCountMax` forwards `maxDrawCount`, zero count is a no-op, count buffer is not passed to the record callback.
+- **`internal/core/indirect_count_test.go`** — `indirectCountInactive` (ended pass / zero count); core `DrawIndirectCount` / `DrawIndexedIndirectCount` forward to HAL once and skip nil buffer, ended pass, or zero count.
 - **`renderpass_indirect_count_test.go`** — table-driven `validateIndirectCountBuffers` (alignment, usage, span overrun); `validateIndexedIndirectCountPreconditions` (missing index buffer, strip format mismatch).
 
 Tier-2 smoke for the feature gate: `TestFeatureGate_MultiDrawIndirectCount` in [`wgpu_feature_gate_test.go`](../wgpu_feature_gate_test.go) (encode → `Finish()` → `*core.FeatureError`).
 
 ```bash
-go test ./hal/... ./core/... . -run 'IndirectCount|ValidateIndirect|RecordIndirectCount' -count=1
+go test ./internal/hal/... ./internal/core/... . -run 'IndirectCount|ValidateIndirect|RecordIndirectCount' -count=1
 ```
 
 ---
@@ -204,7 +204,7 @@ go test ./hal/... ./core/... . -run 'IndirectCount|ValidateIndirect|RecordIndire
 | ID | Pattern | When to use | Primary file |
 |----|---------|-------------|--------------|
 | **P1** | Valid factory | Pure `Validate*` | `validate_test.go` |
-| **P2** | Typed error assert | Every negative test | `core/testutil/assert.go` |
+| **P2** | Typed error assert | Every negative test | `internal/core/testutil/assert.go` |
 | **P3** | Table-driven + `t.Parallel()` | Combinatorial matrices | `texture_compat_matrix_test.go` |
 | **P4** | Mock HAL | Core unit tests via env | `ValidationEnv` |
 | **P5** | Device tracker | Submit-time usage conflicts | `device_tracker_test.go` |
@@ -216,7 +216,7 @@ go test ./hal/... ./core/... . -run 'IndirectCount|ValidateIndirect|RecordIndire
 | **P11** | Guard / completeness | Registry ↔ cases sync | `feature_validate_test.go` |
 | **P12** | Golden reference fn | Matrix self-consistency | `texture_compat_matrix_test.go` |
 | **P13** | `NewTestBuffer` | Public validation without HAL | `export_test.go`, `renderpass_indirect_count_test.go` |
-| **P14** | Layered indirect-count tests | Refactored draw helpers | `hal/`, `core/`, `renderpass_indirect_count_test.go` |
+| **P14** | Layered indirect-count tests | Refactored draw helpers | `internal/hal/`, `internal/core/`, `renderpass_indirect_count_test.go` |
 
 ---
 
@@ -239,19 +239,19 @@ go test ./hal/... ./core/... . -run 'IndirectCount|ValidateIndirect|RecordIndire
 go test ./...
 
 # Core validation only (fast)
-go test ./core/... -count=1
+go test ./internal/core/... -count=1
 
 # Feature gate registry
-go test ./core/... -run TestFeatureGates -v
+go test ./internal/core/... -run TestFeatureGates -v
 
 # Texture matrix
-go test ./core/track/... -run IsCompatible -v
+go test ./internal/core/track/... -run IsCompatible -v
 
 # Smoke with a real HAL (the adapter RequestAdapter(nil) picks)
 go test . -run FeatureGate -v
 
 # Indirect-count validation (HAL + core + public API, no GPU)
-go test ./hal/... ./core/... . -run 'IndirectCount|ValidateIndirect|RecordIndirectCount' -count=1
+go test ./internal/hal/... ./internal/core/... . -run 'IndirectCount|ValidateIndirect|RecordIndirectCount' -count=1
 
 # Lint
 golangci-lint run --timeout=5m
@@ -259,7 +259,7 @@ golangci-lint run --timeout=5m
 
 Build tags:
 
-- `core/testutil` and most validation tests: `!(js && wasm)`
+- `internal/core/testutil` and most validation tests: `!(js && wasm)`
 - `wgpu_feature_gate_test.go`: `!rust && !(js && wasm)`
 
 ---
@@ -268,15 +268,15 @@ Build tags:
 
 | Area | Files |
 |------|-------|
-| Infra | `core/feature_validate.go`, `core/testutil/*` |
-| Format gates | `core/feature_format.go`, `core/validate.go` |
-| Float32 filterable | `core/format_filterable.go` |
-| Shader gates | `core/shader_features.go`, `core/spirv_capabilities.go` |
-| Texture usage | `core/texture_usage_validate.go`, `core/track/texture_compat_matrix_test.go` |
-| Query gates | `core/query_validate.go`, `query_native.go` |
-| Indirect count | `core/command_indirect_count.go`, `renderpass_indirect_count.go`, `hal/indirect_count.go` |
+| Infra | `internal/core/feature_validate.go`, `internal/core/testutil/*` |
+| Format gates | `internal/core/feature_format.go`, `internal/core/validate.go` |
+| Float32 filterable | `internal/core/format_filterable.go` |
+| Shader gates | `internal/core/shader_features.go`, `internal/core/spirv_capabilities.go` |
+| Texture usage | `internal/core/texture_usage_validate.go`, `internal/core/track/texture_compat_matrix_test.go` |
+| Query gates | `internal/core/query_validate.go`, `query_native.go` |
+| Indirect count | `internal/core/command_indirect_count.go`, `renderpass_indirect_count.go`, `internal/hal/indirect_count.go` |
 | Wiring | `device_native.go`, `renderpass_native.go` |
-| Tests | `core/feature_*_test.go`, `core/indirect_count_test.go`, `hal/indirect_count_test.go`, `renderpass_indirect_count_test.go`, `wgpu_feature_gate_test.go` |
+| Tests | `internal/core/feature_*_test.go`, `internal/core/indirect_count_test.go`, `internal/hal/indirect_count_test.go`, `renderpass_indirect_count_test.go`, `wgpu_feature_gate_test.go` |
 
 ---
 

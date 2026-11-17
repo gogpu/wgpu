@@ -1,29 +1,20 @@
 //go:build !rust && !(js && wasm)
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
-import "github.com/gogpu/wgpu/hal"
+import "github.com/gogpu/wgpu/internal/resource"
 
 // Fence is a GPU synchronization primitive.
-// Fences allow CPU-GPU synchronization by signaling when submitted work completes.
 //
-// Fences are created via Device.CreateFence and should be released via Release()
-// when no longer needed.
+// The implementation lives in internal/resource (ADR-070); Release is one
+// delegation. A zero-value Fence has no implementation: Release panics on it,
+// as the pre-move type did (a nil device view).
 type Fence struct {
-	hal      hal.Fence
-	device   *Device
-	released bool
+	impl *resource.Fence
 }
 
 // Release destroys the fence.
-// After this call, the fence must not be used.
-func (f *Fence) Release() {
-	if f.released {
-		return
-	}
-	f.released = true
-	halDevice := f.device.halDevice()
-	if halDevice != nil {
-		halDevice.DestroyFence(f.hal)
-	}
-}
+func (f *Fence) Release() { f.impl.Release() }

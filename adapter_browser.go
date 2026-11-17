@@ -2,11 +2,15 @@
 
 package wgpu
 
-import (
-	"syscall/js"
+// This file is the public declaration layer over internal/instance on the
+// browser build (ADR-070 S12). The implementation moved to internal/instance;
+// what stays here is the frozen public Adapter type, the descriptor boundary and
+// the conversion of the static browser capability answer.
 
+import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/instance"
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
 // DeviceDescriptor configures device creation.
@@ -18,27 +22,39 @@ type DeviceDescriptor struct {
 
 // Adapter represents a physical GPU.
 // On browser, this wraps a GPUAdapter via internal/browser.Adapter.
+//
+// The implementation lives in internal/instance (ADR-070 S12); this type is the
+// declaration layer the public API is frozen on.
+//
+// released is declaration-layer state, not an implementation fact: a wrapper
+// without an implementation cannot record its release in it, and the browser
+// build's zero value answers its HAL kind until it is released. Release is its
+// single writer (ADR-070 S12 settle); nothing else assigns it.
 type Adapter struct {
-	browser  *browser.Adapter
-	info     gputypes.AdapterInfo
-	features gputypes.Features
-	limits   gputypes.Limits
+	impl     *instance.Adapter
 	released bool
 }
 
 // Info returns adapter metadata.
-func (a *Adapter) Info() gputypes.AdapterInfo { return a.info }
+func (a *Adapter) Info() gputypes.AdapterInfo { return a.impl.Info() }
 
 // Features returns supported features.
-func (a *Adapter) Features() gputypes.Features { return a.features }
+func (a *Adapter) Features() gputypes.Features { return a.impl.Features() }
 
 // Limits returns the adapter's resource limits.
-func (a *Adapter) Limits() gputypes.Limits { return a.limits }
+func (a *Adapter) Limits() gputypes.Limits { return a.impl.Limits() }
 
 // DownlevelCapabilities returns backend capability flags for downlevel adapters.
 // Browsers are fully WebGPU compliant, so this returns the default (full compliance).
+//
+// A nil receiver answers the default too: the pre-move method was a constant and
+// ignored the receiver, and the declaration layer must not turn that into a
+// panic (ADR-070 S12 settle).
 func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
-	return gputypes.DefaultDownlevelCapabilities()
+	if a == nil {
+		return gputypes.DefaultDownlevelCapabilities()
+	}
+	return a.impl.DownlevelCapabilities()
 }
 
 // RequestDevice creates a logical device from this adapter.
@@ -48,33 +64,22 @@ func (a *Adapter) RequestDevice(desc *DeviceDescriptor) (*Device, error) {
 		return nil, ErrReleased
 	}
 
-	// Build JS descriptor from Go types.
-	var jsDesc js.Value
+	// The descriptor boundary (shape 1): the public descriptor becomes the
+	// implementation's mirror, and a nil pointer stays nil.
+	var implDesc *instance.DeviceDescriptor
 	if desc != nil {
-		jsDesc = browser.BuildDeviceDescriptor(desc.Label, desc.RequiredFeatures, desc.RequiredLimits)
-	} else {
-		jsDesc = js.Undefined()
+		implDesc = &instance.DeviceDescriptor{
+			Label:            desc.Label,
+			RequiredFeatures: desc.RequiredFeatures,
+			RequiredLimits:   desc.RequiredLimits,
+		}
 	}
 
-	bd, err := a.browser.RequestDevice(jsDesc)
+	impl, q, err := a.impl.RequestDevice(implDesc)
 	if err != nil {
 		return nil, err
 	}
-
-	// Extract the device's features and limits.
-	deviceFeatures := browser.ExtractFeatures(bd.Features())
-	deviceLimits := browser.ExtractLimits(bd.Limits())
-
-	queue := &Queue{
-		browser: bd.Queue(),
-	}
-
-	return &Device{
-		browser:  bd,
-		queue:    queue,
-		features: deviceFeatures,
-		limits:   deviceLimits,
-	}, nil
+	return &Device{impl: impl, queue: &Queue{impl: q}}, nil
 }
 
 // SurfaceCapabilities describes what a surface supports on this adapter.
@@ -96,37 +101,30 @@ type SurfaceCapabilities struct {
 //
 // Matches Rust wgpu SurfaceInterface::get_capabilities for WebSurface.
 func (a *Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities {
-	// Browser WebGPU supports these three formats per spec:
-	// https://gpuweb.github.io/gpuweb/#supported-context-formats
-	formats := []gputypes.TextureFormat{
-		TextureFormatRGBA8Unorm,
-		TextureFormatBGRA8Unorm,
-		gputypes.TextureFormatRGBA16Float,
+	// The answer does not depend on the adapter, so a nil or zero-value
+	// adapter reports it too, as the build always did.
+	var impl *instance.Adapter
+	if a != nil {
+		impl = a.impl
+	}
+	var s *surfacepkg.Surface
+	if surface != nil {
+		s = surface.impl
 	}
 
-	// Put the preferred format first (Rust wgpu does the same swap).
-	if surface != nil && surface.browser != nil {
-		preferredStr := surface.browser.GetPreferredCanvasFormat()
-		preferredFmt := browser.TextureFormatFromJS(preferredStr)
-		for i, f := range formats {
-			if f == preferredFmt {
-				formats[0], formats[i] = formats[i], formats[0]
-				break
-			}
-		}
+	caps := impl.GetSurfaceCapabilities(s)
+	if caps == nil {
+		return nil
 	}
-
 	return &SurfaceCapabilities{
-		Formats:      formats,
-		PresentModes: []gputypes.PresentMode{gputypes.PresentModeFifo},
-		AlphaModes:   []gputypes.CompositeAlphaMode{gputypes.CompositeAlphaModeOpaque},
+		Formats:      caps.Formats,
+		PresentModes: caps.PresentModes,
+		AlphaModes:   caps.AlphaModes,
 	}
 }
 
 // Release releases the adapter.
 func (a *Adapter) Release() {
-	if a.released {
-		return
-	}
 	a.released = true
+	a.impl.Release()
 }

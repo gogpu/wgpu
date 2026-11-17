@@ -12,7 +12,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	_ "github.com/gogpu/wgpu/hal/metal"
+	_ "github.com/gogpu/wgpu/internal/hal/metal"
 )
 
 const countedIndexedShader = `

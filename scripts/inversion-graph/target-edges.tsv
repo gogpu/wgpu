@@ -4,50 +4,67 @@
 # context = all | native | native+rust | rust | wasm   (see README §3)
 # src	dst	context	class	reason
 # --- device -> children (construction, top-down; these are the legal direction) ---
-internal/device	internal/queue	all	N	device_native.go:24 queue *Queue (device_rust.go:23, device_browser.go:19)
-internal/device	internal/instance	native+rust	N	device_native.go:25 instance *Instance (device_rust.go:22; device_browser has no instance field)
-internal/device	internal/encoder	all	N	device_native.go:1034 CreateCommandEncoder; device_rust.go:368; device_browser.go:288
-internal/device	internal/resource	all	N	device_native.go:69 CreateBuffer; device_browser.go:41; rust device CreateBuffer
-internal/device	internal/pipeline	all	N	device_native.go:308 CreateShaderModule; device_browser.go:156
-internal/device	internal/surface	native	N	device_native.go:1284 d.instance.surfacesForDevice -> []*Surface, :1288 surface.discardForDevice
-internal/device	internal/hal	all	N	domain baseline: every extracted package keeps its hal imports (today root -> hal)
-internal/device	internal/core	all	N	domain baseline: device holds *core.Device (device_native.go:21)
-# --- child -> device back-pointers that exist BEFORE the Q12 inversion (F14) ---
-internal/queue	internal/device	native	N	queue_native.go:27 device *Device (queue_rust.go and queue_browser.go hold no device)
-internal/encoder	internal/device	native+rust	N	encoder_native.go:22, :1089; encoder_rust.go:16 (encoder_browser.go holds *browser.CommandEncoder only)
-internal/resource	internal/device	native+rust	N	buffer.go:31, texture_native.go:17, sampler_native.go:14, bind_native.go:29,124,206; buffer_rust.go:17, bind_rust.go:11,30,56
-internal/pipeline	internal/device	native+rust	N	pipeline_native.go:62,167; shader_native.go:18; pipeline_rust.go:17,36, shader_rust.go:11
-internal/surface	internal/device	all	N	surface_native.go:47; surface_rust.go:34; surface_browser.go:38
-internal/surface	internal/instance	native	N	surface_native.go:46 instance *Instance (no instance field in the rust or browser surface)
+internal/device	internal/queue	all	N	device_native.go:57 queue *queue.Queue (the native implementation holds it; rust and browser keep the queue in the root layer)
+internal/device	internal/encoder	all	N	device_native.go:1446 CreateCommandEncoder; device_rust.go:251; device_browser.go:178
+internal/device	internal/resource	all	N	device_native.go:208 CreateBuffer; device_rust.go:82; device_browser.go:73
+internal/device	internal/pipeline	all	N	device_native.go:1007 CreateRenderPipeline; device_rust.go; device_browser.go
+internal/device	internal/surface	native	N	device_native.go:1729 host.SurfacesForDevice -> []*surface.Surface (Release; seams_native.go InstanceHost)
+internal/device	internal/hal	all	N	domain baseline: every extracted package keeps its hal imports (native device_native.go; rust/browser bind their backend directly)
+internal/device	internal/core	all	N	domain baseline: device holds *core.Device (device_native.go:56; rust core.ErrReleased/PollType)
 internal/instance	internal/device	all	N	adapter_native.go:46 RequestDevice() (*Device, error), :63 adoptDevice(device); every variant has an adapter
 internal/instance	internal/surface	all	N	Instance.CreateSurface() (*Surface, error) (surface_browser.go:60, native path same signature)
 # --- the rest of the extraction graph (no cycle candidate, listed for completeness) ---
-internal/instance	internal/queue	native	N	adapter_native.go:108 queue := &Queue{...}
+internal/instance	internal/queue	all	N	adapter_rust.go:10 and adapter_browser.go:11 import internal/queue today; native reaches it through the moving requestDeviceHAL (the root newQueue at queue.go:32 becomes queue.New in the destination, and impl.SetDevice takes the value)
 internal/instance	internal/encoder	native	N	adapter_native.go:103-108 encoder pool construction for the new device
-internal/instance	internal/pendingwrites	native	N	adapter_native.go:111 newPendingWrites(openDevice.Device, openDevice.Queue, pool, ...)
+internal/instance	internal/pendingwrites	native	N	adapter_native.go:112 pendingwrites.New(openDevice.Device, openDevice.Queue, pool, ...)
 internal/instance	internal/hal	all	N	domain baseline (instance_native.go hal.Instance)
 internal/instance	internal/core	all	N	domain baseline (instance_native.go *core.Instance)
-internal/queue	internal/encoder	native	N	queue_native.go:237,249,688,731,886,895 cmdEncoderPool; *CommandBuffer
-internal/queue	internal/pendingwrites	native	N	queue_native.go:28 pending *pendingWrites
+internal/instance	hal	all	N	hal_interop.go:17,41 Instance.HAL/Adapter.HAL return the public hal.Handles (bodies hal_interop_native.go:8,16, hal_interop_rust.go:8,19, hal_interop_browser.go:8,16); methods of the moving types cannot stay behind them, so every context imports the thin leaf (R5 as amended, S10 ruling 5)
+internal/queue	internal/encoder	native+rust	N	queue_native.go:237,249,688,731,886,895 cmdEncoderPool; *CommandBuffer (queue_rust.go Submit: *encoder.CommandBuffer, MarkSubmitted, R())
+internal/queue	internal/pendingwrites	native	N	queue_native.go:31 pending *pendingwrites.Writes
 internal/queue	internal/stencilblit	native	N	queue_native.go:427 stencil upload via stencilblit.NewUpload (payload; the queue records the commands)
 internal/queue	internal/hal	all	N	domain baseline (queue_native.go:25-26 hal.Queue, hal.Device)
-internal/queue	internal/core	native	N	queue_native.go:174 q.device.core; :529 DestroyQueueRef
+internal/queue	internal/core	native+rust	N	queue_native.go:174 q.device.Core(); :529 DestroyQueueRef (queue_rust.go ErrReleased == core.ErrReleased)
+internal/queue	internal/resource	all	N	descriptor.go ImageCopyTexture carries *resource.Texture in every context; seams.go NewStencilUpload; queue_native.go validateSubmitBuffer/validateSubmitTexture, queue_rust.go WriteBuffer/WriteTexture, queue_browser.go ErrReleased == resource.ErrReleased
 internal/encoder	internal/resource	all	N	encoder_browser.go:49 CopyBufferToBuffer(*Buffer); encoder_native.go copy paths
 internal/encoder	internal/pipeline	all	N	renderpass_native.go:74 SetPipeline(*RenderPipeline); computepass_native.go:53 (*ComputePipeline)
 internal/encoder	internal/hal	all	N	domain baseline (encoder_native.go hal.CommandEncoder)
 internal/encoder	internal/core	all	N	domain baseline (encoder_native.go *core.CoreCommandEncoder)
-internal/encoder	internal/stencilblit	native	N	encoder_native.go:704 stencil upload via stencilblit.NewUpload (payload; the encoder records the commands)
+internal/encoder	internal/stencilblit	native	N	stencil_recorder.go BlitRecorder returns stencilblit.Recorder; seams.go NewStencilUpload returns stencilblit.Upload (payload; the encoder records the commands)
 internal/pipeline	internal/resource	all	N	pipeline_native.go:70 bindGroupLayouts []*BindGroupLayout
 internal/pipeline	internal/hal	all	N	domain baseline (pipeline_native.go hal.RenderPipeline)
 internal/pipeline	internal/core	all	N	domain baseline (pipeline_native.go ref *core.ResourceRef)
 internal/resource	internal/hal	all	N	domain baseline (buffer.go hal.Buffer paths)
 internal/resource	internal/core	all	N	domain baseline (buffer.go ref *core.ResourceRef, core *core.Buffer)
-internal/surface	internal/resource	native	N	surface_native.go:782 CreateView() (*TextureView, error), :811 &TextureView{...}
+internal/surface	internal/resource	all	N	surface_native.go (resource.NewSurfaceTexture, TextureViewInit, NewTextureView), surface_rust.go (resource.NewTexture, NewTextureView), surface_browser.go (same) — every context imports internal/resource, backend-import backed (ADR-070 S10)
 internal/surface	internal/hal	all	N	domain baseline (surface hal.Surface, hal.Texture)
 internal/surface	internal/core	all	N	domain baseline (surface_native.go *core.Texture, s.core.Configure)
-internal/pendingwrites	internal/staging	native	N	pending_writes.go:45 belt *stagingBelt
-internal/pendingwrites	internal/encoder	native	N	pending_writes.go:30 pool *encoderPool
-internal/pendingwrites	internal/hal	all	N	domain baseline (pending_writes.go:33-36 hal.Device, hal.Queue)
-internal/pendingwrites	internal/core	native	N	pending_writes.go:111 coreDevice.Tracker()
-internal/stencilblit	internal/hal	all	N	domain baseline (the payload holds hal handles; the encoder records the commands)
+internal/pendingwrites	internal/staging	native	N	internal/pendingwrites/pending_writes.go:47 belt *staging.Belt
+internal/pendingwrites	internal/hal	all	N	domain baseline (internal/pendingwrites/pending_writes.go:35-38 hal.Device, hal.Queue)
+internal/pendingwrites	internal/core	native	N	internal/pendingwrites/pending_writes.go:70 tracker *core.DeviceTracker
+internal/pendingwrites	internal/resource	native	N	internal/pendingwrites/pending_writes.go:12 resource.Texture; :89 dstTextures, :256 CoreTexture
+internal/stencilblit	internal/hal	all	N	upload.go stencilUploadPassDescriptor (hal.Texture of the destination); the encoder records the commands
 internal/staging	internal/hal	all	N	staging_belt.go:34-35 halDevice, halQueue
+# --- the browser WebGPU path (wasm only): the extraction domains' _browser variants import internal/browser; the
+# --- golden was built from pre-A root paths, where these were root files, so the class had zero rows (2026-11-15).
+internal/resource	internal/browser	wasm	N	buffer_browser.go:10 *browser.Buffer field; bind_browser.go:5, sampler_browser.go:5, shader_browser.go:5, texture_browser.go:7
+internal/pipeline	internal/browser	wasm	N	pipeline_browser.go:5
+internal/encoder	internal/browser	wasm	N	computepass_browser.go:5, encoder_browser.go:8, renderpass_browser.go:7
+internal/queue	internal/browser	wasm	N	queue_browser.go:8
+internal/surface	internal/browser	wasm	N	surface_browser.go:12
+internal/device	internal/browser	wasm	N	device_browser.go:20
+internal/instance	internal/browser	wasm	N	adapter_browser.go:9, instance_browser.go:9
+# --- the core trackers (native): the resource, encoder, pendingwrites and queue code registers with core/track.
+internal/resource	internal/core/track	native	N	texture_native.go:8
+internal/encoder	internal/core/track	native	N	computepass_native.go:11, encoder_native.go:10, renderbundle_finish.go:11
+internal/pendingwrites	internal/core/track	native	N	internal/pendingwrites/pending_writes.go:10
+internal/queue	internal/core/track	native	N	queue_native.go:12
+internal/device	internal/core/track	native	N	device_native.go:37 import; :905 track.TextureUsesResource; :898 bufferBindingUses; :907 storageTextureUses
+internal/device	internal/stencilblit	native	N	device_native.go:43 import; :1513 NewStencilUpload -> stencilblit.NewUpload(stencilHost{d: d}, ...) (call at :1514); stencil_blit_cache_native.go:27 and stencil_host_native.go:25 import it (the upload payload the queue seam constructs)
+# --- the indirect draw helpers the encoder's pass encoder declares state for.
+internal/encoder	internal/indirect	all	N	renderpass_native.go RangeFits + record sizes 16/20; renderpass_rust.go:121 RecordOffset; renderpass_browser.go:116 RecordOffset
+# --- the pipeline constants the device's rust and browser variants derive state from.
+internal/device	internal/pipeconst	rust	N	device_rust.go:23
+internal/device	internal/pipeconst	wasm	N	device_browser.go:22
+# --- the shader IR the resource shader module lowers through.
+internal/resource	internal/shaderir	native	N	shader_native.go:13

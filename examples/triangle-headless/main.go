@@ -29,7 +29,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 
-	_ "github.com/gogpu/wgpu/hal/allbackends"
+	_ "github.com/gogpu/wgpu/internal/hal/allbackends"
 )
 
 // Shader bisection table.
@@ -360,6 +360,8 @@ func initDevice() (*wgpu.Device, func(), error) {
 			backends = wgpu.BackendsMetal
 		case "gl", "gles":
 			backends = wgpu.BackendsGL
+		case "software", "sw", "cpu":
+			backends = gputypes.BackendsSoftware
 		}
 	}
 	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{

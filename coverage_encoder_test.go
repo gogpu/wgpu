@@ -231,7 +231,7 @@ func TestEncoderTrackBufferLazyInit(t *testing.T) {
 	}
 
 	// Verify refs were transferred (encoder is empty after Finish).
-	if enc.TestTrackedRefs() != nil {
+	if wgpu.CommandEncoderTestTrackedRefs(enc) != nil {
 		t.Error("encoder should have nil trackedRefs after Finish")
 	}
 	cmdBuf.Release()
@@ -262,7 +262,7 @@ func TestEncoderTrackBindGroupTransfer(t *testing.T) {
 	defer bg.Release()
 
 	// Verify bind group is not released.
-	if bg.TestBindGroupReleased() {
+	if wgpu.BindGroupTestReleased(bg) {
 		t.Error("bind group should not be released after creation")
 	}
 }

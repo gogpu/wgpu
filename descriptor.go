@@ -4,7 +4,7 @@ package wgpu
 
 import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // Extent3D is a 3D size.
@@ -30,14 +30,14 @@ func (o Origin3D) toHAL() hal.Origin3D {
 }
 
 // ImageDataLayout describes the layout of image data in a buffer.
+//
+// Its HAL conversion lived here until the queue moved to internal/queue (ADR-070
+// S9): the queue was its only caller, and it now converts into the destination's
+// own mirror, so the method went with the implementation.
 type ImageDataLayout struct {
 	Offset       uint64
 	BytesPerRow  uint32
 	RowsPerImage uint32
-}
-
-func (l ImageDataLayout) toHAL() hal.ImageDataLayout {
-	return hal.ImageDataLayout{Offset: l.Offset, BytesPerRow: l.BytesPerRow, RowsPerImage: l.RowsPerImage}
 }
 
 // BufferDescriptor describes buffer creation parameters.
@@ -158,12 +158,18 @@ func (d *SamplerDescriptor) toHAL() *hal.SamplerDescriptor {
 }
 
 // QueryType specifies the type of queries in a query set.
-type QueryType = hal.QueryType
+//
+// It is a defined type in this package (ADR-070 §15: a public API never
+// aliases an internal type); the underlying type is uint32, as it was.
+type QueryType uint32
 
 // Query type constants.
 const (
-	QueryTypeOcclusion = hal.QueryTypeOcclusion
-	QueryTypeTimestamp = hal.QueryTypeTimestamp
+	// QueryTypeOcclusion counts the number of samples that pass depth/stencil tests.
+	QueryTypeOcclusion QueryType = iota
+
+	// QueryTypeTimestamp writes GPU timestamps for profiling.
+	QueryTypeTimestamp
 )
 
 // QuerySetDescriptor describes query set creation parameters.
@@ -177,7 +183,7 @@ type QuerySetDescriptor struct {
 func (d *QuerySetDescriptor) toHAL() *hal.QuerySetDescriptor {
 	return &hal.QuerySetDescriptor{
 		Label: d.Label,
-		Type:  d.Type,
+		Type:  hal.QueryType(d.Type),
 		Count: d.Count,
 	}
 }
@@ -260,39 +266,6 @@ type BindGroupEntry struct {
 	TextureView *TextureView // For texture bindings
 }
 
-// toHAL converts a BindGroupEntry to a gputypes.BindGroupEntry.
-func (e *BindGroupEntry) toHAL() gputypes.BindGroupEntry {
-	entry := gputypes.BindGroupEntry{
-		Binding: e.Binding,
-	}
-	var halView hal.TextureView
-	if e.TextureView != nil {
-		halView = e.TextureView.resolveHAL()
-	}
-
-	switch {
-	case e.Buffer != nil:
-		halBuf := e.Buffer.halBuffer()
-		if halBuf != nil {
-			entry.Resource = gputypes.BufferBinding{
-				Buffer: halBuf.NativeHandle(),
-				Offset: e.Offset,
-				Size:   e.Size,
-			}
-		}
-	case e.Sampler != nil && e.Sampler.hal != nil:
-		entry.Resource = gputypes.SamplerBinding{
-			Sampler: e.Sampler.hal.NativeHandle(),
-		}
-	case halView != nil:
-		entry.Resource = gputypes.TextureViewBinding{
-			TextureView: halView.NativeHandle(),
-		}
-	}
-
-	return entry
-}
-
 // PipelineLayoutDescriptor describes a pipeline layout.
 type PipelineLayoutDescriptor struct {
 	Label            string
@@ -359,19 +332,6 @@ func (d *DepthStencilState) toHAL() *hal.DepthStencilState {
 	}
 }
 
-// resolveDepthCompare gives the HAL CompareFunctionAlways for a depthCompare
-// the descriptor left undefined. GPUDepthStencilState.depthCompare has no
-// default: core validation, which runs first, rejects its absence where the
-// spec requires it, and elsewhere the spec's "compare fragment" algorithm
-// passes every fragment for an undefined compare, which is "always"
-// (index.bs). The backends take the value literally: DX12 mapped Undefined to
-// NEVER and drew nothing. Rust wgpu-hal does ds.depth_compare.unwrap_or_default().
-func resolveDepthCompare(ds *hal.DepthStencilState) {
-	if ds != nil && ds.DepthCompare == gputypes.CompareFunctionUndefined {
-		ds.DepthCompare = gputypes.CompareFunctionAlways
-	}
-}
-
 // RenderPipelineDescriptor describes a render pipeline.
 type RenderPipelineDescriptor struct {
 	Label        string
@@ -430,22 +390,22 @@ func (d *RenderPipelineDescriptor) toHAL() *hal.RenderPipelineDescriptor {
 		DepthStencil: normalizeDepthStencilState(d.DepthStencil).toHAL(),
 	}
 
-	if d.Layout != nil {
-		halDesc.Layout = d.Layout.hal
+	if d.Layout != nil && d.Layout.impl != nil {
+		halDesc.Layout = d.Layout.impl.HAL()
 	}
 
-	if d.Vertex.Module != nil {
+	if d.Vertex.Module != nil && d.Vertex.Module.impl != nil {
 		halDesc.Vertex = hal.VertexState{
-			Module:     d.Vertex.Module.hal,
+			Module:     d.Vertex.Module.impl.HAL(),
 			EntryPoint: d.Vertex.EntryPoint,
 			Constants:  d.Vertex.Constants,
 			Buffers:    d.Vertex.Buffers,
 		}
 	}
 
-	if d.Fragment != nil && d.Fragment.Module != nil {
+	if d.Fragment != nil && d.Fragment.Module != nil && d.Fragment.Module.impl != nil {
 		halDesc.Fragment = &hal.FragmentState{
-			Module:     d.Fragment.Module.hal,
+			Module:     d.Fragment.Module.impl.HAL(),
 			EntryPoint: d.Fragment.EntryPoint,
 			Constants:  d.Fragment.Constants,
 			Targets:    normalizeColorTargets(d.Fragment.Targets),
@@ -487,8 +447,8 @@ func (d *ComputePipelineDescriptor) toHAL() *hal.ComputePipelineDescriptor {
 		Label: d.Label,
 	}
 
-	if d.Layout != nil {
-		halDesc.Layout = d.Layout.hal
+	if d.Layout != nil && d.Layout.impl != nil {
+		halDesc.Layout = d.Layout.impl.HAL()
 	}
 
 	// WebGPU spec: zero_initialize_workgroup_memory defaults to true.
@@ -498,9 +458,9 @@ func (d *ComputePipelineDescriptor) toHAL() *hal.ComputePipelineDescriptor {
 		zeroInit = *d.ZeroInitializeWorkgroupMemory
 	}
 
-	if d.Module != nil {
+	if d.Module != nil && d.Module.impl != nil {
 		halDesc.Compute = hal.ComputeState{
-			Module:                        d.Module.hal,
+			Module:                        d.Module.impl.HAL(),
 			EntryPoint:                    d.EntryPoint,
 			Constants:                     d.Constants,
 			ZeroInitializeWorkgroupMemory: zeroInit,
@@ -570,11 +530,11 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			slice := *ca.DepthSlice
 			halCA.DepthSlice = &slice
 		}
-		if ca.View != nil {
-			halCA.View = ca.View.resolveHAL()
+		if ca.View != nil && ca.View.impl != nil {
+			halCA.View = ca.View.impl.ResolveHAL()
 		}
-		if ca.ResolveTarget != nil {
-			halCA.ResolveTarget = ca.ResolveTarget.resolveHAL()
+		if ca.ResolveTarget != nil && ca.ResolveTarget.impl != nil {
+			halCA.ResolveTarget = ca.ResolveTarget.impl.ResolveHAL()
 		}
 		halDesc.ColorAttachments = append(halDesc.ColorAttachments, halCA)
 	}
@@ -591,14 +551,17 @@ func (d *RenderPassDescriptor) toHAL() *hal.RenderPassDescriptor {
 			StencilClearValue: ds.StencilClearValue,
 			StencilReadOnly:   ds.StencilReadOnly,
 		}
-		if ds.View != nil {
-			halDS.View = ds.View.resolveHAL()
+		if ds.View != nil && ds.View.impl != nil {
+			halDS.View = ds.View.impl.ResolveHAL()
 		}
 		halDesc.DepthStencilAttachment = halDS
 	}
 
 	if writes := d.TimestampWrites; writes != nil {
-		halQuerySet := writes.QuerySet.halQuerySet()
+		var halQuerySet hal.QuerySet
+		if writes.QuerySet != nil && writes.QuerySet.impl != nil {
+			halQuerySet = writes.QuerySet.impl.HALQuerySet()
+		}
 		if halQuerySet == nil {
 			return halDesc
 		}
@@ -635,7 +598,11 @@ func (d *ComputePassDescriptor) toHAL() *hal.ComputePassDescriptor {
 		Label: d.Label,
 	}
 	if writes := d.TimestampWrites; writes != nil {
-		if halQuerySet := writes.QuerySet.halQuerySet(); halQuerySet != nil {
+		var halQuerySet hal.QuerySet
+		if writes.QuerySet != nil && writes.QuerySet.impl != nil {
+			halQuerySet = writes.QuerySet.impl.HALQuerySet()
+		}
+		if halQuerySet != nil {
 			halDesc.TimestampWrites = &hal.ComputePassTimestampWrites{
 				QuerySet:                  halQuerySet,
 				BeginningOfPassWriteIndex: writes.BeginningOfPassWriteIndex,
@@ -677,12 +644,12 @@ type ImageCopyTexture struct {
 }
 
 func (i *ImageCopyTexture) toHAL() *hal.ImageCopyTexture {
-	if i == nil || i.Texture == nil {
+	if i == nil || i.Texture == nil || i.Texture.impl == nil {
 		return nil
 	}
 
 	return &hal.ImageCopyTexture{
-		Texture:  i.Texture.resolveHAL(),
+		Texture:  i.Texture.impl.ResolveHAL(),
 		MipLevel: i.MipLevel,
 		Origin:   i.Origin.toHAL(),
 		Aspect:   i.Aspect,
@@ -695,14 +662,6 @@ type TextureCopy struct {
 	Source      ImageCopyTexture
 	Destination ImageCopyTexture
 	Size        Extent3D
-}
-
-func (t *TextureCopy) toHAL() hal.TextureCopy {
-	return hal.TextureCopy{
-		SrcBase: *t.Source.toHAL(),
-		DstBase: *t.Destination.toHAL(),
-		Size:    t.Size.toHAL(),
-	}
 }
 
 // TextureUsageTransition defines a texture usage state transition.
@@ -729,42 +688,9 @@ type TextureBarrier struct {
 	Usage   TextureUsageTransition
 }
 
-func (b TextureBarrier) toHAL() hal.TextureBarrier {
-	var t hal.Texture
-	if b.Texture != nil {
-		t = b.Texture.resolveHAL()
-	}
-	return hal.TextureBarrier{
-		Texture: t,
-		Range: hal.TextureRange{
-			Aspect:          b.Range.Aspect,
-			BaseMipLevel:    b.Range.BaseMipLevel,
-			MipLevelCount:   b.Range.MipLevelCount,
-			BaseArrayLayer:  b.Range.BaseArrayLayer,
-			ArrayLayerCount: b.Range.ArrayLayerCount,
-		},
-		Usage: hal.TextureUsageTransition{
-			OldUsage: b.Usage.OldUsage,
-			NewUsage: b.Usage.NewUsage,
-		},
-	}
-}
-
 // BufferTextureCopy defines a buffer-texture copy region.
 type BufferTextureCopy struct {
 	BufferLayout ImageDataLayout
 	TextureBase  ImageCopyTexture
 	Size         Extent3D
-}
-
-func (c BufferTextureCopy) toHAL() hal.BufferTextureCopy {
-	btc := hal.BufferTextureCopy{
-		BufferLayout: c.BufferLayout.toHAL(),
-		Size:         c.Size.toHAL(),
-	}
-	halTex := c.TextureBase.toHAL()
-	if halTex != nil {
-		btc.TextureBase = *halTex
-	}
-	return btc
 }

@@ -2,7 +2,7 @@ package raytracing
 
 import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // DeviceContext provides access to device-level operations needed by the

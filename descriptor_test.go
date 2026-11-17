@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 func TestBufferDescriptorToHAL(t *testing.T) {
@@ -377,20 +378,16 @@ func TestRenderPassDescriptorToHAL(t *testing.T) {
 }
 
 func TestImageCopyTextureToHAL(t *testing.T) {
+	texture := &Texture{impl: resource.NewTexture(nil, nil, TextureFormatBGRA8Unorm, nil, nil)}
 	tex := ImageCopyTexture{
-		Texture: &Texture{
-			hal:      nil,
-			device:   &Device{},
-			format:   TextureFormatBGRA8Unorm,
-			released: false,
-		},
+		Texture:  texture,
 		MipLevel: 1,
 		Origin:   Origin3D{X: 10, Y: 20, Z: 0},
 		Aspect:   gputypes.TextureAspectAll,
 	}
 	halTex := tex.toHAL()
-	if halTex.Texture != tex.Texture.hal {
-		t.Errorf("Texture HAL = %v, want %v", halTex.Texture, tex.Texture.hal)
+	if halTex.Texture != texture.impl.HAL() {
+		t.Errorf("Texture HAL = %v, want %v", halTex.Texture, texture.impl.HAL())
 	}
 	if halTex.MipLevel != tex.MipLevel {
 		t.Errorf("MipLevel = %d, want %d", halTex.MipLevel, tex.MipLevel)

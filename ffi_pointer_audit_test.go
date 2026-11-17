@@ -1,3 +1,12 @@
+//go:build !js && !wasm
+
+// These tests audit the module's own source files (go/parser over the tree).
+// A js/wasm (or wasip1) runner cannot perform the directory traversal they
+// need — verified: with this tag stripped they fail there — so their scope is
+// the build contexts that own a source tree; they run in every native and
+// rust job. Every other test in this package executes under the wasm-test CI
+// job (P2-INFRA-014).
+
 package wgpu_test
 
 import (
@@ -18,11 +27,11 @@ import (
 var ffiPointerAllowed = map[string]string{
 	// Package-level arrays never move, and Wayland keeps the listener pointer
 	// for the lifetime of the proxy, so it has to be static memory anyway.
-	"hal/software/blit_wayland.go:obtainWlShm:&registryListenerFuncs[0]":          "package-level array",
-	"hal/software/blit_wayland.go:waylandCreateShmBuffer:&bufferListenerFuncs[0]": "package-level array",
+	"internal/hal/software/blit_wayland.go:obtainWlShm:&registryListenerFuncs[0]":          "package-level array",
+	"internal/hal/software/blit_wayland.go:waylandCreateShmBuffer:&bufferListenerFuncs[0]": "package-level array",
 	// debugNameBuf is a field of the heap-allocated Device: heap objects do not
 	// move, and the KeepAlive after the call keeps it reachable.
-	"hal/vulkan/debug.go:setObjectName:&d.debugNameBuf[0]": "heap field kept alive",
+	"internal/hal/vulkan/debug.go:setObjectName:&d.debugNameBuf[0]": "heap field kept alive",
 }
 
 // TestFFIPointersArePinned guards P1-VK-012. A uintptr holding the address of a

@@ -34,8 +34,8 @@
 ✅ **Software backend renders like the GPU backends (v0.34.9)** — commands at `Queue.Submit`, clip-space clipping, viewport, perspective-correct interpolation, 2x2 quads for derivatives and implicit LOD, two-sided stencil, exact integer values, BC/ETC2 sampling; checked by readback against Vulkan, DX12 and GLES
 ✅ **Triple-backend architecture (ADR-038)** — Native Go, Rust FFI, Browser WASM via build tags
 ✅ **All 5 Native HAL backends complete**
-✅ **Three-layer Native stack** — wgpu API → wgpu/core → wgpu/hal
-✅ **Complete public API** — consumers never import `wgpu/hal`
+✅ **Three-layer Native stack** — wgpu API → wgpu/internal/core → wgpu/internal/hal
+✅ **Complete public API** — consumers import only the root package and the thin `hal` interop package
 ✅ **Core validation layer** — Rust wgpu-core parity checks
 ✅ **Text rendering on all 3 GPU backends** — Vulkan, DX12, GLES
 ✅ **DX12 TDR fixed** — deferred resource destruction + DRED diagnostics
@@ -116,7 +116,7 @@
 ✅ **DX12 submission-ordered state reconciliation** — command-local state tracker, preamble barriers at submit time, per-plane depth/stencil tracking, preamble pool, COM lifecycle safety (@besmpl #262)
 ✅ **Rust v29 typed surface targets** — `SurfaceTarget`/`SurfaceTargetUnsafe` with opaque constructors for Win32, Xlib, Wayland, Android NDK, Metal, Web. `hal.SurfaceTarget.RequireKind()` discriminator. Same contract across native/rust/browser (@besmpl #273)
 ✅ **Android arm64 Vulkan (guarded preview)** — API 29+, Bionic loader via goffi v0.6.1, Rust v29 WSI parity. Callbacks rejected pending physical-device proof (@besmpl #268)
-✅ **Headless surface readback** — `HeadlessSurfaceTarget` + `Surface.ReadPixels()` for golden image testing. `hal.PixelReader` optional capability. Closes #256 (@besmpl #276)
+✅ **Headless surface readback** — `HeadlessSurfaceTarget` + `Surface.ReadPixels()` for golden image testing. The HAL's optional `PixelReader` capability. Closes #256 (@besmpl #276)
 ✅ **MRT fix** — Multiple Render Targets across all 5 backends (#322, @darkliquid)
 ✅ **Ray Tracing HAL code (experimental, ADR-062)** — acceleration structure code in the HAL for Vulkan, DX12, Metal and software (CPU BVH), and `internal/raytracing/` with build orchestration, compaction and validation. Not reachable through the public API and never run on a GPU (see [RAY-TRACING.md](docs/RAY-TRACING.md)).
 ✅ **Unified backend naming** — `NewBackend()` constructor on all 6 backends, `API` → `Backend` (software/noop)
@@ -155,7 +155,7 @@ releases.
 - [x] Platform hardware backends register by default with per-backend opt-out build tags; the Pure Go software backend stays an explicit import until v0.35.0 (ADR-083 Phase 0)
 - [x] `wgputest`: software and noop test devices with a recorder and fault injection (P1-API-027)
 - [x] `Device.CheckHealth()`; a DX12 device-removal error satisfies `errors.Is(err, wgpu.ErrDeviceLost)`
-- [x] `hal/noop` stops registering itself in `init`
+- [x] `internal/hal/noop` stops registering itself in `init`
 
 **Patch release v0.34.13** (2026-11-11, naga v0.21.10):
 - [x] naga v0.21.10: Metal stores into run-time-indexed components of workgroup vectors and matrix columns, MSL parity fixes (atomic `workgroupUniformLoad`, packed `vec3` bitcasts, return temporary names)
@@ -233,7 +233,7 @@ bus id, which Rust leaves to the application.
 - [ ] Systematic GL error checking layer — `checkGL()` after every call (ADR-046)
 
 **Public API Quality (#218):**
-- [ ] Remove HAL leaks from public API (`Surface.HAL()`, `Surface.SetPrepareFrame()`)
+- [x] Remove HAL leaks from public API — public accessors return only `hal.Handles`; no `core`/`hal` implementation type is public (ADR-070)
 - [x] `Device.CreateQuerySet` public wrapper
 - [ ] Document Surface single-thread requirement
 
@@ -286,7 +286,7 @@ Target: stable, documented, conformant WebGPU implementation in Pure Go.
 ## Architecture
 
 ```
-                    WebGPU API (core/)
+                    WebGPU API (internal/core/)
                           │
           ┌───────────────┼───────────────┐
           │               │               │

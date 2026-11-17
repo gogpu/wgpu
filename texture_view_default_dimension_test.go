@@ -7,8 +7,8 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 // viewDescRecorder is a HAL device that records the descriptor of every
@@ -43,7 +43,7 @@ func TestCreateTextureViewPassesResolvedDimension(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	rec := &viewDescRecorder{Device: open.Device}
-	device, err := wgpu.NewDeviceFromHAL(rec, open.Queue, 0, gputypes.DefaultLimits(), "recorder")
+	device, err := wgpu.NewDeviceFromHALForTest(rec, open.Queue, 0, gputypes.DefaultLimits(), "recorder")
 	if err != nil {
 		t.Fatalf("NewDeviceFromHAL: %v", err)
 	}

@@ -1,9 +1,16 @@
 //go:build rust
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
+// This file is the public declaration layer over internal/device on the rust
+// build (ADR-070 S11). The implementation moved to internal/device; what stays
+// here is the frozen public Device type, its methods, and the descriptor
+// conversion to the go-webgpu/webgpu types the implementation takes.
+
 import (
-	"errors"
 	"fmt"
 	"runtime"
 	"time"
@@ -12,18 +19,17 @@ import (
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
 
-	"github.com/gogpu/wgpu/internal/pipeconst"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/device"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Device represents a logical GPU device.
 // On Rust backend, this wraps go-webgpu/webgpu Device.
 type Device struct {
-	r        *rwgpu.Device
-	instance *Instance // stored for PopErrorScope which needs Instance handle
+	impl     *device.Device
+	instance *Instance // the identity cache; the implementation holds the seam view
 	queue    *Queue
-	features gputypes.Features
-	limits   gputypes.Limits
-	released bool
 }
 
 // Queue returns the device's command queue.
@@ -33,79 +39,57 @@ func (d *Device) Queue() *Queue {
 
 // Features returns the device's enabled features.
 func (d *Device) Features() gputypes.Features {
-	return d.features
+	if d == nil || d.impl == nil {
+		return 0
+	}
+	return d.impl.Features()
 }
 
 // Limits returns the device's resource limits.
 func (d *Device) Limits() gputypes.Limits {
-	return d.limits
+	if d == nil || d.impl == nil {
+		return gputypes.Limits{}
+	}
+	return d.impl.Limits()
 }
 
 // CreateBuffer creates a GPU buffer.
 func (d *Device) CreateBuffer(desc *BufferDescriptor) (*Buffer, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: buffer descriptor is nil")
 	}
-
-	rb, err := d.r.CreateBuffer(&rwgpu.BufferDescriptor{
+	impl, err := d.impl.CreateBuffer(&rwgpu.BufferDescriptor{
 		Label:            desc.Label,
 		Size:             desc.Size,
 		Usage:            desc.Usage,
 		MappedAtCreation: desc.MappedAtCreation,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create buffer: %w", err)
+		return nil, err
 	}
-
-	return &Buffer{r: rb, device: d}, nil
+	return &Buffer{impl: impl}, nil
 }
 
 // CreateTexture creates a GPU texture.
 func (d *Device) CreateTexture(desc *TextureDescriptor) (*Texture, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: texture descriptor is nil")
 	}
-
-	rt, err := d.r.CreateTexture(convertTextureDesc(desc))
+	impl, err := d.impl.CreateTexture(convertTextureDesc(desc), desc.Format)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create texture: %w", err)
+		return nil, err
 	}
-
-	return &Texture{r: rt, device: d, format: desc.Format}, nil
-}
-
-// convertTextureDesc converts a texture descriptor for wgpu-native, with the
-// zero members that have a WebGPU default set to it (texture_defaults.go).
-func convertTextureDesc(desc *TextureDescriptor) *rwgpu.TextureDescriptor {
-	desc = normalizeTextureDescriptor(desc)
-	return &rwgpu.TextureDescriptor{
-		Label:         desc.Label,
-		Usage:         desc.Usage,
-		Dimension:     desc.Dimension,
-		Size:          rwgpu.Extent3D{Width: desc.Size.Width, Height: desc.Size.Height, DepthOrArrayLayers: desc.Size.DepthOrArrayLayers},
-		Format:        desc.Format,
-		MipLevelCount: desc.MipLevelCount,
-		SampleCount:   desc.SampleCount,
-		ViewFormats:   desc.ViewFormats,
-	}
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex, nil
 }
 
 // CreateTextureView creates a view into a texture.
-// In go-webgpu, CreateView is a method on Texture, not Device.
 func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor) (*TextureView, error) {
-	if d.released {
-		return nil, ErrReleased
+	var parent *resource.Texture
+	if texture != nil {
+		parent = texture.impl
 	}
-	if texture == nil || texture.r == nil {
-		return nil, fmt.Errorf("wgpu: texture is nil")
-	}
-
 	var rDesc *rwgpu.TextureViewDescriptor
 	if desc != nil {
 		rDesc = &rwgpu.TextureViewDescriptor{
@@ -119,27 +103,269 @@ func (d *Device) CreateTextureView(texture *Texture, desc *TextureViewDescriptor
 			ArrayLayerCount: desc.ArrayLayerCount,
 		}
 	}
-
-	rv, err := texture.r.CreateView(rDesc)
+	impl, err := d.impl.CreateTextureView(parent, rDesc)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create texture view: %w", err)
+		return nil, err
 	}
-
-	return &TextureView{r: rv, device: d, texture: texture}, nil
+	return &TextureView{impl: impl}, nil
 }
 
 // CreateSampler creates a texture sampler.
 func (d *Device) CreateSampler(desc *SamplerDescriptor) (*Sampler, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-
-	rs, err := d.r.CreateSampler(samplerDescriptorToRust(desc))
+	impl, err := d.impl.CreateSampler(samplerDescriptorToRust(desc))
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create sampler: %w", err)
+		return nil, err
 	}
+	return &Sampler{impl: impl}, nil
+}
 
-	return &Sampler{r: rs, device: d}, nil
+// CreateShaderModule creates a shader module.
+func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: shader module descriptor is nil")
+	}
+	impl, err := d.impl.CreateShaderModule(desc.Label, desc.WGSL, desc.SPIRV)
+	if err != nil {
+		return nil, err
+	}
+	return &ShaderModule{impl: impl}, nil
+}
+
+// CreateBindGroupLayout creates a bind group layout.
+func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGroupLayout, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: bind group layout descriptor is nil")
+	}
+	rEntries := make([]rwgpu.BindGroupLayoutEntry, len(desc.Entries))
+	for i, e := range desc.Entries {
+		rEntries[i] = convertBindGroupLayoutEntry(e)
+	}
+	impl, err := d.impl.CreateBindGroupLayout(&rwgpu.BindGroupLayoutDescriptor{
+		Label:   desc.Label,
+		Entries: rEntries,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &BindGroupLayout{impl: impl}, nil
+}
+
+// CreatePipelineLayout creates a pipeline layout.
+func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*PipelineLayout, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: pipeline layout descriptor is nil")
+	}
+	rLayouts := make([]*rwgpu.BindGroupLayout, len(desc.BindGroupLayouts))
+	for i, l := range desc.BindGroupLayouts {
+		if l != nil {
+			rLayouts[i] = l.impl.Rust()
+		}
+	}
+	impl, err := d.impl.CreatePipelineLayout(&rwgpu.PipelineLayoutDescriptor{
+		Label:            desc.Label,
+		BindGroupLayouts: rLayouts,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &PipelineLayout{impl: impl}, nil
+}
+
+// CreateBindGroup creates a bind group.
+func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: bind group descriptor is nil")
+	}
+	var rLayout *rwgpu.BindGroupLayout
+	if desc.Layout != nil {
+		rLayout = desc.Layout.impl.Rust()
+	}
+	rEntries := make([]rwgpu.BindGroupEntry, len(desc.Entries))
+	for i, e := range desc.Entries {
+		rEntries[i] = convertBindGroupEntry(e)
+	}
+	impl, err := d.impl.CreateBindGroup(&rwgpu.BindGroupDescriptor{
+		Label:   desc.Label,
+		Layout:  rLayout,
+		Entries: rEntries,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &BindGroup{impl: impl}, nil
+}
+
+// CreateRenderPipeline creates a render pipeline.
+func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: render pipeline descriptor is nil")
+	}
+	var vertexConstants, fragmentConstants map[string]float64
+	vertexConstants = desc.Vertex.Constants
+	hasFragment := desc.Fragment != nil
+	if hasFragment {
+		fragmentConstants = desc.Fragment.Constants
+	}
+	impl, err := d.impl.CreateRenderPipeline(convertRenderPipelineDesc(desc), vertexConstants, fragmentConstants, hasFragment)
+	if err != nil {
+		return nil, err
+	}
+	return &RenderPipeline{impl: impl}, nil
+}
+
+// CreateComputePipeline creates a compute pipeline.
+func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
+	}
+	var rLayout *rwgpu.PipelineLayout
+	if desc.Layout != nil {
+		rLayout = desc.Layout.impl.Rust()
+	}
+	var rModule *rwgpu.ShaderModule
+	if desc.Module != nil {
+		rModule = desc.Module.impl.Rust()
+	}
+	impl, err := d.impl.CreateComputePipeline(&rwgpu.ComputePipelineDescriptor{
+		Label:      desc.Label,
+		Layout:     rLayout,
+		Module:     rModule,
+		EntryPoint: desc.EntryPoint,
+	}, desc.Constants)
+	if err != nil {
+		return nil, err
+	}
+	return &ComputePipeline{impl: impl}, nil
+}
+
+// CreateCommandEncoder creates a command encoder for recording GPU commands.
+func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandEncoder, error) {
+	var rDesc *rwgpu.CommandEncoderDescriptor
+	if desc != nil {
+		rDesc = &rwgpu.CommandEncoderDescriptor{Label: desc.Label}
+	}
+	impl, err := d.impl.CreateCommandEncoder(rDesc)
+	if err != nil {
+		return nil, err
+	}
+	return &CommandEncoder{impl: impl}, nil
+}
+
+// CreateFence creates a no-op fence for API compatibility.
+func (d *Device) CreateFence() (*Fence, error) {
+	impl, err := d.impl.CreateFence()
+	if err != nil {
+		return nil, err
+	}
+	return &Fence{impl: impl}, nil
+}
+
+// DestroyFence destroys a fence.
+//
+// Deprecated: Use Fence.Release() instead.
+func (d *Device) DestroyFence(f *Fence) {
+	if f != nil {
+		f.Release()
+	}
+}
+
+// ResetFence resets a fence to the unsignaled state.
+func (d *Device) ResetFence(f *Fence) error {
+	var impl *resource.Fence
+	if f != nil {
+		impl = f.impl
+	}
+	return d.impl.ResetFence(impl)
+}
+
+// GetFenceStatus returns true if the fence is signaled (non-blocking).
+func (d *Device) GetFenceStatus(f *Fence) (bool, error) {
+	var impl *resource.Fence
+	if f != nil {
+		impl = f.impl
+	}
+	return d.impl.GetFenceStatus(impl)
+}
+
+// WaitForFence waits for a fence to reach the specified value.
+func (d *Device) WaitForFence(f *Fence, _ uint64, _ time.Duration) (bool, error) {
+	var impl *resource.Fence
+	if f != nil {
+		impl = f.impl
+	}
+	return d.impl.WaitForFence(impl, 0, 0)
+}
+
+// PushErrorScope pushes a new error scope onto the device's error scope stack.
+func (d *Device) PushErrorScope(filter ErrorFilter) error {
+	return d.impl.PushErrorScope(core.ErrorFilter(filter))
+}
+
+// PopErrorScope pops the most recently pushed error scope.
+func (d *Device) PopErrorScope() *GPUError {
+	if d == nil || d.impl == nil {
+		return nil
+	}
+	e := d.impl.PopErrorScope()
+	if e == nil {
+		return nil
+	}
+	return &GPUError{Type: ErrorFilter(e.Type), Message: e.Message}
+}
+
+// WaitIdle waits for all GPU work to complete.
+func (d *Device) WaitIdle() error {
+	return d.impl.WaitIdle()
+}
+
+// Poll drives the per-device pending-map triage loop.
+func (d *Device) Poll(pollType PollType) bool {
+	if d == nil || d.impl == nil {
+		return false
+	}
+	return d.impl.Poll(core.PollType(pollType))
+}
+
+// FreeCommandBuffer is a no-op on the Rust backend.
+func (d *Device) FreeCommandBuffer(_ *CommandBuffer) {}
+
+// Release releases the device and all associated resources.
+func (d *Device) Release() {
+	if d == nil {
+		return
+	}
+	d.impl.Release()
+	d.instance = nil
+}
+
+// newDetachedTexture returns a texture that carries the descriptor's format
+// and no backend object. It backs the public wgputest.NewDetachedTexture.
+func newDetachedTexture(desc *TextureDescriptor) *Texture {
+	var format gputypes.TextureFormat
+	if desc != nil {
+		format = desc.Format
+	}
+	impl := resource.NewDetachedTexture(format)
+	tex := &Texture{impl: impl}
+	impl.Pub = tex
+	return tex
+}
+
+// convertTextureDesc converts a texture descriptor for wgpu-native, with the
+// zero members that have a WebGPU default set to it
+// (texture_sampler_defaults.go).
+func convertTextureDesc(desc *TextureDescriptor) *rwgpu.TextureDescriptor {
+	desc = normalizeTextureDescriptor(desc)
+	return &rwgpu.TextureDescriptor{
+		Label:         desc.Label,
+		Usage:         desc.Usage,
+		Dimension:     desc.Dimension,
+		Size:          rwgpu.Extent3D{Width: desc.Size.Width, Height: desc.Size.Height, DepthOrArrayLayers: desc.Size.DepthOrArrayLayers},
+		Format:        desc.Format,
+		MipLevelCount: desc.MipLevelCount,
+		SampleCount:   desc.SampleCount,
+		ViewFormats:   desc.ViewFormats,
+	}
 }
 
 // samplerDescriptorToRust converts a SamplerDescriptor for wgpu-native. A nil
@@ -164,373 +390,6 @@ func samplerDescriptorToRust(desc *SamplerDescriptor) *rwgpu.SamplerDescriptor {
 		Anisotropy:   normalizeAnisotropy(desc.Anisotropy),
 	}
 }
-
-// CreateShaderModule creates a shader module.
-func (d *Device) CreateShaderModule(desc *ShaderModuleDescriptor) (*ShaderModule, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	if desc == nil {
-		return nil, fmt.Errorf("wgpu: shader module descriptor is nil")
-	}
-
-	var rm *rwgpu.ShaderModule
-	var err error
-
-	switch {
-	case desc.WGSL != "":
-		rm, err = d.r.CreateShaderModuleWGSL(desc.WGSL)
-	case len(desc.SPIRV) > 0:
-		rm, err = d.r.CreateShaderModuleSPIRV(desc.Label, desc.SPIRV)
-	default:
-		return nil, fmt.Errorf("wgpu: shader module descriptor has no source")
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create shader module: %w", err)
-	}
-
-	return &ShaderModule{r: rm, device: d}, nil
-}
-
-// CreateBindGroupLayout creates a bind group layout.
-func (d *Device) CreateBindGroupLayout(desc *BindGroupLayoutDescriptor) (*BindGroupLayout, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	if desc == nil {
-		return nil, fmt.Errorf("wgpu: bind group layout descriptor is nil")
-	}
-
-	rEntries := make([]rwgpu.BindGroupLayoutEntry, len(desc.Entries))
-	for i, e := range desc.Entries {
-		rEntries[i] = convertBindGroupLayoutEntry(e)
-	}
-
-	rl, err := d.r.CreateBindGroupLayout(&rwgpu.BindGroupLayoutDescriptor{
-		Label:   desc.Label,
-		Entries: rEntries,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create bind group layout: %w", err)
-	}
-
-	return &BindGroupLayout{r: rl, device: d}, nil
-}
-
-// CreatePipelineLayout creates a pipeline layout.
-func (d *Device) CreatePipelineLayout(desc *PipelineLayoutDescriptor) (*PipelineLayout, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	if desc == nil {
-		return nil, fmt.Errorf("wgpu: pipeline layout descriptor is nil")
-	}
-
-	rLayouts := make([]*rwgpu.BindGroupLayout, len(desc.BindGroupLayouts))
-	for i, l := range desc.BindGroupLayouts {
-		if l != nil {
-			rLayouts[i] = l.r
-		}
-	}
-
-	rl, err := d.r.CreatePipelineLayout(&rwgpu.PipelineLayoutDescriptor{
-		Label:            desc.Label,
-		BindGroupLayouts: rLayouts,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create pipeline layout: %w", err)
-	}
-
-	return &PipelineLayout{r: rl, device: d}, nil
-}
-
-// CreateBindGroup creates a bind group.
-func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	if desc == nil {
-		return nil, fmt.Errorf("wgpu: bind group descriptor is nil")
-	}
-
-	var rLayout *rwgpu.BindGroupLayout
-	if desc.Layout != nil {
-		rLayout = desc.Layout.r
-	}
-
-	rEntries := make([]rwgpu.BindGroupEntry, len(desc.Entries))
-	for i, e := range desc.Entries {
-		rEntries[i] = convertBindGroupEntry(e)
-	}
-
-	rg, err := d.r.CreateBindGroup(&rwgpu.BindGroupDescriptor{
-		Label:   desc.Label,
-		Layout:  rLayout,
-		Entries: rEntries,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create bind group: %w", err)
-	}
-
-	return &BindGroup{r: rg, device: d}, nil
-}
-
-// CreateRenderPipeline creates a render pipeline.
-func (d *Device) CreateRenderPipeline(desc *RenderPipelineDescriptor) (*RenderPipeline, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	if desc == nil {
-		return nil, fmt.Errorf("wgpu: render pipeline descriptor is nil")
-	}
-
-	if err := checkRustRenderConstants(desc); err != nil {
-		return nil, err
-	}
-	rDesc := convertRenderPipelineDesc(desc)
-
-	rp, err := d.r.CreateRenderPipeline(rDesc)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create render pipeline: %w", err)
-	}
-
-	return &RenderPipeline{r: rp, device: d}, nil
-}
-
-// errRustConstantsUnmapped is returned for a programmable stage with pipeline
-// constants under -tags rust: go-webgpu's ComputePipelineDescriptor has no
-// constants and its render stages always send constantCount 0, so the
-// constants would be dropped silently and the shader would run with its
-// override defaults.
-var errRustConstantsUnmapped = errors.New("wgpu: pipeline constants are not supported with -tags rust: go-webgpu does not map constants yet")
-
-// checkRustStageConstants checks a stage's constants as every build does
-// (pipeconst.Validate), then refuses any constant, since go-webgpu cannot
-// pass them on.
-func checkRustStageConstants(stage string, constants map[string]float64) error {
-	if err := pipeconst.Validate(constants); err != nil {
-		return fmt.Errorf("wgpu: %s stage: %w", stage, err)
-	}
-	if len(constants) != 0 {
-		return fmt.Errorf("%s stage: %w", stage, errRustConstantsUnmapped)
-	}
-	return nil
-}
-
-// checkRustRenderConstants applies checkRustStageConstants to the vertex and
-// the fragment stage.
-func checkRustRenderConstants(desc *RenderPipelineDescriptor) error {
-	if err := checkRustStageConstants("vertex", desc.Vertex.Constants); err != nil {
-		return err
-	}
-	if desc.Fragment != nil {
-		return checkRustStageConstants("fragment", desc.Fragment.Constants)
-	}
-	return nil
-}
-
-// CreateComputePipeline creates a compute pipeline.
-func (d *Device) CreateComputePipeline(desc *ComputePipelineDescriptor) (*ComputePipeline, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	if desc == nil {
-		return nil, fmt.Errorf("wgpu: compute pipeline descriptor is nil")
-	}
-	if err := checkRustStageConstants("compute", desc.Constants); err != nil {
-		return nil, err
-	}
-
-	var rLayout *rwgpu.PipelineLayout
-	if desc.Layout != nil {
-		rLayout = desc.Layout.r
-	}
-	var rModule *rwgpu.ShaderModule
-	if desc.Module != nil {
-		rModule = desc.Module.r
-	}
-
-	rp, err := d.r.CreateComputePipeline(&rwgpu.ComputePipelineDescriptor{
-		Label:      desc.Label,
-		Layout:     rLayout,
-		Module:     rModule,
-		EntryPoint: desc.EntryPoint,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create compute pipeline: %w", err)
-	}
-
-	return &ComputePipeline{r: rp, device: d}, nil
-}
-
-// CreateCommandEncoder creates a command encoder for recording GPU commands.
-func (d *Device) CreateCommandEncoder(desc *CommandEncoderDescriptor) (*CommandEncoder, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-
-	var rDesc *rwgpu.CommandEncoderDescriptor
-	if desc != nil {
-		rDesc = &rwgpu.CommandEncoderDescriptor{
-			Label: desc.Label,
-		}
-	}
-
-	re, err := d.r.CreateCommandEncoder(rDesc)
-	if err != nil {
-		return nil, fmt.Errorf("wgpu: failed to create command encoder: %w", err)
-	}
-
-	return &CommandEncoder{r: re, device: d}, nil
-}
-
-// CreateFence creates a GPU synchronization fence.
-// On Rust backend, fences are not exposed by wgpu-native.
-// Returns a no-op fence for API compatibility.
-func (d *Device) CreateFence() (*Fence, error) {
-	if d.released {
-		return nil, ErrReleased
-	}
-	return &Fence{}, nil
-}
-
-// DestroyFence destroys a fence.
-// On Rust backend, fences are no-ops — this is a no-op.
-//
-// Deprecated: Use Fence.Release() instead.
-func (d *Device) DestroyFence(f *Fence) {
-	if f != nil {
-		f.Release()
-	}
-}
-
-// ResetFence resets a fence to the unsignaled state.
-// On Rust backend, fences are no-ops — this always succeeds.
-func (d *Device) ResetFence(f *Fence) error {
-	if d.released {
-		return ErrReleased
-	}
-	if f == nil || f.released {
-		return ErrReleased
-	}
-	return nil
-}
-
-// GetFenceStatus returns true if the fence is signaled (non-blocking).
-// On Rust backend, fences are no-ops — always reports signaled.
-func (d *Device) GetFenceStatus(f *Fence) (bool, error) {
-	if d.released {
-		return false, ErrReleased
-	}
-	if f == nil || f.released {
-		return false, ErrReleased
-	}
-	return true, nil
-}
-
-// WaitForFence waits for a fence to reach the specified value.
-// On Rust backend, fences are no-ops — polls the device and returns immediately.
-func (d *Device) WaitForFence(f *Fence, _ uint64, _ time.Duration) (bool, error) {
-	if d.released {
-		return false, ErrReleased
-	}
-	if f == nil || f.released {
-		return false, ErrReleased
-	}
-	// Poll device to ensure GPU work has progressed.
-	d.r.Poll(true)
-	return true, nil
-}
-
-// PushErrorScope pushes a new error scope onto the device's error scope stack.
-// It returns an error for a filter that is not one of the three WebGPU error
-// filters, and pushes nothing then. The return value is what makes the reason
-// reach the caller: wgpu-native panics on an unknown filter and a panic across
-// the FFI boundary aborts the process, so the value is rejected here instead.
-func (d *Device) PushErrorScope(filter ErrorFilter) error {
-	rFilter, err := errorFilterToRust(filter)
-	if err != nil {
-		return err
-	}
-	if d.r != nil {
-		d.r.PushErrorScope(rFilter)
-	}
-	return nil
-}
-
-// errorFilterToRust maps an ErrorFilter (core's numbering, Validation = 0, as
-// on the native build) to the webgpu.h member of the same name, which counts
-// from 1. wgpu-native panics on a filter it does not know, and a panic across
-// the FFI boundary aborts the process, so an unmapped value is an error here
-// and never reaches the binding (P3-API-025).
-func errorFilterToRust(filter ErrorFilter) (rwgpu.ErrorFilter, error) {
-	switch filter {
-	case ErrorFilterValidation:
-		return rwgpu.ErrorFilterValidation, nil
-	case ErrorFilterOutOfMemory:
-		return rwgpu.ErrorFilterOutOfMemory, nil
-	case ErrorFilterInternal:
-		return rwgpu.ErrorFilterInternal, nil
-	}
-	return 0, fmt.Errorf("wgpu: PushErrorScope: unknown error filter %d", int(filter))
-}
-
-// PopErrorScope pops the most recently pushed error scope.
-// Returns the captured error, or nil if no error occurred.
-func (d *Device) PopErrorScope() *GPUError {
-	if d.r == nil || d.instance == nil || d.instance.r == nil {
-		return nil
-	}
-	errType, message, err := d.r.PopErrorScopeAsync(d.instance.r)
-	if err != nil {
-		return nil //nolint:nilerr // PopErrorScope returns *GPUError not error; infrastructure failure = no captured error
-	}
-	if errType == rwgpu.ErrorTypeNoError {
-		return nil
-	}
-	return &GPUError{
-		Type:    convertRustErrorType(errType),
-		Message: message,
-	}
-}
-
-// WaitIdle waits for all GPU work to complete.
-func (d *Device) WaitIdle() error {
-	if d.released {
-		return ErrReleased
-	}
-	// Poll with wait=true blocks until all work completes.
-	d.r.Poll(true)
-	return nil
-}
-
-// Poll drives the per-device pending-map triage loop.
-func (d *Device) Poll(pollType PollType) bool {
-	if d == nil || d.r == nil {
-		return false
-	}
-	return d.r.Poll(pollType == PollWait)
-}
-
-// FreeCommandBuffer is a no-op on Rust backend.
-func (d *Device) FreeCommandBuffer(_ *CommandBuffer) {}
-
-// HalDevice returns nil on Rust backend. There is no HAL layer.
-func (d *Device) HalDevice() any { return nil }
-
-// Release releases the device and all associated resources.
-func (d *Device) Release() {
-	if d.released {
-		return
-	}
-	d.released = true
-	if d.r != nil {
-		d.r.Release()
-	}
-}
-
-// --- Descriptor conversion helpers ---
 
 // convertBindGroupLayoutEntry converts a gputypes.BindGroupLayoutEntry to rwgpu.
 func convertBindGroupLayoutEntry(e gputypes.BindGroupLayoutEntry) rwgpu.BindGroupLayoutEntry {
@@ -575,13 +434,13 @@ func convertBindGroupEntry(e BindGroupEntry) rwgpu.BindGroupEntry {
 		Size:    e.Size,
 	}
 	if e.Buffer != nil {
-		re.Buffer = e.Buffer.r
+		re.Buffer = e.Buffer.impl.R()
 	}
 	if e.Sampler != nil {
-		re.Sampler = e.Sampler.r
+		re.Sampler = e.Sampler.impl.Rust()
 	}
 	if e.TextureView != nil {
-		re.TextureView = e.TextureView.r
+		re.TextureView = e.TextureView.impl.Rust()
 	}
 	return re
 }
@@ -593,7 +452,7 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 	}
 
 	if desc.Layout != nil {
-		rDesc.Layout = desc.Layout.r
+		rDesc.Layout = desc.Layout.impl.Rust()
 	}
 
 	// Vertex state.
@@ -601,7 +460,7 @@ func convertRenderPipelineDesc(desc *RenderPipelineDescriptor) *rwgpu.RenderPipe
 		EntryPoint: desc.Vertex.EntryPoint,
 	}
 	if desc.Vertex.Module != nil {
-		rDesc.Vertex.Module = desc.Vertex.Module.r
+		rDesc.Vertex.Module = desc.Vertex.Module.impl.Rust()
 	}
 	rDesc.Vertex.Buffers = convertVertexBufferLayouts(desc.Vertex.Buffers)
 
@@ -701,7 +560,7 @@ func convertFragmentState(fs *FragmentState) *rwgpu.FragmentState {
 		EntryPoint: fs.EntryPoint,
 	}
 	if fs.Module != nil {
-		result.Module = fs.Module.r
+		result.Module = fs.Module.impl.Rust()
 	}
 
 	result.Targets = make([]rwgpu.ColorTargetState, len(fs.Targets))
@@ -727,18 +586,4 @@ func convertFragmentState(fs *FragmentState) *rwgpu.FragmentState {
 		result.Targets[i] = ct
 	}
 	return result
-}
-
-// convertRustErrorType maps go-webgpu ErrorType to our ErrorFilter.
-func convertRustErrorType(et rwgpu.ErrorType) ErrorFilter {
-	switch et {
-	case rwgpu.ErrorTypeValidation:
-		return ErrorFilterValidation
-	case rwgpu.ErrorTypeOutOfMemory:
-		return ErrorFilterOutOfMemory
-	case rwgpu.ErrorTypeInternal:
-		return ErrorFilterInternal
-	default:
-		return ErrorFilterInternal
-	}
 }

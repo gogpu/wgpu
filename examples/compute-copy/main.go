@@ -21,7 +21,7 @@ import (
 	"github.com/gogpu/wgpu"
 
 	// Register all available GPU backends (Vulkan, DX12, GLES, Metal, etc.)
-	_ "github.com/gogpu/wgpu/hal/allbackends"
+	_ "github.com/gogpu/wgpu/internal/hal/allbackends"
 )
 
 // copyShaderWGSL copies elements from source to destination with a scale factor.

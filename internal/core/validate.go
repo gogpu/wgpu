@@ -1,0 +1,1582 @@
+//go:build !(js && wasm)
+
+package core
+
+import (
+	"errors"
+	"fmt"
+	"math/bits"
+
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pipeconst"
+)
+
+// ValidateTextureDescriptor validates a texture descriptor against device limits and features.
+// Returns nil if valid, or a *CreateTextureError describing the first validation failure.
+func ValidateTextureDescriptor(desc *hal.TextureDescriptor, limits gputypes.Limits, features gputypes.Features) error {
+	label := desc.Label
+	w := desc.Size.Width
+	h := desc.Size.Height
+	d := desc.Size.DepthOrArrayLayers
+
+	// T17: Dimension must not be Undefined.
+	if desc.Dimension == gputypes.TextureDimensionUndefined {
+		return &CreateTextureError{
+			Kind:  CreateTextureErrorInvalidDimension,
+			Label: label,
+		}
+	}
+
+	// T16: Format must not be Undefined.
+	if desc.Format == gputypes.TextureFormatUndefined {
+		return &CreateTextureError{
+			Kind:  CreateTextureErrorInvalidFormat,
+			Label: label,
+		}
+	}
+
+	// T1-T3: All dimensions must be > 0.
+	if w == 0 || h == 0 || d == 0 {
+		return &CreateTextureError{
+			Kind:            CreateTextureErrorZeroDimension,
+			Label:           label,
+			RequestedWidth:  w,
+			RequestedHeight: h,
+			RequestedDepth:  d,
+		}
+	}
+
+	// T4-T7 dimension limits, then the compressed-format shape rules.
+	if err := validateTextureShape(desc, label, limits); err != nil {
+		return err
+	}
+
+	// T15: Usage must not be empty.
+	if desc.Usage == gputypes.TextureUsageNone {
+		return &CreateTextureError{
+			Kind:  CreateTextureErrorEmptyUsage,
+			Label: label,
+		}
+	}
+
+	// Usage must not contain unknown bits.
+	if desc.Usage.ContainsUnknownBits() {
+		return &CreateTextureError{
+			Kind:  CreateTextureErrorInvalidUsage,
+			Label: label,
+		}
+	}
+
+	// T8-T9: Mip level count validation.
+	if desc.MipLevelCount == 0 {
+		return &CreateTextureError{
+			Kind:          CreateTextureErrorInvalidMipLevelCount,
+			Label:         label,
+			RequestedMips: 0,
+			MaxMips:       maxMips(desc.Dimension, w, h, d),
+		}
+	}
+	mMax := maxMips(desc.Dimension, w, h, d)
+	if desc.MipLevelCount > mMax {
+		return &CreateTextureError{
+			Kind:          CreateTextureErrorInvalidMipLevelCount,
+			Label:         label,
+			RequestedMips: desc.MipLevelCount,
+			MaxMips:       mMax,
+		}
+	}
+
+	// T10: Sample count must be 1 or 4.
+	if desc.SampleCount != 1 && desc.SampleCount != 4 {
+		return &CreateTextureError{
+			Kind:             CreateTextureErrorInvalidSampleCount,
+			Label:            label,
+			RequestedSamples: desc.SampleCount,
+		}
+	}
+
+	// T11-T14: Multisample constraints.
+	if desc.SampleCount > 1 {
+		if err := validateTextureMultisample(desc, label); err != nil {
+			return err
+		}
+	}
+
+	// VAL-C6..C11: Format feature gates.
+	if err := validateTextureFormatFeatures(desc.Format, desc.Usage, features); err != nil {
+		return err
+	}
+
+	// View formats (Rust validate_texture_descriptor_inner).
+	if err := validateTextureViewFormats(label, desc.Format, desc.ViewFormats, features); err != nil {
+		return err
+	}
+
+	// VAL-C14..C18: Usage flag compatibility at creation.
+	if err := ValidateTextureUsageFlags(desc.Usage, desc.SampleCount, desc.Format); err != nil {
+		var cte *CreateTextureError
+		if errors.As(err, &cte) && cte.Label == "" {
+			cte.Label = label
+		}
+		return err
+	}
+
+	return nil
+}
+
+// validateTextureShape checks the size of a texture: the T4-T7 dimension
+// limits, then the shape rules of a compressed format.
+func validateTextureShape(desc *hal.TextureDescriptor, label string, limits gputypes.Limits) error {
+	if err := validateTextureDimLimits(desc, label, limits); err != nil {
+		return err
+	}
+	return validateCompressedTextureShape(desc, label)
+}
+
+// validateTextureDimLimits checks T4-T7 dimension limit constraints.
+func validateTextureDimLimits(desc *hal.TextureDescriptor, label string, limits gputypes.Limits) error {
+	w := desc.Size.Width
+	h := desc.Size.Height
+	d := desc.Size.DepthOrArrayLayers
+
+	switch desc.Dimension {
+	case gputypes.TextureDimension1D:
+		// T4: Width <= maxTextureDimension1D
+		if w > limits.MaxTextureDimension1D {
+			return &CreateTextureError{
+				Kind:           CreateTextureErrorMaxDimension,
+				Label:          label,
+				RequestedWidth: w,
+				MaxDimension:   limits.MaxTextureDimension1D,
+			}
+		}
+		// T7: ArrayLayers <= maxTextureArrayLayers
+		if d > limits.MaxTextureArrayLayers {
+			return &CreateTextureError{
+				Kind:           CreateTextureErrorMaxArrayLayers,
+				Label:          label,
+				RequestedDepth: d,
+				MaxDimension:   limits.MaxTextureArrayLayers,
+			}
+		}
+	case gputypes.TextureDimension2D:
+		// T5: Width, Height <= maxTextureDimension2D
+		if w > limits.MaxTextureDimension2D || h > limits.MaxTextureDimension2D {
+			return &CreateTextureError{
+				Kind:            CreateTextureErrorMaxDimension,
+				Label:           label,
+				RequestedWidth:  w,
+				RequestedHeight: h,
+				MaxDimension:    limits.MaxTextureDimension2D,
+			}
+		}
+		// T7: ArrayLayers <= maxTextureArrayLayers
+		if d > limits.MaxTextureArrayLayers {
+			return &CreateTextureError{
+				Kind:           CreateTextureErrorMaxArrayLayers,
+				Label:          label,
+				RequestedDepth: d,
+				MaxDimension:   limits.MaxTextureArrayLayers,
+			}
+		}
+	case gputypes.TextureDimension3D:
+		// T6: Width, Height, Depth <= maxTextureDimension3D
+		if w > limits.MaxTextureDimension3D || h > limits.MaxTextureDimension3D || d > limits.MaxTextureDimension3D {
+			return &CreateTextureError{
+				Kind:            CreateTextureErrorMaxDimension,
+				Label:           label,
+				RequestedWidth:  w,
+				RequestedHeight: h,
+				RequestedDepth:  d,
+				MaxDimension:    limits.MaxTextureDimension3D,
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateTextureMultisample checks T11-T14 multisample constraints.
+func validateTextureMultisample(desc *hal.TextureDescriptor, label string) error {
+	// T11: MipLevelCount must be 1.
+	if desc.MipLevelCount != 1 {
+		return &CreateTextureError{
+			Kind:          CreateTextureErrorMultisampleMipLevel,
+			Label:         label,
+			RequestedMips: desc.MipLevelCount,
+		}
+	}
+	// T12: Dimension must be 2D.
+	if desc.Dimension != gputypes.TextureDimension2D {
+		return &CreateTextureError{
+			Kind:  CreateTextureErrorMultisampleDimension,
+			Label: label,
+		}
+	}
+	// T13: DepthOrArrayLayers must be 1.
+	if desc.Size.DepthOrArrayLayers != 1 {
+		return &CreateTextureError{
+			Kind:           CreateTextureErrorMultisampleArrayLayers,
+			Label:          label,
+			RequestedDepth: desc.Size.DepthOrArrayLayers,
+		}
+	}
+	// T14: Usage must not include StorageBinding.
+	if desc.Usage.Contains(gputypes.TextureUsageStorageBinding) {
+		return &CreateTextureError{
+			Kind:  CreateTextureErrorMultisampleStorageBinding,
+			Label: label,
+		}
+	}
+	return nil
+}
+
+// ValidateSamplerDescriptor validates a sampler descriptor and enabled features.
+// Returns nil if valid, or a *CreateSamplerError describing the first validation failure.
+func ValidateSamplerDescriptor(desc *hal.SamplerDescriptor, features gputypes.Features) error {
+	label := desc.Label
+
+	// S1: LodMinClamp >= 0.
+	if desc.LodMinClamp < 0 {
+		return &CreateSamplerError{
+			Kind:        CreateSamplerErrorInvalidLodMinClamp,
+			Label:       label,
+			LodMinClamp: desc.LodMinClamp,
+		}
+	}
+
+	// S2: LodMaxClamp >= LodMinClamp.
+	if desc.LodMaxClamp < desc.LodMinClamp {
+		return &CreateSamplerError{
+			Kind:        CreateSamplerErrorInvalidLodMaxClamp,
+			Label:       label,
+			LodMinClamp: desc.LodMinClamp,
+			LodMaxClamp: desc.LodMaxClamp,
+		}
+	}
+
+	// S3-S6: Anisotropy validation. Treat 0 as 1 (default).
+	anisotropy := desc.Anisotropy
+	if anisotropy > 1 {
+		// S4-S6: Anisotropy > 1 requires linear filtering for mag, min, and mipmap.
+		if desc.MagFilter != gputypes.FilterModeLinear ||
+			desc.MinFilter != gputypes.FilterModeLinear ||
+			desc.MipmapFilter != gputypes.FilterModeLinear {
+			return &CreateSamplerError{
+				Kind:       CreateSamplerErrorAnisotropyRequiresLinearFiltering,
+				Label:      label,
+				Anisotropy: anisotropy,
+			}
+		}
+	}
+
+	// FeatureFloat32Filterable is enforced at sampled-texture bind/draw time when
+	// filtering unfilterable float formats; sampler descriptors carry no format.
+
+	_ = features
+	return nil
+}
+
+// ValidateShaderModuleDescriptor validates a shader module descriptor and features.
+// Returns nil if valid, or an error describing the first validation failure.
+//
+// A WGSL source is parsed and validated here, once, with the capabilities of
+// features; on success desc.IR and desc.Info hold the result for the HAL and
+// for pipeline introspection (Rust wgpu-core create_shader_module).
+func ValidateShaderModuleDescriptor(desc *hal.ShaderModuleDescriptor, features gputypes.Features) error {
+	label := desc.Label
+	hasWGSL := desc.Source.WGSL != ""
+	hasSPIRV := len(desc.Source.SPIRV) > 0
+
+	// SM1: Must have at least one source.
+	if !hasWGSL && !hasSPIRV {
+		return &CreateShaderModuleError{
+			Kind:  CreateShaderModuleErrorNoSource,
+			Label: label,
+		}
+	}
+
+	// SM2: Must not have both.
+	if hasWGSL && hasSPIRV {
+		return &CreateShaderModuleError{
+			Kind:  CreateShaderModuleErrorDualSource,
+			Label: label,
+		}
+	}
+
+	return validateShaderModuleFeatures(desc, features)
+}
+
+// ValidatePipelineLayoutDescriptor validates a pipeline layout descriptor against device limits
+// and enabled features.
+// Returns nil if valid, or a validation error describing the first failure.
+//
+// Checks: bind group layout count <= maxBindGroups (typically 4).
+// Rust: wgpu-core device/resource.rs:3562-3568.
+func ValidatePipelineLayoutDescriptor(desc *hal.PipelineLayoutDescriptor, limits gputypes.Limits, features gputypes.Features) error {
+	label := desc.Label
+
+	// PL1: Bind group layout count must not exceed maxBindGroups.
+	if len(desc.BindGroupLayouts) > int(limits.MaxBindGroups) {
+		return &CreatePipelineLayoutError{
+			Kind:      CreatePipelineLayoutErrorTooManyGroups,
+			Label:     label,
+			Count:     len(desc.BindGroupLayouts),
+			MaxGroups: limits.MaxBindGroups,
+		}
+	}
+
+	// VAL-C4: Push constants require FeaturePushConstants.
+	// Reference: wgpu-core device/resource.rs push constant validation.
+	if len(desc.PushConstantRanges) > 0 {
+		if err := RequireFeature(features, gputypes.FeaturePushConstants, "CreatePipelineLayout"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// isDepthStencilFormat returns true if the format is a depth and/or stencil format.
+// These formats do not have a color aspect and cannot be used as color targets.
+//
+// Matches Rust wgpu-types TextureFormat::is_depth_stencil_format().
+// See: https://gpuweb.github.io/gpuweb/#depth-formats
+func isDepthStencilFormat(f gputypes.TextureFormat) bool {
+	switch f {
+	case gputypes.TextureFormatStencil8,
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8:
+		return true
+	}
+	return false
+}
+
+// hasDepthAspect returns true if the format has a depth aspect.
+// Stencil8 is stencil-only and does NOT have a depth aspect.
+//
+// Matches Rust hal::FormatAspects::from(format).contains(DEPTH).
+func hasDepthAspect(f gputypes.TextureFormat) bool {
+	switch f {
+	case gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8:
+		return true
+	}
+	return false
+}
+
+// hasStencilAspect returns true if the format has a stencil aspect.
+// Depth16Unorm, Depth24Plus, Depth32Float are depth-only and do NOT have a stencil aspect.
+//
+// Matches Rust hal::FormatAspects::from(format).contains(STENCIL).
+func hasStencilAspect(f gputypes.TextureFormat) bool {
+	switch f {
+	case gputypes.TextureFormatStencil8,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32FloatStencil8:
+		return true
+	}
+	return false
+}
+
+// isDepthEnabled returns true if depth testing is enabled on the depth/stencil state.
+// Matches Rust wgpu-types DepthStencilState::is_depth_enabled():
+//
+//	depth_compare.unwrap_or_default() != Always || depth_write_enabled
+//
+// An absent depthCompare (CompareFunctionUndefined) counts as Always: the spec
+// "compare fragment" algorithm passes every fragment when it is undefined.
+func isDepthEnabled(ds *hal.DepthStencilState) bool {
+	compare := ds.DepthCompare
+	if compare == gputypes.CompareFunctionUndefined {
+		compare = gputypes.CompareFunctionAlways
+	}
+	return compare != gputypes.CompareFunctionAlways || ds.DepthWriteEnabled
+}
+
+// depthCompareRequired reports whether a depth/stencil state on a format with
+// a depth aspect must provide depthCompare (WebGPU spec, validating
+// GPUDepthStencilState; Rust wgpu-core depth_compare_required): depth writes
+// are enabled or a face's depthFailOp is not keep. An undefined depthFailOp
+// is the spec default keep.
+func depthCompareRequired(ds *hal.DepthStencilState) bool {
+	changesOnDepthFail := func(op gputypes.StencilOperation) bool {
+		return op != gputypes.StencilOperationUndefined && op != hal.StencilOperationKeep
+	}
+	return ds.DepthWriteEnabled ||
+		changesOnDepthFail(ds.StencilFront.DepthFailOp) ||
+		changesOnDepthFail(ds.StencilBack.DepthFailOp)
+}
+
+// validateDepthStencilState checks a pipeline's depth/stencil state in the
+// order of Rust wgpu-core (device/resource.rs, create_render_pipeline):
+// format kind, depth aspect, depthCompare presence, stencil aspect.
+func validateDepthStencilState(ds *hal.DepthStencilState, label string) error {
+	dsErr := func(kind CreateRenderPipelineErrorKind) error {
+		return &CreateRenderPipelineError{Kind: kind, Label: label, Format: ds.Format.String()}
+	}
+
+	// RP9: the format must be a depth/stencil format (not color).
+	// Rust: FormatNotDepthOrStencil.
+	if ds.Format != gputypes.TextureFormatUndefined && !isDepthStencilFormat(ds.Format) {
+		return dsErr(CreateRenderPipelineErrorDepthStencilColorFormat)
+	}
+
+	// RP9b: if depth operations are enabled, the format must have a depth
+	// aspect. Rust: ds.is_depth_enabled() && !aspect.contains(DEPTH).
+	hasDepth := hasDepthAspect(ds.Format)
+	if !hasDepth && isDepthEnabled(ds) {
+		return dsErr(CreateRenderPipelineErrorDepthFormatNoDepthAspect)
+	}
+
+	// RP9d: with a depth aspect, depthCompare must be provided when it is
+	// used. Rust: MissingDepthCompare. depthWriteEnabled is a bool here, so
+	// the spec's "must be provided" for it cannot be checked.
+	if hasDepth && ds.DepthCompare == gputypes.CompareFunctionUndefined && depthCompareRequired(ds) {
+		return dsErr(CreateRenderPipelineErrorMissingDepthCompare)
+	}
+
+	// RP9c: if stencil operations are enabled, the format must have a
+	// stencil aspect (faces only, see isStencilEnabled).
+	if isStencilEnabled(ds) && !hasStencilAspect(ds.Format) {
+		return dsErr(CreateRenderPipelineErrorDepthFormatNoStencilAspect)
+	}
+	return nil
+}
+
+// stencilFaceIgnored returns true if the stencil face state is the default,
+// "ignore" state (compare always, all ops keep; Rust StencilFaceState::IGNORE).
+// An Undefined member counts as its default: it is an absent member, which
+// the spec gives the default value. The root sends normalized faces; a
+// caller of this package that builds the HAL descriptor itself may leave
+// them zero.
+func stencilFaceIgnored(face hal.StencilFaceState) bool {
+	return (face.Compare == gputypes.CompareFunctionAlways || face.Compare == gputypes.CompareFunctionUndefined) &&
+		stencilOpIsKeep(face.FailOp) && stencilOpIsKeep(face.DepthFailOp) && stencilOpIsKeep(face.PassOp)
+}
+
+func stencilOpIsKeep(op gputypes.StencilOperation) bool {
+	return op == gputypes.StencilOperationKeep || op == gputypes.StencilOperationUndefined
+}
+
+// isStencilEnabled returns true if stencil testing is enabled on the
+// depth/stencil state: either face is not the default (compare always, all
+// ops keep). The WebGPU spec requires a stencil aspect from the faces alone
+// (index.bs, GPUDepthStencilState validation: "stencilFront or stencilBack
+// are not the default values"), and Dawn decides the same way
+// (RenderPipeline.cpp UsesStencil). The masks are literal: zero masks compare
+// 0 with 0 and still run the test, as hal/vulkan/pipeline.go enables it.
+//
+// This deviates from Rust wgpu-types StencilState::is_enabled, which also
+// requires a non-zero read or write mask; that is not in the spec.
+func isStencilEnabled(ds *hal.DepthStencilState) bool {
+	return !stencilFaceIgnored(ds.StencilFront) || !stencilFaceIgnored(ds.StencilBack)
+}
+
+// ValidateRenderPipelineDescriptor validates a render pipeline descriptor against device limits and features.
+// Returns nil if valid, or a *CreateRenderPipelineError describing the first validation failure.
+func ValidateRenderPipelineDescriptor(desc *hal.RenderPipelineDescriptor, limits gputypes.Limits, features gputypes.Features) error {
+	label := desc.Label
+
+	// RP1: Vertex module must not be nil.
+	if desc.Vertex.Module == nil {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorMissingVertexModule,
+			Label: label,
+		}
+	}
+
+	// RP2: Vertex entry point must not be empty.
+	if desc.Vertex.EntryPoint == "" {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorMissingVertexEntryPoint,
+			Label: label,
+		}
+	}
+
+	// RP10: Vertex buffer layouts.
+	if err := validateVertexBuffers(desc.Vertex.Buffers, label, limits); err != nil {
+		return err
+	}
+
+	// RP11: Pipeline constants of both stages (the check compute shares).
+	if err := validateRenderStageConstants(desc, label); err != nil {
+		return err
+	}
+
+	// RP3-RP6: Fragment stage validation (if present).
+	if desc.Fragment != nil {
+		if err := validateFragmentStage(desc.Fragment, desc.DepthStencil != nil, label, limits); err != nil {
+			return err
+		}
+	}
+
+	// RP8: Color target formats must be color formats (not depth/stencil).
+	// Rust: resource.rs:4083-4085 — FormatNotColor
+	if desc.Fragment != nil {
+		for i, ct := range desc.Fragment.Targets {
+			if ct.Format != gputypes.TextureFormatUndefined && isDepthStencilFormat(ct.Format) {
+				return &CreateRenderPipelineError{
+					Kind:        CreateRenderPipelineErrorColorTargetDepthFormat,
+					Label:       label,
+					TargetIndex: uint32(i),
+					Format:      ct.Format.String(),
+				}
+			}
+		}
+	}
+
+	// RP9: depth/stencil state (format kind, aspects, depthCompare).
+	if desc.DepthStencil != nil {
+		if err := validateDepthStencilState(desc.DepthStencil, label); err != nil {
+			return err
+		}
+	}
+
+	// RP7: SampleCount must be 1 or 4.
+	if desc.Multisample.Count != 0 && desc.Multisample.Count != 1 && desc.Multisample.Count != 4 {
+		return &CreateRenderPipelineError{
+			Kind:        CreateRenderPipelineErrorInvalidSampleCount,
+			Label:       label,
+			SampleCount: desc.Multisample.Count,
+		}
+	}
+
+	return validateRenderPipelineFormatFeatures(desc, features)
+}
+
+// validateVertexBuffers checks RP10 vertex buffer layout constraints.
+//
+// WebGPU spec (GPUVertexBufferLayout validation):
+//   - arrayStride must be a multiple of 4;
+//   - arrayStride must not exceed maxVertexBufferArrayStride;
+//   - every attribute's offset + format size must fit in arrayStride, or in
+//     maxVertexBufferArrayStride when arrayStride is 0.
+//
+// arrayStride 0 is legal WebGPU (broadcast: every vertex or instance reads
+// element 0). Vulkan and DX12 take it natively; Metal, GLES and software
+// emulate it in their vertex input setup.
+func validateVertexBuffers(buffers []gputypes.VertexBufferLayout, label string, limits gputypes.Limits) error {
+	// RP10e: at most maxVertexBuffers buffers.
+	if len(buffers) > int(limits.MaxVertexBuffers) {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorTooManyVertexBuffers,
+			Label: label,
+			Given: len(buffers),
+			Limit: limits.MaxVertexBuffers,
+		}
+	}
+
+	// Shader locations of every buffer's attributes, for RP10h.
+	locations := make(map[uint32]struct{})
+	maxStride := uint64(limits.MaxVertexBufferArrayStride)
+	for i := range buffers {
+		vb := &buffers[i]
+		bufferIndex := uint32(i)
+
+		// RP10a: arrayStride must be a multiple of 4.
+		if vb.ArrayStride%4 != 0 {
+			return &CreateRenderPipelineError{
+				Kind:        CreateRenderPipelineErrorVertexStrideMisaligned,
+				Label:       label,
+				BufferIndex: bufferIndex,
+				ArrayStride: vb.ArrayStride,
+			}
+		}
+
+		// RP10b: arrayStride must not exceed the device limit (skipped when the limit is unset).
+		if maxStride > 0 && vb.ArrayStride > maxStride {
+			return &CreateRenderPipelineError{
+				Kind:           CreateRenderPipelineErrorVertexStrideTooLarge,
+				Label:          label,
+				BufferIndex:    bufferIndex,
+				ArrayStride:    vb.ArrayStride,
+				MaxArrayStride: limits.MaxVertexBufferArrayStride,
+			}
+		}
+
+		// RP10c: each attribute must fit in the stride, or in the limit when the stride is 0.
+		bound := vb.ArrayStride
+		if bound == 0 {
+			bound = maxStride
+		}
+		if bound > 0 {
+			for j, attr := range vb.Attributes {
+				if attr.Offset+attr.Format.Size() > bound {
+					return &CreateRenderPipelineError{
+						Kind:            CreateRenderPipelineErrorVertexAttributeOutOfStride,
+						Label:           label,
+						BufferIndex:     bufferIndex,
+						ArrayStride:     vb.ArrayStride,
+						MaxArrayStride:  limits.MaxVertexBufferArrayStride,
+						AttributeIndex:  uint32(j),
+						AttributeOffset: attr.Offset,
+						AttributeFormat: attr.Format.String(),
+					}
+				}
+			}
+		}
+
+		// RP10f-RP10h: attribute offsets and shader locations.
+		if err := validateVertexAttributes(vb, bufferIndex, label, limits, locations); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// maxVertexAttributeOffset bounds a vertex attribute offset: Rust wgpu-core
+// rejects an offset of 0x10000000 or more (create_render_pipeline,
+// wgpu-core/src/device/resource.rs).
+const maxVertexAttributeOffset = 0x10000000
+
+// validateVertexAttributes checks the attributes of one vertex buffer in the
+// order of Rust wgpu-core create_render_pipeline
+// (wgpu-core/src/device/resource.rs): first whether the format is one gputypes
+// defines (a check Rust needs neither, since its VertexFormat is an enum),
+// then per attribute the offset alignment (RP10f) and the location limit
+// (RP10g), then per attribute the offset bound (RP10f) and location clashes
+// with every attribute seen so far (RP10h). locations collects the shader
+// locations across the pipeline's buffers.
+//
+// Rust's later total-count check against maxVertexAttributes cannot fail
+// after these: unique locations below maxVertexAttributes bound the total.
+// Its 64-bit format check needs Float64 vertex formats, which gputypes does
+// not define.
+func validateVertexAttributes(
+	vb *gputypes.VertexBufferLayout,
+	bufferIndex uint32,
+	label string,
+	limits gputypes.Limits,
+	locations map[uint32]struct{},
+) error {
+	attrError := func(kind CreateRenderPipelineErrorKind, j uint32, attr gputypes.VertexAttribute) error {
+		return &CreateRenderPipelineError{
+			Kind:                 kind,
+			Label:                label,
+			BufferIndex:          bufferIndex,
+			ArrayStride:          vb.ArrayStride,
+			AttributeIndex:       j,
+			AttributeOffset:      attr.Offset,
+			AttributeFormat:      attr.Format.String(),
+			AttributeFormatValue: attr.Format,
+			ShaderLocation:       attr.ShaderLocation,
+			Limit:                limits.MaxVertexAttributes,
+		}
+	}
+	for j, attr := range vb.Attributes {
+		// The format must be one gputypes defines. This is not a spec
+		// validation rule: WebGPU's IDL rejects an unknown GPUVertexFormat
+		// before the algorithm runs. A Go caller can build one, and an
+		// unknown value has size 0, so every other check here treats it as a
+		// no-op and a backend receives a format it cannot map
+		// (hal/gles/command.go vertexFormatToGL falls back to Float32x4,
+		// reading 16 bytes per vertex).
+		if attr.Format.Size() == 0 {
+			return attrError(CreateRenderPipelineErrorInvalidVertexFormat, uint32(j), attr)
+		}
+		// Every defined format is at least 2 bytes, so the alignment is
+		// non-zero here.
+		if alignment := min(4, attr.Format.Size()); attr.Offset%alignment != 0 {
+			return attrError(CreateRenderPipelineErrorVertexAttributeInvalidOffset, uint32(j), attr)
+		}
+		if attr.ShaderLocation >= limits.MaxVertexAttributes {
+			return attrError(CreateRenderPipelineErrorVertexAttributeLocationTooLarge, uint32(j), attr)
+		}
+	}
+	for j, attr := range vb.Attributes {
+		if attr.Offset >= maxVertexAttributeOffset {
+			return attrError(CreateRenderPipelineErrorVertexAttributeInvalidOffset, uint32(j), attr)
+		}
+		if _, clash := locations[attr.ShaderLocation]; clash {
+			return attrError(CreateRenderPipelineErrorShaderLocationClash, uint32(j), attr)
+		}
+		locations[attr.ShaderLocation] = struct{}{}
+	}
+	return nil
+}
+
+// validateFragmentStage checks RP3-RP6 fragment stage constraints.
+func validateFragmentStage(frag *hal.FragmentState, hasDepthStencil bool, label string, limits gputypes.Limits) error {
+	// RP3: Fragment module must not be nil.
+	if frag.Module == nil {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorMissingFragmentModule,
+			Label: label,
+		}
+	}
+	// RP4: Fragment entry point must not be empty.
+	if frag.EntryPoint == "" {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorMissingFragmentEntryPoint,
+			Label: label,
+		}
+	}
+	// RP5: The pipeline needs at least one attachment: a color target, or the
+	// depth-stencil state (a depth-only pass with a fragment stage, e.g. a
+	// shadow map with alpha-tested discard). WebGPU GPURenderPipelineDescriptor
+	// validation, as Rust wgpu-core.
+	if len(frag.Targets) == 0 && !hasDepthStencil {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorNoFragmentTargets,
+			Label: label,
+		}
+	}
+	// RP6: Color targets count <= maxColorAttachments.
+	targetCount := uint32(len(frag.Targets)) //nolint:gosec // len bounded by MaxColorAttachments check
+	if targetCount > limits.MaxColorAttachments {
+		return &CreateRenderPipelineError{
+			Kind:        CreateRenderPipelineErrorTooManyColorTargets,
+			Label:       label,
+			TargetCount: targetCount,
+			MaxTargets:  limits.MaxColorAttachments,
+		}
+	}
+	return nil
+}
+
+// ValidateComputePipelineDescriptor validates a compute pipeline descriptor.
+// Returns nil if valid, or a *CreateComputePipelineError describing the first validation failure.
+func ValidateComputePipelineDescriptor(desc *hal.ComputePipelineDescriptor) error {
+	label := desc.Label
+
+	// CP1: Module must not be nil.
+	if desc.Compute.Module == nil {
+		return &CreateComputePipelineError{
+			Kind:  CreateComputePipelineErrorMissingModule,
+			Label: label,
+		}
+	}
+
+	// CP2: EntryPoint must not be empty.
+	if desc.Compute.EntryPoint == "" {
+		return &CreateComputePipelineError{
+			Kind:  CreateComputePipelineErrorMissingEntryPoint,
+			Label: label,
+		}
+	}
+
+	// CP3: Pipeline constants: no empty key, no NaN or infinity.
+	if err := pipeconst.Validate(desc.Compute.Constants); err != nil {
+		return &CreateComputePipelineError{
+			Kind:  CreateComputePipelineErrorPipelineConstants,
+			Label: label,
+			Cause: err,
+		}
+	}
+
+	return nil
+}
+
+// validateRenderStageConstants checks the pipeline constants of the vertex
+// and the fragment stage with the check every stage and build path shares
+// (internal/pipeconst). Whether they name the stage's overrides, fit their
+// types and leave none without a value needs the shader; the public API
+// checks that per entry point (naga.ProcessOverrides) after this.
+func validateRenderStageConstants(desc *hal.RenderPipelineDescriptor, label string) error {
+	if err := pipeconst.Validate(desc.Vertex.Constants); err != nil {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorPipelineConstants,
+			Label: label,
+			Stage: "vertex",
+			Cause: err,
+		}
+	}
+	if desc.Fragment == nil {
+		return nil
+	}
+	if err := pipeconst.Validate(desc.Fragment.Constants); err != nil {
+		return &CreateRenderPipelineError{
+			Kind:  CreateRenderPipelineErrorPipelineConstants,
+			Label: label,
+			Stage: "fragment",
+			Cause: err,
+		}
+	}
+	return nil
+}
+
+// ValidateBindGroupLayoutDescriptor validates a bind group layout descriptor against device limits.
+// Returns nil if valid, or a *CreateBindGroupLayoutError describing the first validation failure.
+func ValidateBindGroupLayoutDescriptor(desc *hal.BindGroupLayoutDescriptor, limits gputypes.Limits) error {
+	label := desc.Label
+
+	// BGL2: Number of entries <= maxBindingsPerBindGroup.
+	entryCount := uint32(len(desc.Entries)) //nolint:gosec // len bounded by MaxBindingsPerBindGroup check
+	if entryCount > limits.MaxBindingsPerBindGroup {
+		return &CreateBindGroupLayoutError{
+			Kind:         CreateBindGroupLayoutErrorTooManyBindings,
+			Label:        label,
+			BindingCount: entryCount,
+			MaxBindings:  limits.MaxBindingsPerBindGroup,
+		}
+	}
+
+	// BGL1: Entry binding numbers must be unique.
+	// Also count per-stage resource usage for limit validation.
+	seen := make(map[uint32]struct{}, len(desc.Entries))
+	var storageBuffers, uniformBuffers, samplers, sampledTextures, storageTextures uint32
+	for _, entry := range desc.Entries {
+		if _, ok := seen[entry.Binding]; ok {
+			return &CreateBindGroupLayoutError{
+				Kind:             CreateBindGroupLayoutErrorDuplicateBinding,
+				Label:            label,
+				DuplicateBinding: entry.Binding,
+			}
+		}
+		seen[entry.Binding] = struct{}{}
+
+		// Count resources by type for per-stage limit checks.
+		if entry.Buffer != nil {
+			switch entry.Buffer.Type {
+			case gputypes.BufferBindingTypeStorage, gputypes.BufferBindingTypeReadOnlyStorage:
+				storageBuffers++
+			case gputypes.BufferBindingTypeUniform:
+				uniformBuffers++
+			}
+		}
+		if entry.Sampler != nil {
+			samplers++
+		}
+		if entry.Texture != nil {
+			sampledTextures++
+		}
+		if entry.StorageTexture != nil {
+			storageTextures++
+		}
+	}
+
+	// BGL3: Per-stage resource limits.
+	if limits.MaxStorageBuffersPerShaderStage > 0 && storageBuffers > limits.MaxStorageBuffersPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d storage buffers exceeds limit %d",
+			label, storageBuffers, limits.MaxStorageBuffersPerShaderStage)
+	}
+	if limits.MaxUniformBuffersPerShaderStage > 0 && uniformBuffers > limits.MaxUniformBuffersPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d uniform buffers exceeds limit %d",
+			label, uniformBuffers, limits.MaxUniformBuffersPerShaderStage)
+	}
+	if limits.MaxSamplersPerShaderStage > 0 && samplers > limits.MaxSamplersPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d samplers exceeds limit %d",
+			label, samplers, limits.MaxSamplersPerShaderStage)
+	}
+	if limits.MaxSampledTexturesPerShaderStage > 0 && sampledTextures > limits.MaxSampledTexturesPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d sampled textures exceeds limit %d",
+			label, sampledTextures, limits.MaxSampledTexturesPerShaderStage)
+	}
+	if limits.MaxStorageTexturesPerShaderStage > 0 && storageTextures > limits.MaxStorageTexturesPerShaderStage {
+		return fmt.Errorf("bind group layout %q: %d storage textures exceeds limit %d",
+			label, storageTextures, limits.MaxStorageTexturesPerShaderStage)
+	}
+
+	return nil
+}
+
+// BindGroupBufferInfo carries buffer metadata needed for bind group validation.
+// The core validation layer cannot access buffer objects directly (they are uintptr
+// handles in gputypes.BindGroupEntry), so the caller extracts this info from the
+// public API's typed *Buffer objects and passes it alongside the descriptor.
+type BindGroupBufferInfo struct {
+	// Binding is the binding number this info corresponds to.
+	Binding uint32
+	// Usage is the buffer's usage flags (from Buffer.Usage()).
+	Usage gputypes.BufferUsage
+	// BufferSize is the total size of the buffer in bytes (from Buffer.Size()).
+	BufferSize uint64
+	// Offset is the byte offset into the buffer for this binding.
+	Offset uint64
+	// Size is the requested binding size (0 means "rest of buffer from offset").
+	Size uint64
+}
+
+// ValidateBindGroupDescriptor validates a bind group descriptor.
+// layoutEntries are the entries from the bind group layout — passed separately because
+// the hal.BindGroupLayout interface does not expose entries (they live in core.BindGroupLayout).
+// bufferInfos carries buffer metadata for entries that bind buffers (may be nil if no buffers).
+// limits are the device limits for alignment and size checks.
+// Returns nil if valid, or a *CreateBindGroupError describing the first validation failure.
+func ValidateBindGroupDescriptor(
+	desc *hal.BindGroupDescriptor,
+	layoutEntries []gputypes.BindGroupLayoutEntry,
+	bufferInfos []BindGroupBufferInfo,
+	samplerInfos []BindGroupSamplerInfo,
+	textureInfos []BindGroupTextureInfo,
+	limits gputypes.Limits,
+	features gputypes.Features,
+) error {
+	// BG1: Layout must not be nil.
+	if desc.Layout == nil {
+		return &CreateBindGroupError{
+			Kind:  CreateBindGroupErrorMissingLayout,
+			Label: desc.Label,
+		}
+	}
+
+	// BG2: Entry count must match layout entry count.
+	// Rust: wgpu-core device/resource.rs:3106-3111 — BindingsNumMismatch
+	if len(desc.Entries) != len(layoutEntries) {
+		return &CreateBindGroupError{
+			Kind:     CreateBindGroupErrorBindingsNumMismatch,
+			Label:    desc.Label,
+			Expected: len(layoutEntries),
+			Actual:   len(desc.Entries),
+		}
+	}
+
+	// BG3: Each entry binding must exist in layout, and no duplicates.
+	// Rust: wgpu-core device/resource.rs:3135-3138 — MissingBindingDeclaration
+	// Rust: wgpu-core device/resource.rs:3275-3278 — DuplicateBinding
+	//
+	// Build a map of layout entries by binding number for O(1) lookup.
+	layoutByBinding := make(map[uint32]*gputypes.BindGroupLayoutEntry, len(layoutEntries))
+	for i := range layoutEntries {
+		layoutByBinding[layoutEntries[i].Binding] = &layoutEntries[i]
+	}
+
+	seen := make(map[uint32]bool, len(desc.Entries))
+	for _, entry := range desc.Entries {
+		// Check duplicate binding numbers in descriptor entries.
+		if seen[entry.Binding] {
+			return &CreateBindGroupError{
+				Kind:    CreateBindGroupErrorDuplicateBinding,
+				Label:   desc.Label,
+				Binding: entry.Binding,
+			}
+		}
+		seen[entry.Binding] = true
+
+		// Check that each entry binding has a corresponding declaration in the layout.
+		if _, ok := layoutByBinding[entry.Binding]; !ok {
+			return &CreateBindGroupError{
+				Kind:    CreateBindGroupErrorMissingBindingDeclaration,
+				Label:   desc.Label,
+				Binding: entry.Binding,
+			}
+		}
+	}
+
+	// BG4-BG9: Buffer binding validation.
+	// Rust: wgpu-core device/resource.rs:2747-2834
+	if err := validateBindGroupBufferEntries(desc.Label, layoutByBinding, bufferInfos, limits); err != nil {
+		return err
+	}
+
+	// VAL-C21: Float32 filterable textures at bind time.
+	return validateFloat32FilterableBindings(layoutEntries, samplerInfos, textureInfos, features)
+}
+
+// validateBindGroupBufferEntries validates each buffer binding entry against its
+// layout declaration and device limits. Checks usage compatibility, offset alignment,
+// binding size limits, bounds overflow, zero-size, and storage 4-byte alignment.
+//
+// Rust reference: wgpu-core device/resource.rs:2747-2834
+func validateBindGroupBufferEntries(
+	label string,
+	layoutByBinding map[uint32]*gputypes.BindGroupLayoutEntry,
+	bufferInfos []BindGroupBufferInfo,
+	limits gputypes.Limits,
+) error {
+	for _, info := range bufferInfos {
+		layoutEntry, ok := layoutByBinding[info.Binding]
+		if !ok || layoutEntry.Buffer == nil {
+			// No buffer layout declaration for this binding -- skip.
+			// (This would be caught by resource type mismatch validation, not buffer validation.)
+			continue
+		}
+
+		if err := validateSingleBufferEntry(label, layoutEntry.Buffer, info, limits); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// bufferBindingParams holds the resolved parameters for a buffer binding type.
+type bufferBindingParams struct {
+	requiredUsage    gputypes.BufferUsage
+	maxBindingSize   uint64
+	offsetAlignment  uint32
+	isStorageBinding bool
+}
+
+// resolveBufferBindingParams returns the required usage, max size, alignment, and
+// whether it is a storage binding for the given buffer binding type.
+// Returns ok=false for unknown binding types.
+func resolveBufferBindingParams(bindingType gputypes.BufferBindingType, limits gputypes.Limits) (bufferBindingParams, bool) {
+	switch bindingType {
+	case gputypes.BufferBindingTypeUniform:
+		return bufferBindingParams{
+			requiredUsage:    gputypes.BufferUsageUniform,
+			maxBindingSize:   limits.MaxUniformBufferBindingSize,
+			offsetAlignment:  limits.MinUniformBufferOffsetAlignment,
+			isStorageBinding: false,
+		}, true
+	case gputypes.BufferBindingTypeStorage, gputypes.BufferBindingTypeReadOnlyStorage:
+		return bufferBindingParams{
+			requiredUsage:    gputypes.BufferUsageStorage,
+			maxBindingSize:   limits.MaxStorageBufferBindingSize,
+			offsetAlignment:  limits.MinStorageBufferOffsetAlignment,
+			isStorageBinding: true,
+		}, true
+	default:
+		return bufferBindingParams{}, false
+	}
+}
+
+// validateSingleBufferEntry validates one buffer binding entry against its layout
+// declaration and device limits.
+func validateSingleBufferEntry(
+	label string,
+	bufLayout *gputypes.BufferBindingLayout,
+	info BindGroupBufferInfo,
+	limits gputypes.Limits,
+) error {
+	params, ok := resolveBufferBindingParams(bufLayout.Type, limits)
+	if !ok {
+		return nil // Unknown binding type -- skip.
+	}
+
+	// BG4: Buffer usage must include the required flag.
+	if !info.Usage.Contains(params.requiredUsage) {
+		return &CreateBindGroupError{
+			Kind:          CreateBindGroupErrorBufferUsageMismatch,
+			Label:         label,
+			Binding:       info.Binding,
+			ExpectedUsage: uint64(params.requiredUsage),
+			ActualUsage:   uint64(info.Usage),
+		}
+	}
+
+	// BG5: Buffer offset must be aligned.
+	if params.offsetAlignment > 0 && info.Offset%uint64(params.offsetAlignment) != 0 {
+		return &CreateBindGroupError{
+			Kind:      CreateBindGroupErrorBufferOffsetAlignment,
+			Label:     label,
+			Binding:   info.Binding,
+			Offset:    info.Offset,
+			Alignment: uint64(params.offsetAlignment),
+		}
+	}
+
+	// Resolve effective binding size: 0 means "rest of buffer from offset".
+	effectiveSize := info.Size
+	if effectiveSize == 0 && info.Offset <= info.BufferSize {
+		effectiveSize = info.BufferSize - info.Offset
+	}
+
+	// BG9: Effective binding size must not be zero.
+	// Rust: wgpu-core device/resource.rs:2828 -- BindingZeroSize
+	if effectiveSize == 0 {
+		return &CreateBindGroupError{
+			Kind:    CreateBindGroupErrorBufferBindingZeroSize,
+			Label:   label,
+			Binding: info.Binding,
+		}
+	}
+
+	// BG7: offset + bindingSize must not exceed buffer size.
+	// Rust: wgpu-core resource.rs:517-535 -- BindingRangeTooLarge / BindingOffsetTooLarge
+	if err := validateBufferBounds(label, info); err != nil {
+		return err
+	}
+
+	// BG8: Storage buffer binding size must be a multiple of 4.
+	// Rust: wgpu-core device/resource.rs:2784-2793
+	if params.isStorageBinding && effectiveSize%4 != 0 {
+		return &CreateBindGroupError{
+			Kind:    CreateBindGroupErrorStorageBufferSizeAlignment,
+			Label:   label,
+			Binding: info.Binding,
+			Size:    effectiveSize,
+		}
+	}
+
+	// BG6: Effective binding size must not exceed the maximum for its type.
+	// Rust: wgpu-core device/resource.rs:2798-2804 -- BufferRangeTooLarge
+	if effectiveSize > params.maxBindingSize {
+		return &CreateBindGroupError{
+			Kind:    CreateBindGroupErrorBufferBindingSizeTooLarge,
+			Label:   label,
+			Binding: info.Binding,
+			Size:    effectiveSize,
+			MaxSize: params.maxBindingSize,
+		}
+	}
+
+	// BG10: If MinBindingSize is set, effective binding size must be >= MinBindingSize.
+	// Rust: wgpu-core device/resource.rs:2817-2826 -- BindingSizeTooSmall
+	if bufLayout.MinBindingSize > 0 && effectiveSize < bufLayout.MinBindingSize {
+		return &CreateBindGroupError{
+			Kind:           CreateBindGroupErrorMinBindingSizeMismatch,
+			Label:          label,
+			Binding:        info.Binding,
+			Size:           effectiveSize,
+			MinBindingSize: bufLayout.MinBindingSize,
+		}
+	}
+
+	return nil
+}
+
+// validateBufferBounds checks that offset + size does not exceed the buffer size.
+func validateBufferBounds(label string, info BindGroupBufferInfo) error {
+	if info.Size != 0 {
+		// Explicit size: check offset + size <= bufferSize (with overflow protection).
+		end, overflow := addUint64(info.Offset, info.Size)
+		if overflow || end > info.BufferSize {
+			return &CreateBindGroupError{
+				Kind:       CreateBindGroupErrorBufferBoundsOverflow,
+				Label:      label,
+				Binding:    info.Binding,
+				Offset:     info.Offset,
+				Size:       info.Size,
+				BufferSize: info.BufferSize,
+			}
+		}
+	} else if info.Offset > info.BufferSize {
+		// Implicit size (0 = rest of buffer): offset must not exceed buffer size.
+		return &CreateBindGroupError{
+			Kind:       CreateBindGroupErrorBufferBoundsOverflow,
+			Label:      label,
+			Binding:    info.Binding,
+			Offset:     info.Offset,
+			Size:       0,
+			BufferSize: info.BufferSize,
+		}
+	}
+	return nil
+}
+
+// =============================================================================
+// Render Pass Context (MRT validation)
+// =============================================================================
+
+// RenderPassContext stores the attachment configuration of a render pass
+// or a render pipeline. Used for compatibility checks between a pipeline
+// and the render pass it is used in.
+//
+// Matches Rust wgpu-core device/mod.rs RenderPassContext.
+type RenderPassContext struct {
+	// ColorFormats are the formats of each color attachment slot.
+	// TextureFormatUndefined means the slot is unused (nil attachment).
+	ColorFormats []gputypes.TextureFormat
+
+	// DepthStencilFormat is the format of the depth/stencil attachment.
+	// TextureFormatUndefined if no depth/stencil attachment.
+	DepthStencilFormat gputypes.TextureFormat
+
+	// SampleCount is the sample count of the attachments.
+	// All attachments must share the same sample count.
+	SampleCount uint32
+}
+
+// CheckCompatible validates that a render pipeline's pass context is
+// compatible with this render pass context.
+//
+// This is the Go equivalent of Rust wgpu-core RenderPassContext::check_compatible.
+// Called at draw-time (SetPipeline) to ensure the pipeline was created with
+// formats/sample counts matching the current render pass.
+func (ctx *RenderPassContext) CheckCompatible(pipeline *RenderPassContext, pipelineLabel string) error {
+	// Check color target count.
+	if len(pipeline.ColorFormats) != len(ctx.ColorFormats) {
+		return &RenderPassCompatibilityError{
+			Kind:            RenderPassCompatibilityErrorColorTargetCount,
+			PipelineLabel:   pipelineLabel,
+			PipelineTargets: uint32(len(pipeline.ColorFormats)), //nolint:gosec // len bounded by MaxColorAttachments
+			PassAttachments: uint32(len(ctx.ColorFormats)),      //nolint:gosec // len bounded by MaxColorAttachments
+		}
+	}
+
+	// Check color target formats match.
+	for i := range ctx.ColorFormats {
+		if pipeline.ColorFormats[i] != ctx.ColorFormats[i] {
+			return &RenderPassCompatibilityError{
+				Kind:           RenderPassCompatibilityErrorColorTargetFormat,
+				PipelineLabel:  pipelineLabel,
+				TargetIndex:    i,
+				PipelineFormat: pipeline.ColorFormats[i].String(),
+				PassFormat:     ctx.ColorFormats[i].String(),
+			}
+		}
+	}
+
+	// Check sample count.
+	if pipeline.SampleCount != ctx.SampleCount {
+		return &RenderPassCompatibilityError{
+			Kind:            RenderPassCompatibilityErrorSampleCount,
+			PipelineLabel:   pipelineLabel,
+			PipelineSamples: pipeline.SampleCount,
+			PassSamples:     ctx.SampleCount,
+		}
+	}
+
+	// Check depth/stencil format.
+	// Matches Rust wgpu-core: self.attachments.depth_stencil != other.attachments.depth_stencil
+	if pipeline.DepthStencilFormat != ctx.DepthStencilFormat {
+		return &RenderPassCompatibilityError{
+			Kind:           RenderPassCompatibilityErrorDepthStencilFormat,
+			PipelineLabel:  pipelineLabel,
+			PipelineFormat: pipeline.DepthStencilFormat.String(),
+			PassFormat:     ctx.DepthStencilFormat.String(),
+		}
+	}
+
+	return nil
+}
+
+// ValidateRenderPassDescriptor validates a render pass descriptor against
+// device limits and WebGPU spec rules for multiple render targets:
+//
+//  1. len(ColorAttachments) <= device.limits.MaxColorAttachments
+//  2. All color attachments must have the same sample count
+//  3. All color attachments and the depth/stencil attachment must have the
+//     same render extent (width/height of each view's base mip level)
+//  4. Color views and resolve targets must not attach a subresource twice
+//  5. Every attachment view is a renderable texture view (RENDER_ATTACHMENT
+//     usage; 2d, 2d-array or 3d; one mip level; one array layer; all
+//     aspects), a color view has a color renderable format and the
+//     depth/stencil view a depth-or-stencil format
+//  6. A resolve target is resolved from a multisampled view into a
+//     single-sampled, non-3d renderable view of the same render extent, with
+//     equal view and texture formats that support resolve
+//
+// Returns the resolved RenderPassContext for later pipeline compatibility
+// checks, or an error if validation fails.
+//
+// Reference: Rust wgpu-core command/render.rs begin_render_pass_inner → fill_arc_desc
+// and command/render.rs encode_render_pass → add_view + sample_count checks.
+func ValidateRenderPassDescriptor(desc *RenderPassDescriptor, limits gputypes.Limits) (*RenderPassContext, error) {
+	if desc == nil {
+		return nil, fmt.Errorf("render pass descriptor is nil")
+	}
+
+	// MRT-1: Color attachment count must not exceed maxColorAttachments.
+	maxCA := limits.MaxColorAttachments
+	if uint32(len(desc.ColorAttachments)) > maxCA { //nolint:gosec // len bounded by spec
+		return nil, &RenderPassValidationError{
+			Kind:  RenderPassErrorTooManyColorAttachments,
+			Label: desc.Label,
+			Given: uint32(len(desc.ColorAttachments)), //nolint:gosec // len bounded by spec
+			Limit: maxCA,
+		}
+	}
+
+	// Resolve the pass context from actual attachments.
+	ctx := &RenderPassContext{
+		ColorFormats: make([]gputypes.TextureFormat, len(desc.ColorAttachments)),
+	}
+
+	var (
+		sampleCount    uint32
+		refSampleIdx   int // index of attachment that set sampleCount
+		width, height  uint32
+		refDimIdx      int // index of attachment that set width/height
+		hasDimensions  bool
+		hasSampleCount bool
+		regions        = make(attachmentRegions, len(desc.ColorAttachments))
+	)
+
+	for i := range desc.ColorAttachments {
+		ca := &desc.ColorAttachments[i]
+
+		// Skip nil views (sparse MRT slot).
+		if ca.View == nil || ca.View.Parent == nil {
+			ctx.ColorFormats[i] = gputypes.TextureFormatUndefined
+			continue
+		}
+
+		tex := ca.View.Parent
+		if err := validateColorAttachmentView(desc.Label, i, ca); err != nil {
+			return nil, err
+		}
+		if err := regions.addColorAttachment(desc.Label, i, ca); err != nil {
+			return nil, err
+		}
+		if err := validateResolveTarget(desc.Label, i, ca); err != nil {
+			return nil, err
+		}
+		ctx.ColorFormats[i] = tex.Format()
+		texSize := renderExtent(ca.View)
+		texSamples := tex.SampleCount()
+
+		// MRT-2: All color attachments must have the same sample count.
+		if !hasSampleCount {
+			sampleCount = texSamples
+			refSampleIdx = i
+			hasSampleCount = true
+		} else if texSamples != sampleCount {
+			return nil, &RenderPassValidationError{
+				Kind:            RenderPassErrorSampleCountMismatch,
+				Label:           desc.Label,
+				AttachmentIndex: i,
+				ExpectedSamples: sampleCount,
+				ActualSamples:   texSamples,
+				ReferenceIndex:  refSampleIdx,
+			}
+		}
+
+		// MRT-3: All color attachments must have the same width/height.
+		if !hasDimensions {
+			width = texSize.Width
+			height = texSize.Height
+			refDimIdx = i
+			hasDimensions = true
+		} else if texSize.Width != width || texSize.Height != height {
+			return nil, &RenderPassValidationError{
+				Kind:            RenderPassErrorDimensionMismatch,
+				Label:           desc.Label,
+				AttachmentIndex: i,
+				ReferenceIndex:  refDimIdx,
+				ExpectedWidth:   width,
+				ExpectedHeight:  height,
+				ActualWidth:     texSize.Width,
+				ActualHeight:    texSize.Height,
+			}
+		}
+	}
+
+	// Include depth/stencil in sample count and dimension checks.
+	if err := validateDepthStencilAttachment(desc, &sampleCount, &hasSampleCount, refSampleIdx,
+		&width, &height, &hasDimensions, refDimIdx, ctx); err != nil {
+		return nil, err
+	}
+
+	// Store the resolved sample count (default 1 if no attachments).
+	if hasSampleCount {
+		ctx.SampleCount = sampleCount
+	} else {
+		ctx.SampleCount = 1
+	}
+
+	return ctx, nil
+}
+
+// validateColorAttachmentDepthSlice checks the depthSlice of color attachment
+// i against its view: required for a 3D view and less than the depth of the
+// view's base mip level, absent for any other view. Every non-nil value is
+// checked, 0xFFFFFFFF (webgpu.h WGPU_DEPTH_SLICE_UNDEFINED) included. A view
+// whose dimension is not known (Dimension undefined) is not checked.
+//
+// Reference: WebGPU spec "GPURenderPassColorAttachment Valid Usage";
+// Rust wgpu-core command/render.rs (ColorAttachmentError::MissingDepthSlice,
+// DepthSliceLimit, UnneededDepthSlice).
+func validateColorAttachmentDepthSlice(label string, i int, ca *RenderPassColorAttachment) error {
+	view := ca.View
+	switch view.Dimension {
+	case gputypes.TextureViewDimensionUndefined:
+		return nil
+	case gputypes.TextureViewDimension3D:
+		if ca.DepthSlice == nil {
+			return &RenderPassValidationError{
+				Kind: RenderPassErrorMissingDepthSlice, Label: label, AttachmentIndex: i,
+			}
+		}
+		tex := view.Parent
+		limit := mipLevelSize(tex.Size(), view.BaseMipLevel, tex.Dimension()).DepthOrArrayLayers
+		if *ca.DepthSlice >= limit {
+			return &RenderPassValidationError{
+				Kind: RenderPassErrorDepthSliceLimit, Label: label, AttachmentIndex: i,
+				Given: *ca.DepthSlice, Limit: limit,
+			}
+		}
+		return nil
+	default:
+		if ca.DepthSlice != nil {
+			return &RenderPassValidationError{
+				Kind: RenderPassErrorUnneededDepthSlice, Label: label, AttachmentIndex: i,
+			}
+		}
+		return nil
+	}
+}
+
+// renderExtent returns the size of view's base mip level that a render pass
+// renders to: max(1, size >> mip) in width and height (WebGPU spec "compute
+// render extent"; Rust wgpu-core TextureView render_extent). Only Width and
+// Height are meaningful for the attachment size rule.
+func renderExtent(view *TextureView) gputypes.Extent3D {
+	tex := view.Parent
+	return mipLevelSize(tex.Size(), view.BaseMipLevel, tex.Dimension())
+}
+
+// attachmentSubresource is one entry of a render pass's attachmentRegions:
+// a texture, a mip level and an array layer, or a depth slice for a 3D view.
+type attachmentSubresource struct {
+	texture *Texture
+	mip     uint32
+	layer   uint32
+}
+
+// attachmentRegions is the set of subresources the color attachments and
+// resolve targets of one render pass have claimed so far.
+//
+// Reference: WebGPU spec GPURenderPassDescriptor Valid Usage ("the
+// attachmentRegions must be pairwise disjoint"); Rust wgpu-core
+// command/render.rs check_attachment_overlap.
+type attachmentRegions map[attachmentSubresource]struct{}
+
+// addColorAttachment claims the regions of color attachment i: its view
+// with its depthSlice, then its resolve target. The resolve target is
+// checked against the set too, its own attachment's view included. The
+// depth/stencil attachment is not part of attachmentRegions.
+func (r attachmentRegions) addColorAttachment(label string, i int, ca *RenderPassColorAttachment) error {
+	if mip, layer, ok := r.add(ca.View, ca.DepthSlice); !ok {
+		return &RenderPassValidationError{
+			Kind: RenderPassErrorSubresourceOverlap, Label: label, AttachmentIndex: i,
+			MipLevel: mip, Layer: layer,
+		}
+	}
+	if ca.ResolveTarget == nil || ca.ResolveTarget.Parent == nil {
+		return nil
+	}
+	if mip, layer, ok := r.add(ca.ResolveTarget, nil); !ok {
+		return &RenderPassValidationError{
+			Kind: RenderPassErrorSubresourceOverlap, Label: label, AttachmentIndex: i,
+			MipLevel: mip, Layer: layer, ResolveTarget: true,
+		}
+	}
+	return nil
+}
+
+// add claims the subresources of view at its base mip level: depthSlice of
+// a 3D view, else every array layer of the view's range (Rust iterates the
+// layers of a 2d-array view, which multiview renders to). A view whose
+// layer count is not known claims BaseArrayLayer alone. The count is capped
+// at the texture's layer count, so a view range nothing validated cannot
+// make the loop run past the texture. It returns the first subresource
+// already claimed, with ok false.
+func (r attachmentRegions) add(view *TextureView, depthSlice *uint32) (mip, layer uint32, ok bool) {
+	mip = view.BaseMipLevel
+	first := view.BaseArrayLayer
+	count := min(max(view.ArrayLayerCount, 1), max(view.Parent.Size().DepthOrArrayLayers, 1))
+	if view.Dimension == gputypes.TextureViewDimension3D && depthSlice != nil {
+		first, count = *depthSlice, 1
+	}
+	for layer = first; layer-first < count; layer++ {
+		key := attachmentSubresource{texture: view.Parent, mip: mip, layer: layer}
+		if _, taken := r[key]; taken {
+			return mip, layer, false
+		}
+		r[key] = struct{}{}
+	}
+	return 0, 0, true
+}
+
+// validateDepthStencilAttachment checks that the depth/stencil attachment
+// (if present) has the same sample count and dimensions as the color attachments.
+func validateDepthStencilAttachment(
+	desc *RenderPassDescriptor,
+	sampleCount *uint32, hasSampleCount *bool, refSampleIdx int,
+	width, height *uint32, hasDimensions *bool, refDimIdx int,
+	ctx *RenderPassContext,
+) error {
+	if desc.DepthStencilAttachment == nil {
+		return nil
+	}
+	if desc.DepthStencilAttachment.View == nil || desc.DepthStencilAttachment.View.Parent == nil {
+		return nil
+	}
+
+	if err := validateDepthStencilView(desc.Label, desc.DepthStencilAttachment.View); err != nil {
+		return err
+	}
+	dsTex := desc.DepthStencilAttachment.View.Parent
+	ctx.DepthStencilFormat = dsTex.Format()
+	dsSize := renderExtent(desc.DepthStencilAttachment.View)
+	dsSamples := dsTex.SampleCount()
+
+	if !*hasSampleCount {
+		*sampleCount = dsSamples
+		*hasSampleCount = true
+	} else if dsSamples != *sampleCount {
+		return &RenderPassValidationError{
+			Kind:            RenderPassErrorSampleCountMismatch,
+			Label:           desc.Label,
+			AttachmentIndex: -1, // -1 signals depth/stencil
+			ExpectedSamples: *sampleCount,
+			ActualSamples:   dsSamples,
+			ReferenceIndex:  refSampleIdx,
+		}
+	}
+
+	if !*hasDimensions {
+		*width = dsSize.Width
+		*height = dsSize.Height
+		*hasDimensions = true
+	} else if dsSize.Width != *width || dsSize.Height != *height {
+		return &RenderPassValidationError{
+			Kind:            RenderPassErrorDimensionMismatch,
+			Label:           desc.Label,
+			AttachmentIndex: -1, // -1 signals depth/stencil
+			ReferenceIndex:  refDimIdx,
+			ExpectedWidth:   *width,
+			ExpectedHeight:  *height,
+			ActualWidth:     dsSize.Width,
+			ActualHeight:    dsSize.Height,
+		}
+	}
+
+	return nil
+}
+
+// addUint64 adds a and b, returning the result and whether it overflowed.
+func addUint64(a, b uint64) (uint64, bool) {
+	sum := a + b
+	return sum, sum < a
+}
+
+// maxMips calculates the maximum number of mip levels for a texture.
+func maxMips(dimension gputypes.TextureDimension, width, height, depth uint32) uint32 {
+	var maxDim uint32
+	switch dimension {
+	case gputypes.TextureDimension1D:
+		maxDim = width
+	case gputypes.TextureDimension2D:
+		maxDim = max(width, height)
+	case gputypes.TextureDimension3D:
+		maxDim = max(width, max(height, depth))
+	}
+	if maxDim == 0 {
+		return 0
+	}
+	return uint32(bits.Len32(maxDim)) //nolint:gosec // bits.Len32 returns 0..32, always fits uint32
+}
+
+// validateCompressedTextureShape applies WebGPU "validating
+// GPUTextureDescriptor" to a block-compressed format, as Rust wgpu-core's
+// create_texture does (device/resource.rs): the texture must be 2D, and its
+// width and height multiples of the format's block. Rust also allows 3D for
+// BC and ASTC with the texture-compression-*-sliced-3d features; gputypes has
+// no such features yet, so every compressed 3D texture is refused, as Rust
+// refuses it without them.
+func validateCompressedTextureShape(desc *hal.TextureDescriptor, label string) error {
+	if !desc.Format.IsCompressed() {
+		return nil
+	}
+	if desc.Dimension != gputypes.TextureDimension2D {
+		return &CreateTextureError{
+			Kind:      CreateTextureErrorInvalidCompressedDimension,
+			Label:     label,
+			Format:    desc.Format,
+			Dimension: desc.Dimension,
+		}
+	}
+	bw, bh := desc.Format.BlockDimensions()
+	if desc.Size.Width%bw != 0 || desc.Size.Height%bh != 0 {
+		return &CreateTextureError{
+			Kind:            CreateTextureErrorNotMultipleOfBlockSize,
+			Label:           label,
+			Format:          desc.Format,
+			RequestedWidth:  desc.Size.Width,
+			RequestedHeight: desc.Size.Height,
+		}
+	}
+	return nil
+}

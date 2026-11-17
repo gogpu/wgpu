@@ -3,8 +3,10 @@
 package wgpu_test
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
 	"github.com/gogpu/wgpu/internal/shaderir"
 )
@@ -22,20 +24,26 @@ func TestCreateShaderModuleLowersOnce(t *testing.T) {
 @compute @workgroup_size(1) fn main() { out[0] = k; }`
 
 	for _, adapterCase := range []struct {
-		name string
-		opts *wgpu.RequestAdapterOptions
+		name     string
+		backends gputypes.Backends
 	}{
-		{"default adapter", nil},
-		{"fallback adapter", &wgpu.RequestAdapterOptions{ForceFallbackAdapter: true}},
+		{"default adapter", 0},
+		{"software adapter", gputypes.BackendsSoftware},
 	} {
 		t.Run(adapterCase.name, func(t *testing.T) {
-			inst, err := wgpu.CreateInstance(nil)
+			inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: adapterCase.backends})
 			if err != nil {
 				t.Fatalf("CreateInstance: %v", err)
 			}
 			defer inst.Release()
-			adapter, err := inst.RequestAdapter(adapterCase.opts)
+			adapter, err := inst.RequestAdapter(nil)
 			if err != nil {
+				if adapterCase.backends == 0 && errors.Is(err, wgpu.ErrNoHardwareAdapter) {
+					// ADR-083 §2.3: a zero mask admits hardware backends only, and
+					// this machine has none; the software case below covers the
+					// lowering count.
+					t.Skipf("no hardware adapter on this machine: %v", err)
+				}
 				t.Fatalf("RequestAdapter: %v", err)
 			}
 			defer adapter.Release()

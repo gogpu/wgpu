@@ -21,7 +21,7 @@ import (
 	"unsafe"
 
 	"github.com/gogpu/naga"
-	"github.com/gogpu/wgpu/hal/vulkan/vk"
+	"github.com/gogpu/wgpu/internal/hal/vulkan/vk"
 )
 
 func main() {

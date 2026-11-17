@@ -2,7 +2,7 @@ package raytracing
 
 import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // Tlas represents a top-level acceleration structure.

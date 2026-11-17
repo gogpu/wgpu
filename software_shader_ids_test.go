@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // idsComputeSPIRV is a GLCompute module "main" that adds two u32 values,

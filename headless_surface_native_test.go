@@ -9,9 +9,11 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
-	_ "github.com/gogpu/wgpu/hal/software"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
+	_ "github.com/gogpu/wgpu/internal/hal/software"
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
 
 const headlessTriangleWGSL = `
@@ -47,7 +49,9 @@ func (*emptyPixelReaderSurface) ReadPixels() []byte { return nil }
 func newHeadlessSoftwareFixture(t *testing.T, width, height uint32, format gputypes.TextureFormat, configure bool) *headlessSoftwareFixture {
 	t.Helper()
 
-	instance, err := CreateInstance(nil)
+	// The headless target belongs to the software backend, and ADR-083 §2.3
+	// selects software only through its own mask.
+	instance, err := CreateInstance(&InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
@@ -58,10 +62,7 @@ func newHeadlessSoftwareFixture(t *testing.T, width, height uint32, format gputy
 		t.Fatalf("CreateSurfaceFromTarget: %v", err)
 	}
 
-	adapter, err := instance.RequestAdapter(&RequestAdapterOptions{
-		CompatibleSurface:    surface,
-		ForceFallbackAdapter: true,
-	})
+	adapter, err := instance.RequestAdapter(&RequestAdapterOptions{CompatibleSurface: surface})
 	if err != nil {
 		surface.Release()
 		instance.Release()
@@ -187,14 +188,11 @@ func (f *headlessSoftwareFixture) submitAndPresent(t *testing.T, texture *Surfac
 func newConfiguredWrappedSurface(t *testing.T, raw hal.Surface) *Surface {
 	t.Helper()
 
-	device, err := NewDeviceFromHAL(&noop.Device{}, &noop.Queue{}, 0, DefaultLimits(), "readback-wrapper")
-	if err != nil {
-		t.Fatalf("NewDeviceFromHAL: %v", err)
-	}
-	surface := NewSurfaceFromHAL(raw, "readback-wrapper")
-	// The wrapper owns an already-created raw surface. Set the same internal
-	// creation fact that Instance-created surfaces carry before Configure.
-	surface.surfaceCreated = true
+	device := newDeviceFromHAL(&noop.Device{}, &noop.Queue{}, 0, DefaultLimits(), "readback-wrapper")
+	surface := &Surface{impl: surfacepkg.New(surfacepkg.Init{
+		Core:           core.NewSurface(raw, "readback-wrapper"),
+		SurfaceCreated: true,
+	})}
 	t.Cleanup(func() {
 		surface.Unconfigure()
 		surface.Release()

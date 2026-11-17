@@ -1,7 +1,8 @@
 // Package wgpu provides a safe, ergonomic WebGPU API for Go applications.
 //
-// This package wraps the lower-level hal/ and core/ packages into a user-friendly
-// API aligned with the W3C WebGPU specification.
+// This package wraps the lower-level implementation packages (internal/hal and
+// internal/core) into a user-friendly API aligned with the W3C WebGPU
+// specification.
 //
 // # Quick Start
 //
@@ -24,18 +25,18 @@
 // and OpenGL ES on Windows (386, amd64, arm64), Vulkan and OpenGL ES on Linux
 // (amd64, arm64), Metal on macOS (amd64, arm64; MoltenVK only with
 // -tags wgpu_moltenvk), Vulkan and OpenGL ES on Android (arm64), and the
-// browser's WebGPU on js/wasm. The Pure Go software backend is not registered
-// by default in this release: import hal/software (or hal/allbackends) until
-// v0.35.0, where it becomes default-registered outside the default mask.
-// Other GOOS/GOARCH combinations are outside the default registration set;
-// some cannot build the Pure Go backends at all (goffi has no syscall files
-// for them). Such a build registers no backend unless one is imported.
+// browser's WebGPU on js/wasm. The Pure Go software backend registers by
+// default too, outside the default adapter set: an empty Backends mask never
+// picks it. Select it by naming gputypes.BackendsSoftware in the mask;
+// RequestAdapterOptions.ForceFallbackAdapter then prefers it over other CPU
+// adapters. Other GOOS/GOARCH combinations are outside the default registration
+// set, and the backend packages are not importable outside the module; some of
+// them cannot build the Pure Go backends at all (goffi has no syscall files for
+// them).
 //
 // Build tags remove a backend for a smaller binary: wgpu_novulkan,
 // wgpu_nodx12, wgpu_nometal, wgpu_nogles. wgpu_nosoftware removes the Pure Go
-// software backend from wgputest today and from the default registration in
-// v0.35.0. Until then the software backend registers only when the program
-// imports it; select it with RequestAdapterOptions.ForceFallbackAdapter.
+// software backend from the default registration and from wgputest.
 //
 // GOOS=ios satisfies the darwin build tag, so iOS builds in the default set
 // register Metal.

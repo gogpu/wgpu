@@ -7,10 +7,33 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/encoder"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/pendingwrites"
+	surfacepkg "github.com/gogpu/wgpu/internal/surface"
 )
+
+// mockBatchingQueue is the batching HAL queue double for the pending-writes
+// paths of this file. It lives here because the pending-writes domain and its
+// own doubles moved to internal/pendingwrites (S8): a root test cannot share
+// an unexported test type across the package boundary.
+type mockBatchingQueue struct {
+	noop.Queue
+	submitCalls int
+	submitErr   error
+}
+
+func (q *mockBatchingQueue) SupportsCommandBufferCopies() bool { return true }
+
+func (q *mockBatchingQueue) Submit(commandBuffers []hal.CommandBuffer) (uint64, error) {
+	q.submitCalls++
+	if q.submitErr != nil {
+		return 0, q.submitErr
+	}
+	return q.Queue.Submit(commandBuffers)
+}
 
 type surfaceTextureLifetimeDevice struct {
 	noop.Device
@@ -33,16 +56,15 @@ func newAcquiredSurfaceForLifetimeTest(t *testing.T) (*Surface, *SurfaceTexture,
 
 	rawDevice := &surfaceTextureLifetimeDevice{}
 	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "surface-texture-lifetime-test")
-	queue := &Queue{hal: &noop.Queue{}, halDevice: rawDevice}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
+	device := newTestDeviceWithQueue(coreDevice, nil, &noop.Queue{}, nil)
 
 	rawSurface := &noop.Surface{}
 	surface := &Surface{
-		core:           core.NewSurface(rawSurface, "surface-texture-lifetime-test"),
-		device:         device,
-		surfaceCreated: true,
-		currentBackend: gputypes.BackendEmpty,
+		impl: surfacepkg.New(surfacepkg.Init{
+			Core:           core.NewSurface(rawSurface, "surface-texture-lifetime-test"),
+			Backend:        gputypes.BackendEmpty,
+			SurfaceCreated: true,
+		}),
 	}
 	config := &SurfaceConfiguration{
 		Width:       1,
@@ -121,10 +143,8 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	// Install the batching path used by Vulkan, DX12, and Metal. The write is
 	// valid when recorded, then its acquisition retires before Submit.
 	rawQueue := &mockBatchingQueue{}
-	pool := newEncoderPool(rawDevice)
-	device.cmdEncoderPool = pool
-	device.queue.hal = rawQueue
-	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool, nil)
+	pool := encoder.NewPool(rawDevice)
+	replaceTestQueue(device, pool, rawQueue, pendingwrites.New(rawDevice, rawQueue, pool, nil))
 
 	texture := surfaceTexture.AsTexture()
 	err := device.Queue().WriteTexture(
@@ -136,7 +156,7 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteTexture while acquired: %v", err)
 	}
-	if !device.queue.pending.HasPendingWork() {
+	if !device.queue.impl.Pending().HasPendingWork() {
 		t.Fatal("WriteTexture did not create pending work")
 	}
 
@@ -147,10 +167,10 @@ func TestPendingWriteTextureRejectsRetiredSurfaceAcquisition(t *testing.T) {
 	if rawQueue.submitCalls != 0 {
 		t.Fatalf("HAL Submit calls = %d, want 0", rawQueue.submitCalls)
 	}
-	if device.queue.pending.HasPendingWork() {
+	if device.queue.impl.Pending().HasPendingWork() {
 		t.Fatal("rejected pending batch remained active")
 	}
-	stats := device.queue.pending.belt.stats()
+	stats := device.queue.impl.Pending().BeltStats()
 	if stats.ActiveChunks != 0 || stats.FreeChunks != 1 || stats.ClosedSubs != 0 {
 		t.Fatalf("staging belt after rejection = %+v, want one recycled free chunk", stats)
 	}
@@ -163,10 +183,8 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 
 	submitErr := errors.New("submit rejected")
 	rawQueue := &mockBatchingQueue{submitErr: submitErr}
-	pool := newEncoderPool(rawDevice)
-	device.cmdEncoderPool = pool
-	device.queue.hal = rawQueue
-	device.queue.pending = newPendingWrites(rawDevice, rawQueue, pool, nil)
+	pool := encoder.NewPool(rawDevice)
+	replaceTestQueue(device, pool, rawQueue, pendingwrites.New(rawDevice, rawQueue, pool, nil))
 
 	err := device.Queue().WriteTexture(
 		&ImageCopyTexture{Texture: surfaceTexture.AsTexture()},
@@ -183,10 +201,10 @@ func TestPendingWriteTextureSubmitFailureRecyclesBatch(t *testing.T) {
 	if rawQueue.submitCalls != 1 {
 		t.Fatalf("HAL Submit calls = %d, want 1", rawQueue.submitCalls)
 	}
-	if device.queue.pending.HasPendingWork() {
+	if device.queue.impl.Pending().HasPendingWork() {
 		t.Fatal("failed submitted batch remained active")
 	}
-	stats := device.queue.pending.belt.stats()
+	stats := device.queue.impl.Pending().BeltStats()
 	if stats.ActiveChunks != 0 || stats.FreeChunks != 1 || stats.ClosedSubs != 0 {
 		t.Fatalf("staging belt after failed submit = %+v, want one recycled free chunk", stats)
 	}
@@ -205,12 +223,12 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		defer view.Release()
 		surface.DiscardTexture()
 
-		encoder, err := device.CreateCommandEncoder(nil)
+		enc, err := device.CreateCommandEncoder(nil)
 		if err != nil {
 			t.Fatalf("CreateCommandEncoder: %v", err)
 		}
-		defer encoder.DiscardEncoding()
-		_, err = encoder.BeginRenderPass(&RenderPassDescriptor{
+		defer enc.DiscardEncoding()
+		_, err = enc.BeginRenderPass(&RenderPassDescriptor{
 			ColorAttachments: []RenderPassColorAttachment{{
 				View:    view,
 				LoadOp:  gputypes.LoadOpClear,
@@ -228,13 +246,13 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		defer surface.Release()
 
 		texture := surfaceTexture.AsTexture()
-		encoder, err := device.CreateCommandEncoder(nil)
+		enc, err := device.CreateCommandEncoder(nil)
 		if err != nil {
 			t.Fatalf("CreateCommandEncoder: %v", err)
 		}
 		surface.DiscardTexture()
-		encoder.CopyTextureToTexture(texture, texture, nil)
-		if _, err := encoder.Finish(); !errors.Is(err, ErrReleased) {
+		enc.CopyTextureToTexture(texture, texture, nil)
+		if _, err := enc.Finish(); !errors.Is(err, ErrReleased) {
 			t.Fatalf("Finish after copy from retired texture = %v, want ErrReleased", err)
 		}
 	})
@@ -284,11 +302,11 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 			t.Fatalf("CreateView: %v", err)
 		}
 		defer view.Release()
-		encoder, err := device.CreateCommandEncoder(nil)
+		enc, err := device.CreateCommandEncoder(nil)
 		if err != nil {
 			t.Fatalf("CreateCommandEncoder: %v", err)
 		}
-		pass, err := encoder.BeginRenderPass(&RenderPassDescriptor{
+		pass, err := enc.BeginRenderPass(&RenderPassDescriptor{
 			ColorAttachments: []RenderPassColorAttachment{{
 				View:    view,
 				LoadOp:  gputypes.LoadOpClear,
@@ -301,14 +319,14 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 		if err := pass.End(); err != nil {
 			t.Fatalf("RenderPass.End: %v", err)
 		}
-		commandBuffer, err := encoder.Finish()
+		commandBuffer, err := enc.Finish()
 		if err != nil {
 			t.Fatalf("Finish: %v", err)
 		}
 		defer commandBuffer.Release()
 
 		rawQueue := &mockBatchingQueue{}
-		device.queue.hal = rawQueue
+		replaceTestQueue(device, testDevicePool(device), rawQueue, nil)
 		surface.DiscardTexture()
 		if _, err := device.Queue().Submit(commandBuffer); !errors.Is(err, ErrSubmitTextureDestroyed) {
 			t.Fatalf("Submit with retired attachment = %v, want ErrSubmitTextureDestroyed", err)
@@ -317,72 +335,6 @@ func TestRetiredSurfaceWrappersFailAtPublicHALBoundaries(t *testing.T) {
 			t.Fatalf("HAL Submit calls = %d, want 0", rawQueue.submitCalls)
 		}
 	})
-}
-
-func TestRenderPassAttachmentLifetimeValidationCoversEverySlot(t *testing.T) {
-	surface, surfaceTexture, device, _ := newAcquiredSurfaceForLifetimeTest(t)
-	defer device.Release()
-	defer surface.Release()
-
-	color, err := surfaceTexture.CreateView(nil)
-	if err != nil {
-		t.Fatalf("color CreateView: %v", err)
-	}
-	defer color.Release()
-	resolve, err := surfaceTexture.CreateView(nil)
-	if err != nil {
-		t.Fatalf("resolve CreateView: %v", err)
-	}
-	defer resolve.Release()
-	depth, err := surfaceTexture.CreateView(nil)
-	if err != nil {
-		t.Fatalf("depth CreateView: %v", err)
-	}
-	defer depth.Release()
-
-	desc := &RenderPassDescriptor{
-		ColorAttachments:       []RenderPassColorAttachment{{View: color, ResolveTarget: resolve}},
-		DepthStencilAttachment: &RenderPassDepthStencilAttachment{View: depth},
-	}
-	trackRenderPassTextureViews(nil, desc)
-	trackRenderPassTextureViews(&CommandEncoder{}, nil)
-	encoder := &CommandEncoder{}
-	trackRenderPassTextureViews(encoder, desc)
-	if len(encoder.usedTextures) != 3 {
-		t.Fatalf("tracked texture owners = %d, want 3", len(encoder.usedTextures))
-	}
-	if err := validateRenderPassTextureViews(nil); err != nil {
-		t.Fatalf("nil descriptor validation: %v", err)
-	}
-	if err := validateRenderPassTextureViews(desc); err != nil {
-		t.Fatalf("active attachment validation: %v", err)
-	}
-
-	surface.DiscardTexture()
-	tests := []struct {
-		name string
-		desc *RenderPassDescriptor
-	}{
-		{
-			name: "color",
-			desc: &RenderPassDescriptor{ColorAttachments: []RenderPassColorAttachment{{View: color}}},
-		},
-		{
-			name: "resolve",
-			desc: &RenderPassDescriptor{ColorAttachments: []RenderPassColorAttachment{{ResolveTarget: resolve}}},
-		},
-		{
-			name: "depth stencil",
-			desc: &RenderPassDescriptor{DepthStencilAttachment: &RenderPassDepthStencilAttachment{View: depth}},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if err := validateRenderPassTextureViews(test.desc); !errors.Is(err, ErrReleased) {
-				t.Fatalf("validation = %v, want ErrReleased", err)
-			}
-		})
-	}
 }
 
 func TestTextureCopyRegionsRejectRetiredSurfaceAliases(t *testing.T) {
@@ -453,12 +405,12 @@ func TestBufferCopyToSurfaceTextureHonorsAcquisitionLifetime(t *testing.T) {
 		Size:         Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
 	}}
 
-	encoder, err := device.CreateCommandEncoder(nil)
+	enc, err := device.CreateCommandEncoder(nil)
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder: %v", err)
 	}
-	encoder.CopyBufferToTexture(buffer, texture, region)
-	commandBuffer, err := encoder.Finish()
+	enc.CopyBufferToTexture(buffer, texture, region)
+	commandBuffer, err := enc.Finish()
 	if err != nil {
 		t.Fatalf("active CopyBufferToTexture: %v", err)
 	}
@@ -490,12 +442,12 @@ func TestBufferCopyToSurfaceTextureHonorsAcquisitionLifetime(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			encoder, err := device.CreateCommandEncoder(nil)
+			enc, err := device.CreateCommandEncoder(nil)
 			if err != nil {
 				t.Fatalf("CreateCommandEncoder: %v", err)
 			}
-			test.record(encoder)
-			if _, err := encoder.Finish(); !errors.Is(err, ErrReleased) {
+			test.record(enc)
+			if _, err := enc.Finish(); !errors.Is(err, ErrReleased) {
 				t.Fatalf("Finish = %v, want ErrReleased", err)
 			}
 		})
@@ -551,20 +503,8 @@ func TestSurfaceTextureDerivedWrappersInvalidateAfterPresentAndRelease(t *testin
 	}
 }
 
-func TestSurfacePresentRejectsTextureFromAnotherAcquisition(t *testing.T) {
-	surface, surfaceTexture, device, _ := newAcquiredSurfaceForLifetimeTest(t)
-	defer device.Release()
-
-	other := &SurfaceTexture{hal: surfaceTexture.hal, surface: surface, device: device, lease: surfaceTexture.lease + 1}
-	if err := surface.Present(other); !errors.Is(err, ErrReleased) {
-		t.Fatalf("Present with foreign token = %v, want ErrReleased", err)
-	}
-	if surface.core.State() != core.SurfaceStateAcquired {
-		t.Fatalf("surface state after rejected Present = %v, want acquired", surface.core.State())
-	}
-	surface.DiscardTexture()
-	surface.Release()
-}
+// TestSurfacePresentRejectsTextureFromAnotherAcquisition moved to
+// internal/surface with the implementation it exercises (ADR-070 S10).
 
 func TestSurfaceTextureLeaseAcrossReconfigureAndUnconfigure(t *testing.T) {
 	surface, surfaceTexture, device, rawDevice := newAcquiredSurfaceForLifetimeTest(t)
@@ -621,99 +561,8 @@ func TestSurfaceTextureLeaseAcrossReconfigureAndUnconfigure(t *testing.T) {
 	surface.Release()
 }
 
-// TestSurfaceSwapchainTextureCaching verifies that GetCurrentTexture reuses
-// the same core.Texture (and TrackerIndex) across frames instead of leaking
-// a new TrackerIndex every frame (#307).
-func TestSurfaceSwapchainTextureCaching(t *testing.T) {
-	t.Parallel()
-
-	rawDevice := &surfaceTextureLifetimeDevice{}
-	coreDevice := core.NewDevice(rawDevice, nil, 0, gputypes.DefaultLimits(), "cache-test")
-	queue := &Queue{hal: &noop.Queue{}, halDevice: rawDevice}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
-	defer device.Release()
-
-	rawSurface := &noop.Surface{}
-	surface := &Surface{
-		core:           core.NewSurface(rawSurface, "cache-test"),
-		device:         device,
-		surfaceCreated: true,
-		currentBackend: gputypes.BackendEmpty,
-	}
-	config := &SurfaceConfiguration{
-		Width:       1,
-		Height:      1,
-		Format:      gputypes.TextureFormatRGBA8Unorm,
-		Usage:       gputypes.TextureUsageRenderAttachment,
-		PresentMode: gputypes.PresentModeFifo,
-		AlphaMode:   gputypes.CompositeAlphaModeAuto,
-	}
-	if err := surface.Configure(device, config); err != nil {
-		t.Fatalf("Configure: %v", err)
-	}
-
-	// Simulate 100 frames — TrackerIndex must stay stable.
-	var firstIndex uint32
-	for i := range 100 {
-		st, _, err := surface.GetCurrentTexture()
-		if err != nil {
-			t.Fatalf("frame %d: GetCurrentTexture: %v", i, err)
-		}
-		if st.coreTexture == nil {
-			t.Fatalf("frame %d: coreTexture is nil", i)
-		}
-		td := st.coreTexture.TrackingData()
-		if td == nil || !td.Index().IsValid() {
-			t.Fatalf("frame %d: invalid TrackerIndex", i)
-		}
-		idx := uint32(td.Index())
-		if i == 0 {
-			firstIndex = idx
-		} else if idx != firstIndex {
-			t.Fatalf("frame %d: TrackerIndex changed from %d to %d (leak!)", i, firstIndex, idx)
-		}
-		if err := surface.Present(st); err != nil {
-			t.Fatalf("frame %d: Present: %v", i, err)
-		}
-	}
-
-	// After 100 frames, texture allocator should have exactly 1 active texture index
-	// (the cached swapchain texture), not 100.
-	texAlloc := coreDevice.TrackerIndices().Textures()
-	if texAlloc.Size() < 1 {
-		t.Fatalf("expected at least 1 active texture index, got %d", texAlloc.Size())
-	}
-
-	// Unconfigure should release the cached TrackerIndex.
-	surface.Unconfigure()
-	if surface.swapchainTexture != nil {
-		t.Fatal("swapchainTexture should be nil after Unconfigure")
-	}
-
-	// Reconfigure and verify a fresh TrackerIndex is allocated.
-	if err := surface.Configure(device, config); err != nil {
-		t.Fatalf("re-Configure: %v", err)
-	}
-	st, _, err := surface.GetCurrentTexture()
-	if err != nil {
-		t.Fatalf("GetCurrentTexture after reconfigure: %v", err)
-	}
-	if st.coreTexture == nil {
-		t.Fatal("coreTexture nil after reconfigure")
-	}
-	// The reused index from the free list should be the same as firstIndex.
-	td := st.coreTexture.TrackingData()
-	if td == nil || !td.Index().IsValid() {
-		t.Fatal("invalid TrackerIndex after reconfigure")
-	}
-	if err := surface.Present(st); err != nil {
-		t.Fatalf("Present after reconfigure: %v", err)
-	}
-
-	surface.Release()
-}
-
+// TestSurfaceSwapchainTextureCaching moved to internal/surface with the
+// implementation it exercises (ADR-070 S10).
 func TestSurfaceTextureDerivedWrappersInvalidateAfterDeviceRelease(t *testing.T) {
 	surface, surfaceTexture, device, rawDevice := newAcquiredSurfaceForLifetimeTest(t)
 
@@ -724,10 +573,10 @@ func TestSurfaceTextureDerivedWrappersInvalidateAfterDeviceRelease(t *testing.T)
 	}
 
 	device.Release()
-	if texture.resolveHAL() != nil {
+	if texture.impl.ResolveHAL() != nil {
 		t.Fatal("surface texture wrapper remained usable after Device.Release")
 	}
-	if view.resolveHAL() != nil {
+	if view.impl.ResolveHAL() != nil {
 		t.Fatal("surface texture view remained usable after Device.Release")
 	}
 	if surfaceTexture.AsTexture() != nil {

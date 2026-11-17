@@ -31,10 +31,13 @@ type floor struct {
 	identifiers int
 }
 
+// contextFloors are the post-window (v0.35.0, ADR-070) values: the public set
+// is root + thin hal + wgputest, so a load that loses a package or shrinks the
+// identifier count fails instead of writing a short golden.
 var contextFloors = map[string]floor{
-	"windows/amd64/":     {20, 8200},
-	"windows/amd64/rust": {20, 8200},
-	"js/wasm/":           {7, 5200},
+	"windows/amd64/":     {3, 258},
+	"windows/amd64/rust": {3, 246},
+	"js/wasm/":           {3, 241},
 }
 
 func floorFor(c config) (floor, error) {

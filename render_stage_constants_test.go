@@ -10,7 +10,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/naga"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/pipeconst"
 )
 

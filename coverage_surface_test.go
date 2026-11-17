@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 // =============================================================================
@@ -19,7 +19,7 @@ import (
 // Release() sets s.core = nil; subsequent calls must be a no-op.
 func TestSetPresentsWithTransactionReleased(t *testing.T) {
 	// A noop.Surface has a valid Destroy(), so Release() succeeds.
-	surface := wgpu.NewSurfaceFromHAL(&noop.Surface{}, "released")
+	surface := wgpu.NewSurfaceFromHALForTest(&noop.Surface{}, "released")
 	surface.Release() // sets s.core = nil
 	// Must not panic (s.core == nil hits the early return).
 	surface.SetPresentsWithTransaction(true)
@@ -31,7 +31,7 @@ func TestSetPresentsWithTransactionReleased(t *testing.T) {
 // Note: Release() panics when RawSurface() is nil (it calls Destroy() on nil),
 // so cleanup is intentionally omitted here — no GPU resources were allocated.
 func TestSetPresentsWithTransactionNilRaw(t *testing.T) {
-	surface := wgpu.NewSurfaceFromHAL(nil, "nil-raw")
+	surface := wgpu.NewSurfaceFromHALForTest(nil, "nil-raw")
 	// core is non-nil, but core.RawSurface() == nil — must return without panic.
 	surface.SetPresentsWithTransaction(true)
 	surface.SetPresentsWithTransaction(false)
@@ -42,7 +42,7 @@ func TestSetPresentsWithTransactionNilRaw(t *testing.T) {
 // assertion fails silently and the call is a no-op.
 func TestSetPresentsWithTransactionNoopBackend(t *testing.T) {
 	halSurface := &noop.Surface{}
-	surface := wgpu.NewSurfaceFromHAL(halSurface, "noop")
+	surface := wgpu.NewSurfaceFromHALForTest(halSurface, "noop")
 	defer surface.Release()
 	// noop.Surface has no SetPresentsWithTransaction — type assertion is false.
 	surface.SetPresentsWithTransaction(true)
@@ -66,7 +66,7 @@ func (m *mockTransactionSurface) SetPresentsWithTransaction(enabled bool) {
 // branch: a surface that implements SetPresentsWithTransaction delegates to it.
 func TestSetPresentsWithTransactionImplemented(t *testing.T) {
 	mock := &mockTransactionSurface{}
-	surface := wgpu.NewSurfaceFromHAL(mock, "mock-metal")
+	surface := wgpu.NewSurfaceFromHALForTest(mock, "mock-metal")
 	defer surface.Release()
 
 	surface.SetPresentsWithTransaction(true)
@@ -88,7 +88,7 @@ func TestSetPresentsWithTransactionImplemented(t *testing.T) {
 func TestActualExtentUnconfigured(t *testing.T) {
 	// nil HAL surface → RawSurface() == nil → returns (0,0).
 	// Release() not called because it panics with nil RawSurface.
-	surface := wgpu.NewSurfaceFromHAL(nil, "unconfigured")
+	surface := wgpu.NewSurfaceFromHALForTest(nil, "unconfigured")
 
 	w, h := surface.ActualExtent()
 	if w != 0 || h != 0 {
@@ -118,7 +118,7 @@ func TestSurfaceTextureAsTextureCompiles(t *testing.T) {
 
 func TestDiscardTextureUnconfigured(t *testing.T) {
 	// nil HAL surface → Release() not called (would panic on nil RawSurface).
-	surface := wgpu.NewSurfaceFromHAL(nil, "unconfigured")
+	surface := wgpu.NewSurfaceFromHALForTest(nil, "unconfigured")
 	// Must not panic when no texture has been acquired.
 	surface.DiscardTexture()
 }

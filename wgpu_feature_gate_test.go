@@ -8,7 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 func newDeviceWithoutFeatures(t *testing.T) (*wgpu.Instance, *wgpu.Adapter, *wgpu.Device) {
@@ -70,7 +70,7 @@ func TestFeatureGate_MultiDrawIndirect_NoFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -106,7 +106,7 @@ func TestFeatureGate_MultiDrawIndirect_WithFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -135,7 +135,7 @@ func TestFeatureGate_MultiDrawIndirect_SingleDrawAllowedWithoutFeature(t *testin
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -164,7 +164,7 @@ func TestFeatureGate_MultiDrawIndirectCount_NoFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	indirectBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -265,7 +265,7 @@ func TestFeatureGate_MultiDrawIndirectCount_WithFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	indirectBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -308,7 +308,7 @@ func TestDirectDrawFirstInstance_AcceptedWithoutFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstInstance: 1})
@@ -328,7 +328,7 @@ func TestDirectDrawFirstInstance_AcceptedWithFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1, FirstInstance: 1})
@@ -347,7 +347,7 @@ func TestDirectDrawIndexedFirstInstance_AcceptedWithoutFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	indexBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -376,7 +376,7 @@ func TestFeatureGate_MultiDrawIndexedIndirect_NoFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	indexBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -417,7 +417,7 @@ func TestFeatureGate_MultiDrawIndexedIndirectCount_NoFeature(t *testing.T) {
 
 	encoder, pass := newEncoderWithRenderPassForDevice(t, device)
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	indexBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{

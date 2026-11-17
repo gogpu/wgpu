@@ -1,0 +1,70 @@
+name: Waiver audit
+
+# The public-layer waiver file (internal/layoutcheck/publiclayer_allow.txt) has two properties the hermetic
+# checker cannot enforce: it may not grow against the PR base, and a dated entry expires. The checker owns
+# the format, the stale/unused failure and the count limit; this workflow owns the clock and the history.
+#
+# It is its own file, not a job in ci.yml, because a workflow-level `schedule` trigger would run every job in
+# ci.yml nightly, and the existing jobs are deliberately left untouched. The scheduled run only needs the
+# expiry check; the pull_request run adds the growth check against the merge-base; and the push run on the
+# default branch adds it against the previous head, which closes the admin-bypass/merge path: a merge that
+# bypasses the required check (or whose PR run never saw the final tree) still lands on main, and this run
+# diffs exactly what that push added.
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    # Nightly expiry: an expired waiver is a reviewed exemption that outlived its grant.
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Waiver audit
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        # Full history: the growth check diffs against the merge-base of the PR base and HEAD, so both must
+        # exist locally.
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        # The audit tool lives in the tools module; its go.mod sets the toolchain minimum.
+        go-version-file: tools/go.mod
+        cache-dependency-path: tools/go.sum
+
+    - name: Build the audit tool
+      run: go -C tools build -o "$RUNNER_TEMP/waiveraudit" ./waiveraudit
+
+    - name: Waiver expiry
+      run: '"$RUNNER_TEMP/waiveraudit" expire -file internal/layoutcheck/publiclayer_allow.txt'
+
+    - name: Waiver growth against the PR base
+      if: github.event_name == 'pull_request'
+      run: |
+        base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+        "$RUNNER_TEMP/waiveraudit" growth -file internal/layoutcheck/publiclayer_allow.txt -base "$base"
+
+    # The path the PR-only check cannot see: an admin merge (ruleset bypass) or a merge whose PR run never
+    # saw the final tree. github.event.before is the branch's previous head, so base..HEAD is exactly what
+    # this push added. A branch-creation push has no previous head (all zeroes) and nothing to diff.
+    - name: Waiver growth against the pushed-from head
+      if: github.event_name == 'push'
+      run: |
+        before="${{ github.event.before }}"
+        if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+          echo "no previous head on this branch: nothing to diff"
+          exit 0
+        fi
+        "$RUNNER_TEMP/waiveraudit" growth -file internal/layoutcheck/publiclayer_allow.txt -base "$before"

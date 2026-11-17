@@ -84,7 +84,7 @@ GOOS=js GOARCH=wasm go build -o app.wasm .
 > | `-tags rust` | go-webgpu/webgpu → wgpu-native v29 | wgpu-native's backends |
 > | `GOOS=js` | syscall/js → Browser WebGPU | Web applications |
 >
-> **API consistency:** The public API compiles on all build targets. HAL wrapper functions (`NewDeviceFromHAL`, `NewSurfaceFromHAL`, etc.) return errors or nil on Rust/Browser builds where no Go HAL layer exists. Use `RequestAdapter` → `RequestDevice` for the standard cross-backend path.
+> **API consistency:** The public API compiles on all build targets. The `HAL()` accessors on `Instance`, `Adapter`, `Device` and `Surface` exist on every build and return `hal.Handles` in that build's terms — the native backend's handles, `KindWebGPU` handles behind the wgpu-native binding, or `KindBrowser` on the browser build — and a nil or released object answers the zero `Handles` (`KindUnknown`). Use `RequestAdapter` → `RequestDevice` for the standard cross-backend path.
 
 ---
 
@@ -218,34 +218,36 @@ Features: WGSL compute shaders, storage/uniform buffers, indirect dispatch, GPU 
 ```
 wgpu/
 ├── *.go                # Public API (import "github.com/gogpu/wgpu")
-├── core/               # Validation, state tracking, deferred resource destruction
-├── hal/                # Hardware Abstraction Layer
-│   ├── allbackends/    # Platform-specific backend auto-registration
-│   ├── noop/           # No-op backend (testing)
-│   ├── software/       # CPU software rasterizer
-│   ├── gles/           # OpenGL 3.3+ / OpenGL ES 3.0+
-│   ├── vulkan/         # Pure Go Vulkan backend
-│   ├── metal/          # Metal
-│   └── dx12/           # DirectX 12
+├── hal/                # Public interop surface (BackendKind, Handles)
+├── internal/
+│   ├── core/           # Validation, state tracking, deferred resource destruction
+│   ├── hal/            # Hardware Abstraction Layer
+│   │   ├── allbackends/  # Platform-specific backend auto-registration
+│   │   ├── noop/         # No-op backend (testing)
+│   │   ├── software/     # CPU software rasterizer
+│   │   ├── gles/         # OpenGL 3.3+ / OpenGL ES 3.0+
+│   │   ├── vulkan/       # Pure Go Vulkan backend
+│   │   ├── metal/        # Metal
+│   │   └── dx12/         # DirectX 12
 ├── examples/
 │   ├── compute-copy/          # GPU buffer copy with compute shader
-│   ├── compute-sum/           # Parallel reduction on GPU
-│   └── raytracing-headless/   # HAL acceleration structure build, rays traced on the CPU
+│   └── compute-sum/           # Parallel reduction on GPU
 └── cmd/
+    ├── raytracing-headless/   # HAL acceleration structure build, rays traced on the CPU
     ├── vk-gen/         # Vulkan bindings generator
     └── ...             # Backend integration tests
 ```
 
 ### Public API
 
-The root package (`import "github.com/gogpu/wgpu"`) provides a safe, ergonomic API aligned with the W3C WebGPU specification. It wraps `core/` and `hal/` into user-friendly types:
+The root package (`import "github.com/gogpu/wgpu"`) provides a safe, ergonomic API aligned with the W3C WebGPU specification. It wraps `internal/core` and `internal/hal` into user-friendly types:
 
 ```
 User Application
   ↓ import "github.com/gogpu/wgpu"    ← always the same import
 Root Package (public API: *Device, *Buffer, *Texture...)
   ↓ build tag selects implementation
-  ├─ [default]      _native.go  → core/ → hal/ → vulkan/metal/dx12/gles/software
+  ├─ [default]      _native.go  → internal/core → internal/hal → vulkan/metal/dx12/gles/software
   ├─ [-tags rust]   _rust.go    → go-webgpu/webgpu → wgpu-native
   └─ [js,wasm]      _browser.go → syscall/js → Browser WebGPU
 ```
@@ -265,27 +267,21 @@ import "github.com/gogpu/wgpu"
 // - Android: Vulkan, GLES (arm64)
 ```
 
-The Pure Go software backend is **not** registered by default in this release: import `hal/software` (or
-`hal/allbackends`) until v0.35.0, where it becomes default-registered outside the default adapter mask. Keeping it
-explicit leaves every existing program's adapters and picks unchanged.
+The Pure Go software backend is **registered by default** (ADR-083, v0.35.0): no blank import is needed. It is
+outside the default adapter set, so an empty `Backends` mask keeps every existing program's adapters and picks
+unchanged. Select it by naming `gputypes.BackendsSoftware` in the mask; `RequestAdapterOptions.ForceFallbackAdapter`
+then prefers it over other CPU adapters such as WARP and llvmpipe. `-tags wgpu_nosoftware` leaves it out of the
+build.
 
-A test binary that imports `wgputest` is an exception: the package imports `hal/software`, so software is
-registered there even when only `NewNoopDevice` is used, and until v0.35.0 the `BackendEmpty` rule admits it
-whatever mask a request names.
-
-Other GOOS/GOARCH combinations are outside the default registration set; import a backend explicitly (or use
-`hal/allbackends`) until v0.35.0. Some of them, for example linux/386, cannot build the Pure Go backends at all
+Other GOOS/GOARCH combinations are outside the default registration set and get no backend: the backend packages are
+not importable outside the module. Some of them, for example linux/386, cannot build the Pure Go backends at all
 because goffi has no syscall files for that architecture.
 
 Opt out per backend with `-tags wgpu_novulkan`, `wgpu_nodx12`, `wgpu_nometal`,
-`wgpu_nogles` or `wgpu_nosoftware`. The latter removes the software backend
-from `wgputest` today and from the default registration in v0.35.0. Until then
-the software backend registers only when the program imports it; select it
-with `RequestAdapterOptions.ForceFallbackAdapter`. `hal/allbackends` remains
-valid until `hal` moves under `internal/` in v0.35.0, after which it is
-removed. On macOS, dropping it loses Vulkan (MoltenVK): default registration
-on darwin is Metal only. `GOOS=ios` satisfies the darwin tag, so iOS builds in
-the default set register Metal.
+`wgpu_nogles` or `wgpu_nosoftware`. `wgpu_nosoftware` also removes the software
+device from `wgputest`. On macOS, default registration covers Metal only:
+Vulkan through MoltenVK is opt-in with `-tags wgpu_moltenvk`. `GOOS=ios`
+satisfies the darwin tag, so iOS builds in the default set register Metal.
 
 ---
 
@@ -359,9 +355,11 @@ Cross-platform GPU access via OpenGL ES 3.0+:
 CPU rasterizer for headless and windowed rendering. Always compiled — no build tags or GPU hardware required.
 
 ```go
-// The software backend is not registered by default until v0.35.0. Import it
-// explicitly, then select it with RequestAdapterOptions.ForceFallbackAdapter:
-import _ "github.com/gogpu/wgpu/hal/software"
+import "github.com/gogpu/wgpu"
+
+// The software backend is registered by default. Name gputypes.BackendsSoftware
+// in the instance mask to select it; with RequestAdapterOptions.ForceFallbackAdapter
+// it is preferred over other CPU adapters. -tags wgpu_nosoftware leaves it out.
 
 // Use cases:
 // - CI/CD testing without GPU
@@ -393,7 +391,7 @@ within these documented limits; it is not a sandbox for hostile SPIR-V. For untr
 validates.
 
 **Debug & Testing:**
-- Render pass instrumentation: `hal.Logger().Debug()` events + `RenderPassStats` for CI e2e assertions
+- Render pass instrumentation: HAL debug log events and `RenderPassStats` for the repository's CI end-to-end assertions
 - Public `wgpu.HeadlessSurfaceTarget` + `Surface.ReadPixels()` lifecycle for deterministic headless render verification; snapshots are owned, tightly packed RGBA8
 - HAL `GetFramebuffer()` remains as a compatibility alias for existing software-backend callers; new root API code should use `Surface.ReadPixels()`
 - Damage-aware partial blit with pixel-level test coverage

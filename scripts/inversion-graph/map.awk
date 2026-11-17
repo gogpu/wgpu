@@ -6,13 +6,21 @@
 #
 # Destination rules (README §2). Keep in one place: a path that is not listed
 # here is already at its destination and maps to itself.
-
+#
+# The three hal names are distinct destinations (ADR-070 §11, §14.1):
+#   hal            the public thin hal: declarations only, zero imports; it
+#                  stays where it is and is what the internal code names.
+#   internal/hal/** the backend tree: moved whole in A, already at its
+#                  destination, so it falls through to the identity return.
+#   hal/**         the legacy paths of the pre-A tree (hal/vulkan,
+#                  hal/software, ...): they map under internal/hal, so a row
+#                  pinned before the move still resolves to its backend.
 function dest(p) {
   if (p == "(root)")        return "wgpu"
   if (p == "core")          return "internal/core"
   if (p == "core/track")    return "internal/core/track"
   if (p == "core/testutil") return "internal/core/testutil"
-  if (p == "hal")           return "internal/hal"
+  if (p == "hal")           return "hal"
   if (p ~ /^hal\//)         return "internal/" p
   if (p == "internal/thread") return "cmd/internal/thread"
   if (p == "internal/eglrefs") return "internal/hal/gles/internal/eglrefs"

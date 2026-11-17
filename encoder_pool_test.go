@@ -6,18 +6,20 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/encoder"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 func TestEncoderPool_AcquireCreatesNew(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
-	defer pool.destroy()
+	pool := encoder.NewPool(dev)
+	defer pool.Destroy()
 
-	enc, err := pool.acquire()
+	enc, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire failed: %v", err)
 	}
@@ -30,11 +32,11 @@ func TestEncoderPool_ReleaseAndReacquire(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
-	defer pool.destroy()
+	pool := encoder.NewPool(dev)
+	defer pool.Destroy()
 
 	// Acquire, use, release.
-	enc1, err := pool.acquire()
+	enc1, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire failed: %v", err)
 	}
@@ -49,10 +51,10 @@ func TestEncoderPool_ReleaseAndReacquire(t *testing.T) {
 
 	// Simulate GPU completion: ResetAll + release.
 	enc1.ResetAll([]hal.CommandBuffer{cmdBuf})
-	pool.release(enc1)
+	pool.Release(enc1)
 
 	// Reacquire should return the same encoder (from pool, not creating new).
-	enc2, err := pool.acquire()
+	enc2, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("re-acquire failed: %v", err)
 	}
@@ -61,9 +63,7 @@ func TestEncoderPool_ReleaseAndReacquire(t *testing.T) {
 	}
 
 	// The pool should be empty now.
-	pool.mu.Lock()
-	freeCount := len(pool.free)
-	pool.mu.Unlock()
+	freeCount := pool.FreeCount()
 	if freeCount != 0 {
 		t.Errorf("expected 0 free encoders after acquire, got %d", freeCount)
 	}
@@ -73,27 +73,24 @@ func TestEncoderPool_MultipleEncoders(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
-	defer pool.destroy()
+	pool := encoder.NewPool(dev)
+	defer pool.Destroy()
 
 	// Acquire multiple encoders (simulates maxFramesInFlight=2).
-	enc1, err := pool.acquire()
+	enc1, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire 1 failed: %v", err)
 	}
-	enc2, err := pool.acquire()
+	enc2, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire 2 failed: %v", err)
 	}
 
 	// Release both.
-	pool.release(enc1)
-	pool.release(enc2)
+	pool.Release(enc1)
+	pool.Release(enc2)
 
-	pool.mu.Lock()
-	freeCount := len(pool.free)
-	pool.mu.Unlock()
-	if freeCount != 2 {
+	if freeCount := pool.FreeCount(); freeCount != 2 {
 		t.Errorf("expected 2 free encoders, got %d", freeCount)
 	}
 }
@@ -102,21 +99,18 @@ func TestEncoderPool_DestroyReleasesAll(t *testing.T) {
 	dev, _, cleanup := createNoopDeviceForTest(t)
 	defer cleanup()
 
-	pool := newEncoderPool(dev)
+	pool := encoder.NewPool(dev)
 
-	enc1, err := pool.acquire()
+	enc1, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire failed: %v", err)
 	}
-	pool.release(enc1)
+	pool.Release(enc1)
 
 	// Destroy should not panic.
-	pool.destroy()
+	pool.Destroy()
 
-	pool.mu.Lock()
-	freeCount := len(pool.free)
-	pool.mu.Unlock()
-	if freeCount != 0 {
+	if freeCount := pool.FreeCount(); freeCount != 0 {
 		t.Errorf("expected 0 free encoders after destroy, got %d", freeCount)
 	}
 }
@@ -129,18 +123,16 @@ func TestEncoderPool_TracksOutstanding(t *testing.T) {
 	defer cleanup()
 
 	dev := &countingDevice{Device: noopDev}
-	pool := newEncoderPool(dev)
+	pool := encoder.NewPool(dev)
 	outstanding := func() int {
-		pool.mu.Lock()
-		defer pool.mu.Unlock()
-		return len(pool.outstanding)
+		return pool.OutstandingCount()
 	}
 	released, retired, abandoned := mustAcquire(t, pool), mustAcquire(t, pool), mustAcquire(t, pool)
 	if n := outstanding(); n != 3 {
 		t.Fatalf("%d outstanding after 3 acquires, want 3", n)
 	}
-	pool.release(released)
-	pool.retire(retired)
+	pool.Release(released)
+	pool.Retire(retired)
 	if n := outstanding(); n != 1 {
 		t.Fatalf("%d outstanding after release and retire, want 1", n)
 	}
@@ -151,7 +143,7 @@ func TestEncoderPool_TracksOutstanding(t *testing.T) {
 	if dev.destroyed != 1 {
 		t.Fatalf("%d encoders destroyed before destroy, want 1 (the retired one)", dev.destroyed)
 	}
-	pool.destroy()
+	pool.Destroy()
 	if n := outstanding(); n != 0 {
 		t.Errorf("%d outstanding after destroy, want 0", n)
 	}
@@ -186,9 +178,9 @@ type countingEncoder struct {
 
 func (e *countingEncoder) Destroy() { e.device.destroyed++ }
 
-func mustAcquire(t *testing.T, pool *encoderPool) hal.CommandEncoder {
+func mustAcquire(t *testing.T, pool *encoder.Pool) hal.CommandEncoder {
 	t.Helper()
-	enc, err := pool.acquire()
+	enc, err := pool.Acquire()
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
@@ -221,43 +213,17 @@ func createNoopDeviceForTest(t *testing.T) (hal.Device, hal.Queue, func()) {
 // Released without being submitted (the hal.Submit failure path) must not keep
 // pinning every resource the frame touched.
 func TestCommandBufferReleaseDropsUsedSets(t *testing.T) {
-	cb := &CommandBuffer{
-		usedBuffers:    map[*Buffer]struct{}{{}: {}},
-		usedTextures:   map[*Texture]struct{}{{}: {}},
-		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
-	}
+	cb := &CommandBuffer{impl: &encoder.CommandBuffer{}}
+	cb.impl.SetUsedSetsForTest(
+		map[*resource.Buffer]struct{}{{}: {}},
+		map[*resource.Texture]struct{}{{}: {}},
+		map[*resource.BindGroup]struct{}{{}: {}},
+	)
 
 	cb.Release()
 
-	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
+	if cb.impl.UsedBuffers() != nil || cb.impl.UsedTextures() != nil || cb.impl.UsedBindGroups() != nil {
 		t.Errorf("Release left validation sets populated: buffers=%v textures=%v bindGroups=%v",
-			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
-	}
-}
-
-// TestPostSubmitDropsSetsWithoutDestroyQueue verifies that a command buffer is
-// marked submitted and has its validation sets dropped even when the device has
-// no DestroyQueue. postSubmit returns early in that case; the bookkeeping must
-// happen before the early return, since the HAL submit has already succeeded.
-func TestPostSubmitDropsSetsWithoutDestroyQueue(t *testing.T) {
-	q := &Queue{} // nil device — destroyQueue() returns nil
-	if q.destroyQueue() != nil {
-		t.Fatal("test precondition: expected nil destroy queue")
-	}
-
-	cb := &CommandBuffer{
-		usedBuffers:    map[*Buffer]struct{}{{}: {}},
-		usedTextures:   map[*Texture]struct{}{{}: {}},
-		usedBindGroups: map[*BindGroup]struct{}{{}: {}},
-	}
-
-	q.postSubmit(1, []*CommandBuffer{cb})
-
-	if !cb.submitted {
-		t.Error("postSubmit left cb.submitted false — a double submit would not be caught")
-	}
-	if cb.usedBuffers != nil || cb.usedTextures != nil || cb.usedBindGroups != nil {
-		t.Errorf("postSubmit left validation sets populated: buffers=%v textures=%v bindGroups=%v",
-			cb.usedBuffers, cb.usedTextures, cb.usedBindGroups)
+			cb.impl.UsedBuffers(), cb.impl.UsedTextures(), cb.impl.UsedBindGroups())
 	}
 }

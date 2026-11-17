@@ -1,130 +1,92 @@
 //go:build rust
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
 import (
 	"context"
-	"fmt"
 
-	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // Buffer represents a GPU buffer.
-// On Rust backend, this wraps go-webgpu/webgpu Buffer.
+//
+// The implementation lives in internal/resource (ADR-070). This declaration is
+// the public surface: every method is one delegation, and nil/released
+// behavior matches the implementation's guards. The file is per context, like
+// the implementation it fronts; its two siblings (browser, rust) declare the
+// same surface, so a later step can let them diverge without moving the type.
 type Buffer struct {
-	r        *rwgpu.Buffer
-	device   *Device
-	released bool
+	impl *resource.Buffer
 }
 
 // Size returns the buffer size in bytes.
-func (b *Buffer) Size() uint64 {
-	if b.r == nil {
-		return 0
-	}
-	return b.r.Size()
-}
+func (b *Buffer) Size() uint64 { return b.impl.Size() }
 
 // Usage returns the buffer's usage flags.
-func (b *Buffer) Usage() gputypes.BufferUsage {
-	if b.r == nil {
-		return 0
-	}
-	return b.r.Usage()
-}
+func (b *Buffer) Usage() gputypes.BufferUsage { return b.impl.Usage() }
 
 // Label returns the buffer's debug label.
-func (b *Buffer) Label() string {
-	return ""
-}
+func (b *Buffer) Label() string { return b.impl.Label() }
 
-// Release destroys the buffer.
+// Release drops the application's ownership reference to the buffer; see the
+// implementation's documentation for the refcount-driven destruction contract.
 func (b *Buffer) Release() {
-	if b.released {
+	if b.impl == nil {
 		return
 	}
-	b.released = true
-	if b.r != nil {
-		b.r.Release()
-	}
+	b.impl.Release()
 }
 
 // MapState returns the current mapping state of the buffer.
 func (b *Buffer) MapState() MapState {
-	if b == nil || b.released || b.r == nil {
+	if b == nil || b.impl == nil {
 		return MapStateUnmapped
 	}
-	rState := b.r.MapState()
-	switch rState {
-	case rwgpu.BufferMapStateMapped:
-		return MapStateMapped
-	case rwgpu.BufferMapStatePending:
-		return MapStatePending
-	default:
-		return MapStateUnmapped
-	}
+	return MapState(b.impl.MapState())
 }
 
-// Map blocks until a CPU-visible mapping is established for the given
-// byte range, or until ctx is canceled.
+// Map blocks until a CPU-visible mapping is established for the given byte
+// range, or until ctx is canceled.
 func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) error {
-	if b == nil || b.r == nil {
+	if b == nil || b.impl == nil {
 		return ErrReleased
 	}
-	if b.released {
-		return ErrBufferDestroyed
-	}
-
-	rMode := rwgpu.MapMode(mode)
-	return b.r.Map(ctx, rMode, offset, size)
+	return b.impl.Map(ctx, resource.MapMode(mode), offset, size)
 }
 
 // MapAsync initiates a buffer map without blocking the caller.
 func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error) {
-	if b == nil || b.r == nil {
+	if b == nil || b.impl == nil {
 		return nil, ErrReleased
 	}
-	if b.released {
-		return nil, ErrBufferDestroyed
-	}
-
-	rMode := rwgpu.MapMode(mode)
-	rp, err := b.r.MapAsync(rMode, offset, size)
+	pending, err := b.impl.MapAsync(resource.MapMode(mode), offset, size)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: mapAsync: %w", err)
+		return nil, err
 	}
-
-	return &MapPending{r: rp, buf: b}, nil
+	return &MapPending{impl: pending}, nil
 }
 
 // MappedRange returns a safe view over the mapped region [offset, offset+size).
 func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
-	if b == nil || b.r == nil {
+	if b == nil || b.impl == nil {
 		return nil, ErrReleased
 	}
-	if b.released {
-		return nil, ErrBufferDestroyed
-	}
-	if b.MapState() != MapStateMapped {
-		return nil, ErrMapNotMapped
-	}
-
-	rm, err := b.r.MappedRange(offset, size)
+	mapped, err := b.impl.MappedRange(offset, size)
 	if err != nil {
-		return nil, fmt.Errorf("wgpu: mapped range: %w", err)
+		return nil, err
 	}
-
-	return &MappedRange{r: rm}, nil
+	return &MappedRange{impl: mapped}, nil
 }
 
-// Unmap releases the current mapping.
+// Unmap releases the current mapping and invalidates all outstanding
+// MappedRange handles for this buffer.
 func (b *Buffer) Unmap() error {
-	if b == nil || b.r == nil {
+	if b == nil || b.impl == nil {
 		return ErrReleased
 	}
-	if b.released {
-		return ErrBufferDestroyed
-	}
-	return b.r.Unmap()
+	return b.impl.Unmap()
 }

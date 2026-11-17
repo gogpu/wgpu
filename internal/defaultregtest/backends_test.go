@@ -1,25 +1,49 @@
 //go:build !rust && !(js && wasm)
 
-// Package defaultregtest checks the public default-registration contract from
-// a binary that imports nothing else in the module: no test helper, no
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+// Package defaultregtest_test checks the public default-registration contract
+// from a binary that imports nothing else in the module: no test helper, no
 // wgputest, no backend. That is what a normal program sees.
-package defaultregtest
+//
+// It is an external test package on purpose (ADR-070 §15.10): a white-box test
+// in a child package is a finding, an external one is a test-only consumer.
+package defaultregtest_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
 )
 
-// TestSoftwareIsNotRegisteredByDefault: Phase 0 registers the platform
-// hardware backends only. Software stays an explicit import until v0.35.0,
-// where it becomes default-registered but outside the default mask
-// (ADR-083 §2.1/§2.3, user decision 2026-10-18).
-func TestSoftwareIsNotRegisteredByDefault(t *testing.T) {
-	if backend, ok := hal.GetBackend(gputypes.BackendEmpty); ok {
-		t.Fatalf("a BackendEmpty backend is registered by default (%T); software must stay an explicit import until v0.35.0", backend)
+// emptyMask is the backend flag a registration for gputypes.BackendEmpty would
+// answer to: every flag follows BackendsX == 1 << BackendX, and the no-op
+// backend is the only one that reports BackendEmpty.
+const emptyMask = gputypes.Backends(1 << gputypes.BackendEmpty)
+
+// TestNoopIsNotRegisteredByDefault: the no-op backend is a test double and
+// belongs to no default binary. Since v0.35.0 it owns the BackendEmpty variant
+// alone — software reports BackendSoftware (ADR-083 §2.3) — so a BackendEmpty
+// registration here would be a no-op leaking into production. Registration is
+// observable through the public selection: the mask below admits no registered
+// backend, while a registration answering to it would leave the backend
+// registered with no adapter on this machine (ErrNoHardwareAdapter).
+func TestNoopIsNotRegisteredByDefault(t *testing.T) {
+	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: emptyMask})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	defer instance.Release()
+
+	_, err = instance.RequestAdapter(nil)
+	if !errors.Is(err, wgpu.ErrNoBackendRegistered) {
+		t.Fatalf("RequestAdapter error = %v, want ErrNoBackendRegistered; a backend registered for BackendEmpty would make this ErrNoHardwareAdapter", err)
+	}
+	if errors.Is(err, wgpu.ErrNoHardwareAdapter) {
+		t.Errorf("RequestAdapter error = %v, must not match ErrNoHardwareAdapter", err)
 	}
 }
 

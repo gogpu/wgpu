@@ -8,7 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // TestRequestDeviceRejectsWhatTheAdapterLacks checks that RequestDevice
@@ -17,7 +17,9 @@ import (
 // validate_device_descriptor (wgpu-core/src/instance.rs) do, instead of
 // recording a feature the device was never created with.
 func TestRequestDeviceRejectsWhatTheAdapterLacks(t *testing.T) {
-	inst, err := wgpu.CreateInstance(nil)
+	// Pin the instance to the Pure Go software backend: after ADR-083 §2.3 the
+	// default mask is hardware-only, and this test needs any adapter, not a GPU.
+	inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}

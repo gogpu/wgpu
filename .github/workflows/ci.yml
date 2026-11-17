@@ -147,6 +147,10 @@ jobs:
   test:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # A required gate must fail closed. TestRunGate skips itself when `sh` is
+    # not in PATH; layoutcheck in WGPU_REQUIRE turns that skip into a failure.
+    env:
+      WGPU_REQUIRE: "layoutcheck"
     # Codecov uploads with OIDC; no other job needs an id token.
     permissions:
       contents: read
@@ -174,14 +178,32 @@ jobs:
 
     - name: Run go vet
       if: matrix.os == 'ubuntu-latest'
-      # Skip hal/vulkan/vk and hal/gles due to intentional unsafe.Pointer FFI usage
+      # Skip internal/hal/vulkan/vk and internal/hal/gles due to intentional unsafe.Pointer FFI usage.
+      # The list is captured first: a failed `go list` inside `$(...)` does not abort under `set -e`,
+      # and a failed substitution would degrade the command to bare `go vet` (the current package only).
       run: |
-        go vet $(go list ./... | grep -v '/hal/vulkan/vk$' | grep -v '/hal/gles')
+        set -euo pipefail
+        pkgs=$(go list ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
+        go vet $pkgs
 
     # The build users ship: CGO_ENABLED=0, so goffi runs its fakecgo path.
+    # -coverpkg=./... is required since the implementation moved into internal
+    # packages (ADR-070): the root tests exercise them through the public API,
+    # and Go credits cross-package execution only when the package is
+    # instrumented. Without it the moved code reads as barely covered
+    # (internal/encoder showed 17.9% on the window's first reports while the
+    # root tests drive it; its own tests alone reach 47.1%).
     - name: Run tests
       shell: bash
-      run: go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic ./...
+      run: |
+        # -coverpkg=./... only where the profile is uploaded (ubuntu): it
+        # instruments every package, and the other matrix legs produce a profile
+        # no one reads.
+        coverpkg=
+        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          coverpkg="-coverpkg=./..."
+        fi
+        go test -v -count=1 -coverprofile=coverage.txt -covermode=atomic $coverpkg ./...
 
     # Race detection uses the toolchain's -race (ThreadSanitizer, needs cgo).
     # With CGO_ENABLED=1 goffi links the real runtime/cgo instead of its
@@ -197,12 +219,13 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       shell: bash
       run: |
-        if [ -f coverage.txt ]; then
-          echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
-        else
-          echo "coverage.txt not found, generating separately..."
-          go test -coverprofile=coverage.txt -covermode=atomic ./... || true
+        # A missing profile is a failure, not a reason to re-run the suite with
+        # errors swallowed: the Run tests step above must have produced it.
+        if [ ! -f coverage.txt ]; then
+          echo "coverage.txt missing: the Run tests step did not produce a profile" >&2
+          exit 1
         fi
+        echo "coverage.txt found ($(wc -l < coverage.txt) lines)"
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
@@ -253,7 +276,7 @@ jobs:
       run: go mod download
 
     - name: Build GLES backend
-      run: go build -v ./hal/gles/...
+      run: go build -v ./internal/hal/gles/...
 
     - name: Run GLES integration test (surfaceless)
       env:
@@ -269,7 +292,7 @@ jobs:
         echo "WAYLAND_DISPLAY='$WAYLAND_DISPLAY'"
         echo "LIBGL_ALWAYS_SOFTWARE='$LIBGL_ALWAYS_SOFTWARE'"
         echo ""
-        go test -v -tags integration ./hal/gles/...
+        go test -v -tags integration ./internal/hal/gles/...
 
     - name: Run GLES integration test on an OpenGL ES context (surfaceless)
       # Mesa offers desktop GL, so the backend never takes its ES paths here
@@ -281,7 +304,7 @@ jobs:
         LIBGL_ALWAYS_SOFTWARE: "1"
         MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
         WGPU_REQUIRE: "gles"
-      run: go test -v -tags "integration wgpu_gles_force_es" ./hal/gles/...
+      run: go test -v -tags "integration wgpu_gles_force_es" ./internal/hal/gles/...
 
     - name: Test EGL library loading
       run: |
@@ -320,9 +343,36 @@ jobs:
         install-mode: none
         args: --timeout=5m
 
+    # Compiles the rust-tagged files, tests included: the build and test jobs
+    # use the native tags, and cross-compile runs `go build .` only, so nothing
+    # else type-checks hal_interop_rust_test.go and the other rust-tagged
+    # tests. Same skip as the test job's "Run go vet" step: intentional
+    # unsafe.Pointer FFI use in internal/hal/vulkan/vk and internal/hal/gles.
+    - name: Run go vet with the rust build tag
+      run: |
+        set -euo pipefail
+        pkgs=$(go list -tags rust ./... | grep -v '/internal/hal/vulkan/vk$' | grep -v '/internal/hal/gles')
+        go vet -tags rust $pkgs
+
+    # Compiles the wasm-tagged files, tests included (hal_interop_browser_test.go
+    # and the other test files of the wasm build graph); no other job
+    # type-checks them. The packages are that graph, not ./...: outside it the
+    # tree does not type-check for js/wasm yet — internal/raytracing and
+    # internal/shaderir name native-only hal types, internal/hal/allbackends and
+    # examples/browser-compute do not build at all, and the test files of
+    # internal/core and internal/hal/vulkan do not compile. All pre-existing;
+    # widening this step needs its own change.
+    - name: Run go vet for js/wasm
+      env:
+        GOOS: js
+        GOARCH: wasm
+      run: |
+        set -euo pipefail
+        go vet . ./hal ./internal/browser ./internal/indirect ./internal/pipeconst
+
   # Lint the other desktop targets. The job above type-checks only the linux
-  # files, so code under darwin or windows build tags (hal/metal, hal/dx12,
-  # hal/gles/wgl) is never linted otherwise. The code is pure Go
+  # files, so code under darwin or windows build tags (internal/hal/metal, internal/hal/dx12,
+  # internal/hal/gles/wgl) is never linted otherwise. The code is pure Go
   # (CGO_ENABLED=0), so GOOS/GOARCH on a linux runner load exactly that
   # target's files; a target that fails to type-check exits non-zero, never
   # "0 issues". One GOARCH per GOOS is enough: the module has no arch-specific
@@ -448,6 +498,38 @@ jobs:
         [ $WARNINGS -gt 0 ] && echo "::warning::$WARNINGS ecosystem dep(s) outdated"
         exit 0
 
+  # The root and encoder packages' js/wasm tests actually EXECUTE here (node runs the
+  # wasm binary): browser-context contract tests are otherwise compiled and
+  # vetted but never run (P2-INFRA-014).
+  wasm-test:
+    name: wasm test (root + encoder, node)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run the root and encoder test suites on js/wasm
+      env:
+        GOOS: js
+        GOARCH: wasm
+      run: |
+        # `go test` executes the wasm test binary through go_$GOOS_$GOARCH_exec
+        # (go_js_wasm_exec, which runs it under node). Without that directory on
+        # PATH the runner tries to exec the wasm binary itself and fails with
+        # "exec format error" (the first real run of this job, 2026-11-16).
+        export PATH="$(go env GOROOT)/lib/wasm:$PATH"
+        go test -count=1 -v . ./internal/encoder/
+
   # The one check the main-protection ruleset requires, by this exact job name:
   # renaming the job silently drops the requirement. Jobs and the matrix can
   # change without touching the ruleset; a new required job goes into `needs`.
@@ -456,7 +538,7 @@ jobs:
   gate:
     name: Test
     if: always()
-    needs: [android-arm64-preview, build, cross-compile, test, integration-gles, lint, lint-targets, formatting, deps]
+    needs: [android-arm64-preview, build, cross-compile, test, integration-gles, wasm-test, lint, lint-targets, formatting, deps]
     runs-on: ubuntu-latest
     steps:
     - name: Every required job succeeded

@@ -35,14 +35,14 @@ func TestDetachedTextureKeepsMetadata(t *testing.T) {
 	if got := tex.Format(); got != gputypes.TextureFormatRGBA8Unorm {
 		t.Fatalf("Format = %v, want RGBA8Unorm", got)
 	}
-	got := tex.viewFormatList()
+	got := tex.impl.ViewFormatList()
 	if len(got) != 1 || got[0] != gputypes.TextureFormatRGBA8UnormSrgb {
 		t.Fatalf("viewFormats = %v, want [RGBA8UnormSrgb]", got)
 	}
 
 	// The handle owns its copy: mutating the caller's slice changes nothing.
 	view[0] = gputypes.TextureFormatBGRA8Unorm
-	if got := tex.viewFormatList(); got[0] != gputypes.TextureFormatRGBA8UnormSrgb {
+	if got := tex.impl.ViewFormatList(); got[0] != gputypes.TextureFormatRGBA8UnormSrgb {
 		t.Fatalf("viewFormats aliased the caller's slice: %v", got)
 	}
 }

@@ -5,9 +5,11 @@ package wgpu
 import (
 	"testing"
 
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/pipeline"
+	"github.com/gogpu/wgpu/internal/resource"
 )
 
 // computeCall is one state or dispatch call on a HAL compute pass.
@@ -24,8 +26,8 @@ type recordingComputePass struct {
 	calls []computeCall
 }
 
-func (p *recordingComputePass) SetPipeline(pipeline hal.ComputePipeline) {
-	p.calls = append(p.calls, computeCall{op: "pipeline", pipeline: pipeline})
+func (p *recordingComputePass) SetPipeline(halPipeline hal.ComputePipeline) {
+	p.calls = append(p.calls, computeCall{op: "pipeline", pipeline: halPipeline})
 }
 
 func (p *recordingComputePass) SetBindGroup(index uint32, _ hal.BindGroup, _ []uint32) {
@@ -59,13 +61,13 @@ func (e *passRecordingEncoder) BeginComputePass(desc *hal.ComputePassDescriptor)
 func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 	command := &passRecordingEncoder{CommandEncoder: &noop.CommandEncoder{}}
 	device := newCaptureDevice(&captureDevice{Device: &noop.Device{}, commandEncoder: command})
-	iv := device.core.IndirectValidation()
+	iv := device.impl.Core().IndirectValidation()
 	if iv == nil {
 		t.Fatal("the noop device has no indirect validation; the test needs it")
 	}
-	indirectCore := core.NewBuffer(&noop.Buffer{}, device.core, BufferUsageIndirect|BufferUsageStorage, 64, "indirect")
+	indirectCore := core.NewBuffer(&noop.Buffer{}, device.impl.Core(), BufferUsageIndirect|BufferUsageStorage, 64, "indirect")
 	indirectCore.Ref = core.NewResourceRef("Buffer:indirect", nil)
-	indirect := &Buffer{core: indirectCore}
+	indirect := NewTestBufferFromCore(indirectCore)
 	encoder, err := device.CreateCommandEncoder(nil)
 	if err != nil {
 		t.Fatalf("CreateCommandEncoder() error = %v", err)
@@ -76,9 +78,12 @@ func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 	}
 
 	l := rebindLayout(false)
-	userPipeline := &ComputePipeline{hal: &testHALResource{}, bindGroupLayouts: []*BindGroupLayout{l}}
+	userPipeline := &ComputePipeline{impl: pipeline.NewComputePipeline(&pipeline.ComputePipelineInit{
+		HAL:              &testHALResource{},
+		BindGroupLayouts: []*resource.BindGroupLayout{l},
+	})}
 	pass.SetPipeline(userPipeline)
-	pass.SetBindGroup(0, rebindGroup(l), nil)
+	pass.SetBindGroup(0, &BindGroup{impl: rebindGroup(l)}, nil)
 	pass.DispatchIndirect(indirect, 0)
 	if err := pass.End(); err != nil {
 		t.Fatalf("End() error = %v", err)
@@ -96,7 +101,7 @@ func TestDispatchIndirectValidatedKeepsUserState(t *testing.T) {
 		t.Errorf("validation pass calls = %+v, want the validation pipeline first", got)
 	}
 	want := []computeCall{
-		{op: "pipeline", pipeline: userPipeline.hal},
+		{op: "pipeline", pipeline: userPipeline.impl.HAL()},
 		{op: "group", index: 0},
 		{op: "dispatchIndirect"},
 	}

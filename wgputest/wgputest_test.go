@@ -10,24 +10,28 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 	"github.com/gogpu/wgpu/wgputest"
 )
 
 // TestImportDoesNotRegisterNoop guards the factory's private noop instance:
 // importing wgputest must not put the noop backend into the global HAL
-// registry, where it would replace the software backend under BackendEmpty.
+// registry. Since v0.35.0 software has its own variant (ADR-083 §2.3), so the
+// registry can be checked exactly.
 func TestImportDoesNotRegisterNoop(t *testing.T) {
-	// This test only builds where the software backend is in the build
-	// (its build tag mirrors the constructor), so BackendEmpty is always
-	// registered by hal/software: a missing entry is a regression, not a skip.
-	backend, ok := hal.GetBackend(gputypes.BackendEmpty)
+	// This test only builds where the software backend is in the build (its
+	// build tag mirrors the constructor), so BackendSoftware is always
+	// registered: a missing entry is a regression, not a skip.
+	backend, ok := hal.GetBackend(gputypes.BackendSoftware)
 	if !ok {
-		t.Fatal("no BackendEmpty backend registered: importing wgputest no longer registers the software backend")
+		t.Fatal("no software backend registered: importing wgputest no longer registers the software backend")
 	}
 	if _, isNoop := backend.(noop.Backend); isNoop {
-		t.Fatal("importing wgputest registered the noop backend over software")
+		t.Fatal("the software registry entry holds the noop backend")
+	}
+	if backend, ok := hal.GetBackend(gputypes.BackendEmpty); ok {
+		t.Fatalf("importing wgputest registered a BackendEmpty backend (%T); the noop device must stay private", backend)
 	}
 }
 

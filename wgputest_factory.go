@@ -5,21 +5,40 @@ package wgpu
 import (
 	"errors"
 
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/wgputestbridge"
 )
 
 func init() {
 	wgputestbridge.Register(newTestDeviceFactory())
+	wgputestbridge.RegisterHALDeviceAccessor(func(device any) any {
+		d, ok := device.(*Device)
+		if !ok {
+			return nil
+		}
+		return d.halDevice()
+	})
+	wgputestbridge.RegisterDeviceFromHALFactory(func(halDevice, halQueue any, features gputypes.Features, limits gputypes.Limits, label string) (any, error) {
+		hd, ok := halDevice.(hal.Device)
+		if !ok || hd == nil {
+			return nil, errors.New("wgpu: halDevice is not a HAL device")
+		}
+		hq, ok := halQueue.(hal.Queue)
+		if !ok || hq == nil {
+			return nil, errors.New("wgpu: halQueue is not a HAL queue")
+		}
+		return newDeviceFromHAL(hd, hq, features, limits, label), nil
+	})
 }
 
 // newTestDeviceFactory constructs the wgpu Device for package wgputest around
 // a private HAL backend instance that wgputest opened. The wgpu core and its
 // validation are unchanged; the recorder is attached at the public API.
 //
-// The root package does not import any backend for this: software stays an
-// explicit import until v0.35.0, when it becomes default-registered outside
-// the default mask (ADR-083).
+// The root package does not import a backend for this: it builds the device
+// through the wgputest bridge, so a test binary that imports wgputest gets the
+// device it asked for and nothing else.
 func newTestDeviceFactory() wgputestbridge.Factory {
 	return func(opts *wgputestbridge.Options) (any, any, func(), error) {
 		halDevice, ok := opts.Device.(hal.Device)
@@ -32,8 +51,8 @@ func newTestDeviceFactory() wgputestbridge.Factory {
 		}
 		hooks := wgputestbridge.NewHooks(opts.Observer, opts.Faults)
 		device := newDeviceFromHAL(halDevice, halQueue, opts.Features, opts.Limits, opts.Label)
-		device.test = hooks
-		device.queue.test = hooks
+		device.impl.SetTestHooks(hooks)
+		device.queue.impl.SetTestHooks(hooks)
 		return device, device.queue, func() { device.Release() }, nil
 	}
 }

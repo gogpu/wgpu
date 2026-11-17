@@ -2,7 +2,9 @@
 
 package wgpu_test
 
-import "github.com/gogpu/wgpu"
+import (
+	"github.com/gogpu/wgpu"
+)
 
 // The public resource types are comparable, so a value can be a map key or be
 // compared with ==. Adding a slice, map or func field to one of them is an

@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 // copyRecordingDevice hands out encoders that count the copy commands that
@@ -58,9 +58,7 @@ func newCopyRecordingDevice(t *testing.T) (*Device, *copyRecordingDevice) {
 	raw := &copyRecordingDevice{}
 	adapter := &core.Adapter{DownlevelCapabilities: gputypes.DefaultDownlevelCapabilities()}
 	coreDevice := core.NewDevice(raw, adapter, 0, gputypes.DefaultLimits(), "copy-recording-test")
-	queue := &Queue{hal: &noop.Queue{}, halDevice: raw}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
+	device := newTestDeviceWithQueue(coreDevice, nil, &noop.Queue{}, nil)
 	t.Cleanup(device.Release)
 	return device, raw
 }
@@ -132,11 +130,11 @@ func textureRegion(src, dst *Texture, w, h, d uint32) TextureCopy {
 // before the tracker is touched) and records no error.
 func requireNoSideEffects(t *testing.T, enc *CommandEncoder) {
 	t.Helper()
-	if len(enc.trackedRefs) != 0 {
-		t.Errorf("tracked refs = %d, want 0", len(enc.trackedRefs))
+	if len(enc.impl.TrackedRefs()) != 0 {
+		t.Errorf("tracked refs = %d, want 0", len(enc.impl.TrackedRefs()))
 	}
-	if len(enc.usedBuffers) != 0 {
-		t.Errorf("used buffers = %d, want 0", len(enc.usedBuffers))
+	if len(enc.impl.UsedBuffers()) != 0 {
+		t.Errorf("used buffers = %d, want 0", len(enc.impl.UsedBuffers()))
 	}
 	if _, err := enc.Finish(); err != nil {
 		t.Errorf("Finish: %v", err)

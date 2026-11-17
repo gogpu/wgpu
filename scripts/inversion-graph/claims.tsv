@@ -1,0 +1,75 @@
+# claims.tsv — machine-readable claim of every golden row by the step that creates it (ADR-070 §15.2).
+# Format: README.md § "claims.tsv". Columns are tab-separated:
+#   golden  target|inverted
+#   src     source package (destination path)
+#   dst     destination package (destination path)
+#   context all|native|native+rust|rust|wasm
+#   step    S1..S13
+# Each step's commit adds exactly its own rows; the S13 sweep sets the phase to final.
+# The golden files (target-edges.tsv, inverted-edges.tsv) stay hand-reviewed design intent.
+golden	src	dst	context	step
+phase: final
+target	internal/resource	internal/browser	wasm	S1
+target	internal/resource	internal/core	all	S1
+target	internal/resource	internal/hal	all	S1
+inverted	internal/resource	internal/device	native+rust	S1
+target	internal/resource	internal/core/track	native	S2
+target	internal/resource	internal/shaderir	native	S2
+target	internal/pipeline	internal/resource	all	S3
+target	internal/pipeline	internal/hal	all	S3
+target	internal/pipeline	internal/core	all	S3
+target	internal/pipeline	internal/browser	wasm	S3
+target	internal/encoder	internal/resource	all	S4
+target	internal/encoder	internal/pipeline	all	S4
+target	internal/encoder	internal/hal	all	S4
+target	internal/encoder	internal/core	all	S4
+target	internal/encoder	internal/browser	wasm	S4
+target	internal/encoder	internal/core/track	native	S4
+target	internal/encoder	internal/indirect	all	S5
+target	internal/staging	internal/hal	all	S7
+target	internal/pendingwrites	internal/staging	native	S8
+target	internal/pendingwrites	internal/resource	native	S8
+target	internal/pendingwrites	internal/hal	all	S8
+target	internal/pendingwrites	internal/core	native	S8
+target	internal/pendingwrites	internal/core/track	native	S8
+target	internal/queue	internal/core	native+rust	S9
+target	internal/queue	internal/core/track	native	S9
+target	internal/queue	internal/encoder	native+rust	S9
+target	internal/queue	internal/hal	all	S9
+target	internal/queue	internal/pendingwrites	native	S9
+target	internal/queue	internal/resource	all	S9
+target	internal/queue	internal/browser	wasm	S9
+target	internal/queue	internal/stencilblit	native	S9
+target	internal/encoder	internal/stencilblit	native	S9
+target	internal/stencilblit	internal/hal	all	S9
+target	internal/surface	internal/core	all	S10
+target	internal/surface	internal/hal	all	S10
+target	internal/surface	internal/resource	all	S10
+target	internal/surface	internal/browser	wasm	S10
+inverted	internal/surface	internal/device	all	S10
+inverted	internal/surface	internal/instance	native	S10
+target	internal/device	internal/queue	all	S11
+target	internal/device	internal/encoder	all	S11
+target	internal/device	internal/resource	all	S11
+target	internal/device	internal/pipeline	all	S11
+target	internal/device	internal/surface	native	S11
+target	internal/device	internal/hal	all	S11
+target	internal/device	internal/core	all	S11
+target	internal/device	internal/browser	wasm	S11
+target	internal/device	internal/pipeconst	rust	S11
+target	internal/device	internal/pipeconst	wasm	S11
+target	internal/device	internal/core/track	native	S11
+inverted	internal/device	internal/instance	native+rust	S11
+target	internal/device	internal/stencilblit	native	S11
+target	internal/instance	internal/device	all	S12
+target	internal/instance	internal/surface	all	S12
+target	internal/instance	internal/queue	all	S12
+target	internal/instance	internal/encoder	native	S12
+target	internal/instance	internal/pendingwrites	native	S12
+target	internal/instance	internal/hal	all	S12
+target	internal/instance	internal/core	all	S12
+target	internal/instance	internal/browser	wasm	S12
+target	internal/instance	hal	all	S12
+inverted	internal/pipeline	internal/device	native+rust	S3
+inverted	internal/encoder	internal/device	native+rust	S4
+inverted	internal/queue	internal/device	native	S9

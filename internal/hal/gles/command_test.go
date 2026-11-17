@@ -1,0 +1,462 @@
+// Copyright 2025 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+//go:build windows && !(js && wasm)
+
+package gles
+
+import (
+	"testing"
+
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/hal"
+)
+
+func TestCommandEncoder_BeginEndEncoding(t *testing.T) {
+	enc := &CommandEncoder{}
+
+	// Begin encoding
+	if err := enc.BeginEncoding("test"); err != nil {
+		t.Fatalf("BeginEncoding failed: %v", err)
+	}
+
+	if enc.label != "test" {
+		t.Errorf("label = %q, want %q", enc.label, "test")
+	}
+
+	// End encoding
+	cmdBuf, err := enc.EndEncoding()
+	if err != nil {
+		t.Fatalf("EndEncoding failed: %v", err)
+	}
+
+	if cmdBuf == nil {
+		t.Error("EndEncoding returned nil CommandBuffer")
+	}
+
+	// Commands should be cleared after EndEncoding
+	if enc.commands != nil {
+		t.Error("commands should be nil after EndEncoding")
+	}
+}
+
+func TestCommandEncoder_DiscardEncoding(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	// Add some commands manually
+	enc.commands = append(enc.commands, &ClearColorCommand{r: 1, g: 0, b: 0, a: 1})
+
+	enc.DiscardEncoding()
+
+	if enc.commands != nil {
+		t.Error("commands should be nil after DiscardEncoding")
+	}
+}
+
+func TestCommandBuffer_Destroy(t *testing.T) {
+	cmdBuf := &CommandBuffer{
+		commands: []Command{
+			&ClearColorCommand{r: 1, g: 0, b: 0, a: 1},
+			&ClearDepthCommand{depth: 1.0},
+		},
+	}
+
+	cmdBuf.Destroy()
+
+	if cmdBuf.commands != nil {
+		t.Error("commands should be nil after Destroy")
+	}
+}
+
+func TestCommandEncoder_ClearBuffer(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	buf := &Buffer{id: 1, size: 1024}
+	enc.ClearBuffer(buf, 0, 512)
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*ClearBufferCommand)
+	if !ok {
+		t.Fatalf("expected ClearBufferCommand, got %T", enc.commands[0])
+	}
+
+	if cmd.buffer != buf {
+		t.Error("buffer mismatch")
+	}
+	if cmd.offset != 0 {
+		t.Errorf("offset = %d, want 0", cmd.offset)
+	}
+	if cmd.size != 512 {
+		t.Errorf("size = %d, want 512", cmd.size)
+	}
+}
+
+func TestCommandEncoder_CopyBufferToBuffer(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	src := &Buffer{id: 1}
+	dst := &Buffer{id: 2}
+
+	regions := []hal.BufferCopy{
+		{SrcOffset: 0, DstOffset: 100, Size: 256},
+		{SrcOffset: 512, DstOffset: 0, Size: 128},
+	}
+
+	enc.CopyBufferToBuffer(src, dst, regions)
+
+	if len(enc.commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(enc.commands))
+	}
+
+	for i, r := range regions {
+		cmd, ok := enc.commands[i].(*CopyBufferCommand)
+		if !ok {
+			t.Fatalf("command %d: expected CopyBufferCommand, got %T", i, enc.commands[i])
+		}
+
+		if cmd.srcID != 1 {
+			t.Errorf("command %d: srcID = %d, want 1", i, cmd.srcID)
+		}
+		if cmd.dstID != 2 {
+			t.Errorf("command %d: dstID = %d, want 2", i, cmd.dstID)
+		}
+		if cmd.srcOffset != r.SrcOffset {
+			t.Errorf("command %d: srcOffset = %d, want %d", i, cmd.srcOffset, r.SrcOffset)
+		}
+		if cmd.dstOffset != r.DstOffset {
+			t.Errorf("command %d: dstOffset = %d, want %d", i, cmd.dstOffset, r.DstOffset)
+		}
+		if cmd.size != r.Size {
+			t.Errorf("command %d: size = %d, want %d", i, cmd.size, r.Size)
+		}
+	}
+}
+
+func TestRenderPassEncoder_Draw(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc)
+
+	rpe.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*DrawCommand)
+	if !ok {
+		t.Fatalf("expected DrawCommand, got %T", enc.commands[0])
+	}
+
+	if cmd.vertexCount != 3 {
+		t.Errorf("vertexCount = %d, want 3", cmd.vertexCount)
+	}
+	if cmd.instanceCount != 1 {
+		t.Errorf("instanceCount = %d, want 1", cmd.instanceCount)
+	}
+}
+
+func TestRenderPassEncoder_DrawIndexed(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc)
+
+	// Set index format
+	idxBuf := &Buffer{id: 5}
+	rpe.SetIndexBuffer(idxBuf, gputypes.IndexFormatUint32, 0)
+
+	rpe.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 36, InstanceCount: 2})
+
+	// Should have SetIndexBufferCommand and DrawIndexedCommand
+	if len(enc.commands) < 2 {
+		t.Fatalf("expected at least 2 commands, got %d", len(enc.commands))
+	}
+
+	drawCmd, ok := enc.commands[len(enc.commands)-1].(*DrawIndexedCommand)
+	if !ok {
+		t.Fatalf("expected DrawIndexedCommand, got %T", enc.commands[len(enc.commands)-1])
+	}
+
+	if drawCmd.indexCount != 36 {
+		t.Errorf("indexCount = %d, want 36", drawCmd.indexCount)
+	}
+	if drawCmd.instanceCount != 2 {
+		t.Errorf("instanceCount = %d, want 2", drawCmd.instanceCount)
+	}
+	if drawCmd.indexFormat != gputypes.IndexFormatUint32 {
+		t.Errorf("indexFormat = %v, want Uint32", drawCmd.indexFormat)
+	}
+}
+
+func TestRenderPassEncoder_SetViewport(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc)
+
+	rpe.SetViewport(gputypes.Viewport{X: 10, Y: 20, Width: 800, Height: 600, MinDepth: 0.0, MaxDepth: 1.0})
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*SetViewportCommand)
+	if !ok {
+		t.Fatalf("expected SetViewportCommand, got %T", enc.commands[0])
+	}
+
+	if cmd.x != 10 || cmd.y != 20 {
+		t.Errorf("position = (%v, %v), want (10, 20)", cmd.x, cmd.y)
+	}
+	if cmd.width != 800 || cmd.height != 600 {
+		t.Errorf("size = (%v, %v), want (800, 600)", cmd.width, cmd.height)
+	}
+}
+
+func TestRenderPassEncoder_SetScissorRect(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc)
+
+	rpe.SetScissorRect(gputypes.ScissorRect{X: 50, Y: 50, Width: 400, Height: 300})
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*SetScissorCommand)
+	if !ok {
+		t.Fatalf("expected SetScissorCommand, got %T", enc.commands[0])
+	}
+
+	if cmd.x != 50 || cmd.y != 50 {
+		t.Errorf("position = (%d, %d), want (50, 50)", cmd.x, cmd.y)
+	}
+	if cmd.width != 400 || cmd.height != 300 {
+		t.Errorf("size = (%d, %d), want (400, 300)", cmd.width, cmd.height)
+	}
+}
+
+func TestSetScissorCommand_PassThrough(t *testing.T) {
+	// With ADJUST_COORDINATE_SPACE, scissor coordinates pass through directly.
+	// No Y-flip is needed because the scene is rendered upside-down in GL,
+	// so GL pixel Y=0 corresponds to the top of the scene (WebGPU Y=0).
+	tests := []struct {
+		name string
+		x, y uint32
+		w, h uint32
+	}{
+		{"top-left corner", 0, 0, 100, 100},
+		{"bottom-right corner", 700, 500, 100, 100},
+		{"center region", 200, 150, 400, 300},
+		{"full framebuffer", 0, 0, 800, 600},
+		{"small rect near top", 50, 10, 200, 50},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &SetScissorCommand{
+				x: tt.x, y: tt.y, width: tt.w, height: tt.h,
+			}
+			// Coordinates should be stored as-is (pass-through, no Y-flip)
+			if cmd.x != tt.x || cmd.y != tt.y {
+				t.Errorf("position = (%d, %d), want (%d, %d)", cmd.x, cmd.y, tt.x, tt.y)
+			}
+			if cmd.width != tt.w || cmd.height != tt.h {
+				t.Errorf("size = (%d, %d), want (%d, %d)", cmd.width, cmd.height, tt.w, tt.h)
+			}
+		})
+	}
+}
+
+func TestRenderPassEncoder_SetScissorRect_PassThrough(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc).(*RenderPassEncoder)
+
+	rpe.SetScissorRect(gputypes.ScissorRect{X: 50, Y: 100, Width: 400, Height: 200})
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*SetScissorCommand)
+	if !ok {
+		t.Fatalf("expected SetScissorCommand, got %T", enc.commands[0])
+	}
+
+	// Verify the command stores WebGPU coordinates directly (no Y-flip)
+	if cmd.x != 50 || cmd.y != 100 {
+		t.Errorf("position = (%d, %d), want (50, 100)", cmd.x, cmd.y)
+	}
+	if cmd.width != 400 || cmd.height != 200 {
+		t.Errorf("size = (%d, %d), want (400, 200)", cmd.width, cmd.height)
+	}
+}
+
+func TestRenderPassEncoder_SetVertexBuffer(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc).(*RenderPassEncoder)
+
+	buf := &Buffer{id: 10}
+	rpe.SetVertexBuffer(0, buf, 64)
+
+	if len(rpe.vertexBuffers) != 1 {
+		t.Errorf("vertexBuffers length = %d, want 1", len(rpe.vertexBuffers))
+	}
+	if got := rpe.vertexBuffers[0]; got.buffer != buf || got.offset != 64 {
+		t.Errorf("vertexBuffers[0] = %+v, want buffer 10 at offset 64", got)
+	}
+	if rpe.dirtyVertexBuffers != 1 {
+		t.Errorf("dirtyVertexBuffers = %#b, want 1", rpe.dirtyVertexBuffers)
+	}
+	// The attributes are set up at the draw, with the pipeline's layout
+	// (TestVertexBufferBindingOrder).
+	if len(enc.commands) != 0 {
+		t.Errorf("expected no command before the draw, got %d", len(enc.commands))
+	}
+}
+
+func TestRenderPassEncoder_ClearColorOnLoad(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{
+			{
+				LoadOp:     gputypes.LoadOpClear,
+				ClearValue: gputypes.Color{R: 1.0, G: 0.5, B: 0.25, A: 1.0},
+			},
+		},
+	}
+	_ = enc.BeginRenderPass(desc)
+
+	// BeginRenderPass emits: SetDrawColorBuffersCommand + ClearColorBufferCommand
+	if len(enc.commands) != 2 {
+		t.Fatalf("expected 2 commands (draw buffers + clear), got %d", len(enc.commands))
+	}
+
+	// First command: SetDrawColorBuffersCommand
+	drawBufsCmd, ok := enc.commands[0].(*SetDrawColorBuffersCommand)
+	if !ok {
+		t.Fatalf("expected SetDrawColorBuffersCommand, got %T", enc.commands[0])
+	}
+	if drawBufsCmd.count != 1 {
+		t.Errorf("draw buffer count = %d, want 1", drawBufsCmd.count)
+	}
+
+	// Second command: ClearColorBufferCommand (per-buffer clear via glClearBufferfv)
+	cmd, ok := enc.commands[1].(*ClearColorBufferCommand)
+	if !ok {
+		t.Fatalf("expected ClearColorBufferCommand, got %T", enc.commands[1])
+	}
+
+	if cmd.drawBuffer != 0 {
+		t.Errorf("drawBuffer = %d, want 0", cmd.drawBuffer)
+	}
+	if cmd.color != [4]float32{1.0, 0.5, 0.25, 1.0} {
+		t.Errorf("clear color = %v, want [1.0, 0.5, 0.25, 1.0]", cmd.color)
+	}
+}
+
+func TestComputePassEncoder_Dispatch(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	cpe := enc.BeginComputePass(nil)
+	cpe.Dispatch(16, 8, 4)
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*DispatchCommand)
+	if !ok {
+		t.Fatalf("expected DispatchCommand, got %T", enc.commands[0])
+	}
+
+	if cmd.x != 16 || cmd.y != 8 || cmd.z != 4 {
+		t.Errorf("dispatch = (%d, %d, %d), want (16, 8, 4)", cmd.x, cmd.y, cmd.z)
+	}
+}
+
+func TestRenderPassEncoder_SetBlendConstant(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc)
+
+	color := &gputypes.Color{R: 0.2, G: 0.4, B: 0.6, A: 0.8}
+	rpe.SetBlendConstant(color)
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*SetBlendConstantCommand)
+	if !ok {
+		t.Fatalf("expected SetBlendConstantCommand, got %T", enc.commands[0])
+	}
+
+	const epsilon = 0.0001
+	if cmd.r < 0.2-epsilon || cmd.r > 0.2+epsilon {
+		t.Errorf("r = %v, want ~0.2", cmd.r)
+	}
+}
+
+func TestRenderPassEncoder_SetStencilReference(t *testing.T) {
+	enc := &CommandEncoder{}
+	_ = enc.BeginEncoding("test")
+
+	desc := &hal.RenderPassDescriptor{
+		ColorAttachments: []hal.RenderPassColorAttachment{},
+	}
+	rpe := enc.BeginRenderPass(desc)
+
+	rpe.SetStencilReference(128)
+
+	if len(enc.commands) != 1 {
+		t.Fatalf("expected 1 command, got %d", len(enc.commands))
+	}
+
+	cmd, ok := enc.commands[0].(*SetStencilRefCommand)
+	if !ok {
+		t.Fatalf("expected SetStencilRefCommand, got %T", enc.commands[0])
+	}
+
+	if cmd.ref != 128 {
+		t.Errorf("ref = %d, want 128", cmd.ref)
+	}
+}

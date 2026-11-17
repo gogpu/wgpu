@@ -1,0 +1,57 @@
+//go:build !rust && !(js && wasm)
+
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
+package device
+
+import (
+	"testing"
+
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/resource"
+)
+
+// testBuffer returns a Buffer backed by core state only, as the pre-move root
+// fixture did (NewTestBuffer): the dynamic-binding derivation reads Size and
+// never a HAL handle.
+func testBuffer(size uint64, usage gputypes.BufferUsage, label string) *resource.Buffer {
+	coreBuf := core.NewBuffer(nil, nil, usage, size, label)
+	coreBuf.Ref = core.NewResourceRef("Buffer:"+label, nil)
+	return resource.NewBufferFromCore(coreBuf)
+}
+
+// dynamicOffsetsTestGroup returns a bind group with, listed out of binding
+// order: binding 3, a 512-byte buffer bound at [0, 64) as dynamic read-only
+// storage; binding 1, a 1024-byte buffer bound at [256, 288) as a dynamic
+// uniform; and binding 0, a non-dynamic uniform.
+func dynamicOffsetsTestGroup() *resource.BindGroup {
+	layout := []gputypes.BindGroupLayoutEntry{
+		{Binding: 3, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeReadOnlyStorage, HasDynamicOffset: true}},
+		{Binding: 0, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform}},
+		{Binding: 1, Buffer: &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, HasDynamicOffset: true}},
+	}
+	entries := []BindGroupEntry{
+		{Binding: 0, Buffer: testBuffer(64, gputypes.BufferUsageUniform, "plain")},
+		{Binding: 1, Buffer: testBuffer(1024, gputypes.BufferUsageUniform, "uniform"), Offset: 256, Size: 32},
+		{Binding: 3, Buffer: testBuffer(512, gputypes.BufferUsageStorage, "storage"), Size: 64},
+	}
+	return resource.NewBindGroup(&resource.BindGroupInit{DynamicBindings: buildDynamicBindings(layout, entries)})
+}
+
+func TestBuildDynamicBindings(t *testing.T) {
+	got := dynamicOffsetsTestGroup().DynamicBindings()
+	want := []core.DynamicBinding{
+		{Binding: 1, BindingType: gputypes.BufferBindingTypeUniform, BufferSize: 1024, BindingEnd: 288, MaxDynamicOffset: 736},
+		{Binding: 3, BindingType: gputypes.BufferBindingTypeReadOnlyStorage, BufferSize: 512, BindingEnd: 64, MaxDynamicOffset: 448},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("dynamic bindings = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("dynamic binding %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

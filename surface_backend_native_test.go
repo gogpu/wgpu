@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
-	"github.com/gogpu/wgpu/hal/software"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
+	"github.com/gogpu/wgpu/internal/hal/software"
+	instancepkg "github.com/gogpu/wgpu/internal/instance"
 )
 
 type surfaceCreateTestInstance struct {
@@ -53,15 +54,14 @@ func newSoftwareSurfaceTestInstance(t *testing.T) *Instance {
 	// Software-only instance. These tests drive synthetic platform targets (a
 	// fake HWND, Xlib window or CAMetalLayer pointer); handing one to a real
 	// hardware backend is invalid input that crashes instead of erroring on
-	// macOS, where Metal retains the layer pointer. Mask 0 admits only the
-	// explicitly registered BackendEmpty backend until v0.35.0, which replaces
-	// it with the BackendsSoftware bit and removes the bypass (ADR-083 2.3).
-	instance, err := CreateInstance(&InstanceDescriptor{Backends: 0})
+	// macOS, where Metal retains the layer pointer. The mask names the software
+	// backend (ADR-083 §2.3).
+	instance, err := CreateInstance(&InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 	t.Cleanup(instance.Release)
-	if instance.core.HALInstanceForBackend(gputypes.BackendEmpty) == nil {
+	if instance.impl.Core().HALInstanceForBackend(gputypes.BackendSoftware) == nil {
 		t.Fatal("software HAL instance was not registered")
 	}
 	return instance
@@ -97,7 +97,7 @@ func TestCreateHALSurfacesTriesEveryBackendAndSucceedsIfAny(t *testing.T) {
 	surfaces, firstBackend, err := createHALSurfaces([]core.HALInstanceEntry{
 		{Backend: gputypes.BackendGL, Instance: unsupported},
 		{Backend: gputypes.BackendVulkan, Instance: vulkan},
-		{Backend: gputypes.BackendEmpty, Instance: softwareInstance},
+		{Backend: gputypes.BackendSoftware, Instance: softwareInstance},
 	}, target)
 	if err != nil {
 		t.Fatalf("createHALSurfaces: %v", err)
@@ -111,7 +111,7 @@ func TestCreateHALSurfacesTriesEveryBackendAndSucceedsIfAny(t *testing.T) {
 	if surfaces[gputypes.BackendVulkan] != vulkanSurface {
 		t.Fatal("Vulkan surface was not retained under the Vulkan backend")
 	}
-	if surfaces[gputypes.BackendEmpty] != softwareSurface {
+	if surfaces[gputypes.BackendSoftware] != softwareSurface {
 		t.Fatal("software surface was not retained under the software backend")
 	}
 	for name, instance := range map[string]*surfaceCreateTestInstance{
@@ -156,74 +156,13 @@ func TestCreateHALSurfacesMapsAllUnsupportedFailures(t *testing.T) {
 	}
 }
 
-func TestEnsureHALSurfaceSwitchesToRetainedBackendSurface(t *testing.T) {
-	first := &noop.Surface{}
-	second := &noop.Surface{}
-	surface := &Surface{
-		core:           core.NewSurface(first, "multi-backend-switch"),
-		currentBackend: gputypes.BackendVulkan,
-		surfaceCreated: true,
-		halSurfaces: map[gputypes.Backend]hal.Surface{
-			gputypes.BackendVulkan: first,
-			gputypes.BackendGL:     second,
-		},
-	}
-
-	if err := surface.ensureHALSurface(gputypes.BackendGL); err != nil {
-		t.Fatalf("ensureHALSurface: %v", err)
-	}
-	if got := surface.HAL(); got != second {
-		t.Fatalf("active HAL surface = %v, want retained GL surface %v", got, second)
-	}
-	if surface.currentBackend != gputypes.BackendGL {
-		t.Fatalf("current backend = %v, want GL", surface.currentBackend)
-	}
-
-	surface.Release()
-}
-
-func TestHALSurfaceForBackendDoesNotFollowActiveBackend(t *testing.T) {
-	vulkanSurface := &noop.Surface{}
-	glSurface := &noop.Surface{}
-	surface := &Surface{
-		core:           core.NewSurface(vulkanSurface, "adapter-capabilities"),
-		currentBackend: gputypes.BackendVulkan,
-		surfaceCreated: true,
-		halSurfaces: map[gputypes.Backend]hal.Surface{
-			gputypes.BackendVulkan: vulkanSurface,
-			gputypes.BackendGL:     glSurface,
-		},
-	}
-	defer surface.Release()
-
-	if got := surface.halSurfaceForBackend(gputypes.BackendVulkan); got != vulkanSurface {
-		t.Fatalf("Vulkan adapter surface = %v, want retained Vulkan surface %v", got, vulkanSurface)
-	}
-	if got := surface.halSurfaceForBackend(gputypes.BackendGL); got != glSurface {
-		t.Fatalf("GL adapter surface = %v, want retained GL surface %v", got, glSurface)
-	}
-
-	if err := surface.ensureHALSurface(gputypes.BackendGL); err != nil {
-		t.Fatalf("ensureHALSurface(GL): %v", err)
-	}
-	if got := surface.halSurfaceForBackend(gputypes.BackendVulkan); got != vulkanSurface {
-		t.Fatalf("Vulkan adapter surface after GL activation = %v, want %v", got, vulkanSurface)
-	}
-	if got := surface.halSurfaceForBackend(gputypes.BackendGL); got != glSurface {
-		t.Fatalf("GL adapter surface after GL activation = %v, want %v", got, glSurface)
-	}
-	if got := surface.halSurfaceForBackend(gputypes.BackendDX12); got != nil {
-		t.Fatalf("missing DX12 adapter surface = %v, want nil", got)
-	}
-
-	legacyRaw := &noop.Surface{}
-	legacy := &Surface{core: core.NewSurface(legacyRaw, "legacy-single-hal")}
-	defer legacy.Release()
-	if got := legacy.halSurfaceForBackend(gputypes.BackendGL); got != legacyRaw {
-		t.Fatalf("legacy single-HAL adapter surface = %v, want active surface %v", got, legacyRaw)
-	}
-}
-
+// TestEnsureHALSurfaceSwitchesToRetainedBackendSurface,
+// TestHALSurfaceForBackendDoesNotFollowActiveBackend,
+// TestCreateHALSurfaceForTargetMapsBackendFailures,
+// TestCreateAndEnsureHALSurfaceCoverDeferredPaths,
+// TestEnsureHALSurfaceUnconfiguresBeforeSwitch and
+// TestSurfaceBackendViewsHandleNilReleasedAndLegacySurfaces moved to
+// internal/surface with the implementation they exercise (ADR-070 S10).
 func TestSurfaceTargetFromLegacyHandlesForPlatform(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -287,7 +226,7 @@ func TestTypedSurfaceCreationPathsUseBackendMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSurface: %v", err)
 	}
-	if legacy.HAL() == nil {
+	if legacy.impl.Core().RawSurface() == nil {
 		t.Fatal("legacy surface has no HAL surface")
 	}
 	legacy.Release()
@@ -312,7 +251,7 @@ func TestTypedSurfaceCreationPathsUseBackendMap(t *testing.T) {
 	if safeSurface.targetSource != provider {
 		t.Fatal("safe surface did not retain its provider")
 	}
-	if safeSurface.halSurfaces[gputypes.BackendEmpty] == nil {
+	if safeSurface.impl.HALSurfacesForAdapterRequest()[gputypes.BackendSoftware] == nil {
 		t.Fatal("safe surface did not retain the software backend surface")
 	}
 
@@ -334,8 +273,8 @@ func TestTypedSurfaceCreationPathsUseBackendMap(t *testing.T) {
 func TestCreateSurfaceReportsBoundaryFailures(t *testing.T) {
 	target := currentPlatformSurfaceTarget(t)
 
-	empty := &Instance{core: core.NewInstanceWithMock(nil)}
-	t.Cleanup(empty.core.Destroy)
+	empty := &Instance{impl: instancepkg.New(core.NewInstanceWithMock(nil))}
+	t.Cleanup(empty.impl.Release)
 	if surface, err := empty.CreateSurfaceUnsafe(target); surface != nil || err == nil {
 		t.Fatalf("CreateSurfaceUnsafe without HAL = (%v, %v), want nil error result", surface, err)
 	}
@@ -366,19 +305,21 @@ func TestCreateSurfaceReportsBoundaryFailures(t *testing.T) {
 }
 
 func TestAdoptCreatedSurfaceDestroysEverySurfaceOnReleaseRace(t *testing.T) {
-	instance := &Instance{core: core.NewInstanceWithMock(nil), released: true}
-	t.Cleanup(instance.core.Destroy)
+	impl := instancepkg.New(core.NewInstanceWithMock(nil))
+	impl.Release()
+	instance := &Instance{impl: impl}
+	t.Cleanup(impl.Release)
 	first := &surfaceDestroyCounter{}
 	second := &surfaceDestroyCounter{}
 
 	surface, err := instance.adoptCreatedSurface(
-		SurfaceTargetFromAndroidNativeWindow(1),
 		nil,
 		map[gputypes.Backend]hal.Surface{
 			gputypes.BackendVulkan: first,
 			gputypes.BackendGL:     second,
 		},
 		gputypes.BackendVulkan,
+		hal.SurfaceTarget{Kind: hal.SurfaceTargetAndroidNativeWindow, WindowHandle: 1},
 	)
 	if surface != nil || !errors.Is(err, ErrReleased) {
 		t.Fatalf("adoptCreatedSurface = (%v, %v), want ErrReleased", surface, err)
@@ -386,191 +327,4 @@ func TestAdoptCreatedSurfaceDestroysEverySurfaceOnReleaseRace(t *testing.T) {
 	if first.destroys != 1 || second.destroys != 1 {
 		t.Fatalf("destroy counts = (%d, %d), want (1, 1)", first.destroys, second.destroys)
 	}
-}
-
-func TestCreateHALSurfaceForTargetMapsBackendFailures(t *testing.T) {
-	target := hal.SurfaceTarget{
-		Kind:          hal.SurfaceTargetXlibWindow,
-		DisplayHandle: 1,
-		WindowHandle:  2,
-	}
-	wantSurface := &noop.Surface{}
-	regularErr := errors.New("driver rejected surface")
-	tests := []struct {
-		name     string
-		instance *surfaceCreateTestInstance
-		want     hal.Surface
-		wantErr  error
-	}{
-		{
-			name:     "success",
-			instance: &surfaceCreateTestInstance{surface: wantSurface},
-			want:     wantSurface,
-		},
-		{
-			name:     "unsupported",
-			instance: &surfaceCreateTestInstance{err: hal.ErrUnsupportedSurfaceTarget},
-			wantErr:  ErrUnsupportedSurfaceTarget,
-		},
-		{
-			name:     "driver error",
-			instance: &surfaceCreateTestInstance{err: regularErr},
-			wantErr:  regularErr,
-		},
-		{
-			name:     "nil surface",
-			instance: &surfaceCreateTestInstance{},
-			wantErr:  errors.New("nil surface"),
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got, err := createHALSurfaceForTarget(test.instance, gputypes.BackendVulkan, target)
-			if got != test.want {
-				t.Fatalf("surface = %v, want %v", got, test.want)
-			}
-			if test.name == "nil surface" {
-				if err == nil {
-					t.Fatal("nil HAL surface returned no error")
-				}
-				return
-			}
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("error = %v, want %v", err, test.wantErr)
-			}
-		})
-	}
-}
-
-func TestCreateAndEnsureHALSurfaceCoverDeferredPaths(t *testing.T) {
-	instance := newSoftwareSurfaceTestInstance(t)
-	target := currentPlatformSurfaceTarget(t)
-
-	surface := &Surface{
-		core:     core.NewSurface(&noop.Surface{}, "deferred-create"),
-		instance: instance,
-		target:   target,
-	}
-	if _, err := surface.createHALSurface(gputypes.Backend(255)); err == nil {
-		t.Fatal("createHALSurface succeeded without a matching HAL instance")
-	}
-	surface.target = SurfaceTargetFromWebCanvasID(1)
-	if _, err := surface.createHALSurface(gputypes.BackendEmpty); !errors.Is(err, ErrUnsupportedSurfaceTarget) {
-		t.Fatalf("createHALSurface(web target) = %v, want ErrUnsupportedSurfaceTarget", err)
-	}
-	surface.target = target
-	raw, err := surface.createHALSurface(gputypes.BackendEmpty)
-	if err != nil {
-		t.Fatalf("createHALSurface(software): %v", err)
-	}
-	raw.Destroy()
-
-	if err := surface.ensureHALSurface(gputypes.BackendEmpty); err != nil {
-		t.Fatalf("ensureHALSurface(software): %v", err)
-	}
-	if surface.halSurfaces[gputypes.BackendEmpty] == nil {
-		t.Fatal("ensureHALSurface did not retain the lazily created surface")
-	}
-	if surface.currentBackend != gputypes.BackendEmpty || !surface.surfaceCreated {
-		t.Fatalf("active surface = (%v, %v), want software/created", surface.currentBackend, surface.surfaceCreated)
-	}
-	surface.Release()
-
-	failing := &Surface{
-		core:     core.NewSurface(&noop.Surface{}, "deferred-failure"),
-		instance: instance,
-		target:   target,
-	}
-	if err := failing.ensureHALSurface(gputypes.Backend(255)); err == nil {
-		t.Fatal("ensureHALSurface succeeded without a matching HAL instance")
-	}
-	failing.Release()
-}
-
-func TestEnsureHALSurfaceUnconfiguresBeforeSwitch(t *testing.T) {
-	first := &noop.Surface{}
-	second := &noop.Surface{}
-	coreSurface := core.NewSurface(first, "configured-switch")
-	coreDevice := core.NewDevice(&noop.Device{}, nil, 0, gputypes.DefaultLimits(), "configured-switch")
-	t.Cleanup(coreDevice.Destroy)
-	if err := coreSurface.Configure(coreDevice, &hal.SurfaceConfiguration{
-		Width:       1,
-		Height:      1,
-		Format:      gputypes.TextureFormatBGRA8Unorm,
-		Usage:       gputypes.TextureUsageRenderAttachment,
-		PresentMode: gputypes.PresentModeFifo,
-		AlphaMode:   gputypes.CompositeAlphaModeOpaque,
-	}); err != nil {
-		t.Fatalf("Configure: %v", err)
-	}
-	surface := &Surface{
-		core:           coreSurface,
-		currentBackend: gputypes.BackendVulkan,
-		surfaceCreated: true,
-		halSurfaces: map[gputypes.Backend]hal.Surface{
-			gputypes.BackendVulkan: first,
-			gputypes.BackendGL:     second,
-		},
-	}
-
-	if err := surface.ensureHALSurface(gputypes.BackendGL); err != nil {
-		t.Fatalf("ensureHALSurface: %v", err)
-	}
-	if coreSurface.State() != core.SurfaceStateUnconfigured {
-		t.Fatalf("surface state = %v, want unconfigured", coreSurface.State())
-	}
-	surface.Release()
-}
-
-func TestSurfaceBackendViewsHandleNilReleasedAndLegacySurfaces(t *testing.T) {
-	var nilSurface *Surface
-	if got := nilSurface.halSurfaceForBackend(gputypes.BackendVulkan); got != nil {
-		t.Fatalf("nil surface HAL = %v, want nil", got)
-	}
-	if got := nilSurface.halSurfacesForAdapterRequest(); got != nil {
-		t.Fatalf("nil surface adapter map = %v, want nil", got)
-	}
-
-	raw := &noop.Surface{}
-	vulkan := &noop.Surface{}
-	surface := &Surface{
-		core:           core.NewSurface(raw, "backend-views"),
-		currentBackend: gputypes.BackendGL,
-		halSurfaces: map[gputypes.Backend]hal.Surface{
-			gputypes.BackendVulkan: vulkan,
-		},
-	}
-	copied := surface.halSurfacesForAdapterRequest()
-	if copied[gputypes.BackendVulkan] != vulkan {
-		t.Fatalf("copied Vulkan surface = %v, want %v", copied[gputypes.BackendVulkan], vulkan)
-	}
-	delete(copied, gputypes.BackendVulkan)
-	if surface.halSurfaces[gputypes.BackendVulkan] != vulkan {
-		t.Fatal("adapter surface map aliases the owned map")
-	}
-	surface.Release()
-	if got := surface.halSurfaceForBackend(gputypes.BackendVulkan); got != nil {
-		t.Fatalf("released surface HAL = %v, want nil", got)
-	}
-	if got := surface.halSurfacesForAdapterRequest(); got != nil {
-		t.Fatalf("released surface adapter map = %v, want nil", got)
-	}
-
-	legacyRaw := &noop.Surface{}
-	legacy := &Surface{
-		core:           core.NewSurface(legacyRaw, "legacy-adapter-map"),
-		currentBackend: gputypes.BackendGL,
-	}
-	legacyMap := legacy.halSurfacesForAdapterRequest()
-	if len(legacyMap) != 1 || legacyMap[gputypes.BackendGL] != legacyRaw {
-		t.Fatalf("legacy adapter map = %v, want GL raw surface", legacyMap)
-	}
-	legacy.Release()
-
-	empty := &Surface{core: core.NewSurface(nil, "empty-adapter-map")}
-	if got := empty.halSurfacesForAdapterRequest(); len(got) != 0 {
-		t.Fatalf("empty adapter map = %v, want empty", got)
-	}
-	empty.Release()
 }

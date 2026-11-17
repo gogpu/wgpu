@@ -29,10 +29,14 @@ func newInstance(t *testing.T) *wgpu.Instance {
 // newAdapter requests an adapter from a fresh instance.
 func newAdapter(t *testing.T) (*wgpu.Instance, *wgpu.Adapter) {
 	t.Helper()
-	inst := newInstance(t)
-	// Backends register by default (ADR-083 §2.1); pin the tests to the Pure
-	// Go software backend so the pick does not depend on this machine's GPUs.
-	adapter, err := inst.RequestAdapter(&wgpu.RequestAdapterOptions{ForceFallbackAdapter: true})
+	// Pin the tests to the Pure Go software backend: after ADR-083 §2.3 it is
+	// selectable only through its own mask, and the pick then does not depend
+	// on this machine's GPUs.
+	inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	adapter, err := inst.RequestAdapter(nil)
 	if err != nil {
 		t.Fatalf("RequestAdapter: %v", err)
 	}
@@ -158,6 +162,12 @@ func TestInstanceRequestAdapter(t *testing.T) {
 
 	adapter, err := inst.RequestAdapter(nil)
 	if err != nil {
+		// ADR-083 §2.3: a zero mask admits hardware backends only; on a machine
+		// without one the dedicated sentinel is the contract under test.
+		if errors.Is(err, wgpu.ErrNoHardwareAdapter) {
+			t.Logf("no hardware adapter on this machine: %v (the sentinel path holds)", err)
+			return
+		}
 		t.Fatalf("RequestAdapter: %v", err)
 	}
 	if adapter == nil {
@@ -592,7 +602,7 @@ func TestEncoderPoolFinishTransfersEncoder(t *testing.T) {
 	}
 
 	// After Finish, the CommandBuffer should carry the HAL encoder.
-	if cmdBuf.TestHALEncoder() == nil {
+	if wgpu.CommandBufferTestHALEncoder(cmdBuf) == nil {
 		t.Fatal("CommandBuffer.halEncoder is nil after Finish — encoder was not transferred from pool")
 	}
 }
@@ -643,7 +653,7 @@ func TestEncoderPoolRecyclesAfterSubmit(t *testing.T) {
 
 	// After submit, the CommandBuffer's halEncoder should be nil
 	// (ownership moved to deferred callback).
-	if cmdBuf.TestHALEncoder() != nil {
+	if wgpu.CommandBufferTestHALEncoder(cmdBuf) != nil {
 		t.Fatal("CommandBuffer.halEncoder should be nil after Submit — ownership not transferred to deferred callback")
 	}
 }
@@ -1068,14 +1078,15 @@ func TestSurfacePresentNilTexture(t *testing.T) {
 }
 
 func TestErrorSentinels(t *testing.T) {
-	// All three sentinel errors must be distinct.
+	// The public sentinel errors must be pairwise distinct.
 	sentinels := []struct {
 		name string
 		err  error
 	}{
 		{"ErrReleased", wgpu.ErrReleased},
-		{"ErrNoAdapters", wgpu.ErrNoAdapters},
-		{"ErrNoBackends", wgpu.ErrNoBackends},
+		{"ErrNoBackendRegistered", wgpu.ErrNoBackendRegistered},
+		{"ErrNoHardwareAdapter", wgpu.ErrNoHardwareAdapter},
+		{"ErrNoFallbackAdapter", wgpu.ErrNoFallbackAdapter},
 	}
 
 	for i, a := range sentinels {
@@ -1101,8 +1112,9 @@ func TestErrorSentinelMessages(t *testing.T) {
 		wantSub string
 	}{
 		{"ErrReleased", wgpu.ErrReleased, "released"},
-		{"ErrNoAdapters", wgpu.ErrNoAdapters, "adapter"},
-		{"ErrNoBackends", wgpu.ErrNoBackends, "backend"},
+		{"ErrNoBackendRegistered", wgpu.ErrNoBackendRegistered, "backend"},
+		{"ErrNoHardwareAdapter", wgpu.ErrNoHardwareAdapter, "adapter"},
+		{"ErrNoFallbackAdapter", wgpu.ErrNoFallbackAdapter, "fallback"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1168,7 +1180,9 @@ func TestReleasedInstanceRequestAdapterFails(t *testing.T) {
 // --- Full lifecycle tests (require HAL) ---
 
 func TestFullLifecycleCreateAndRelease(t *testing.T) {
-	inst, err := wgpu.CreateInstance(nil)
+	// Pin the instance to the Pure Go software backend: after ADR-083 §2.3 the
+	// default mask is hardware-only, and this test needs any adapter, not a GPU.
+	inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: gputypes.BackendsSoftware})
 	if err != nil {
 		t.Fatalf("CreateInstance: %v", err)
 	}
@@ -1730,7 +1744,7 @@ func TestRenderPassMultiDrawIndirectRangeValidation(t *testing.T) {
 	}
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 	buf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
 		Label: "count-indirect-buf",
@@ -1788,7 +1802,7 @@ func TestRenderPassDrawIndexedIndirectCountRangeValidation(t *testing.T) {
 			}
 
 			pipeline := &wgpu.RenderPipeline{}
-			pipeline.SetTestRequiredVertexBuffers(0)
+			wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 			pass.SetPipeline(pipeline)
 
 			idxBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -1845,7 +1859,7 @@ func TestRenderPassDrawIndexedIndirectCountMany(t *testing.T) {
 	}
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	idxBuf, err := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2244,7 +2258,7 @@ func TestRenderPassDrawWithInsufficientVertexBuffers(t *testing.T) {
 
 	// Pipeline requiring 2 vertex buffers.
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(2)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 2)
 	pass.SetPipeline(pipeline)
 
 	// Only set 1 vertex buffer (slot 0).
@@ -2274,7 +2288,7 @@ func TestRenderPassDrawWithSufficientVertexBuffers(t *testing.T) {
 
 	// Pipeline requiring 1 vertex buffer.
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(1)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 1)
 	pass.SetPipeline(pipeline)
 
 	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2302,7 +2316,7 @@ func TestRenderPassDrawWithZeroRequiredVertexBuffers(t *testing.T) {
 
 	// Pipeline requiring 0 vertex buffers (e.g., fullscreen triangle from vertex ID).
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1}) // should pass: no vertex buffers needed
@@ -2320,7 +2334,7 @@ func TestRenderPassDrawIndexedWithoutIndexBuffer(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer set
@@ -2337,7 +2351,7 @@ func TestRenderPassDrawIndexedIndirectWithoutIndexBuffer(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2364,7 +2378,7 @@ func TestRenderPassDrawIndexedWithIndexBuffer(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2569,8 +2583,8 @@ func TestDrawMissingBindGroupSentinel(t *testing.T) {
 	// Pipeline with 1 bind group layout (index 0).
 	layout := &wgpu.BindGroupLayout{}
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
-	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{layout})
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
+	wgpu.SetTestRenderPipelineBindGroupLayouts(pipeline, []*wgpu.BindGroupLayout{layout})
 	pass.SetPipeline(pipeline)
 
 	// No bind group at index 0.
@@ -2591,22 +2605,22 @@ func TestDrawIncompatibleBindGroupSentinel(t *testing.T) {
 	defer device.Release()
 
 	expectedLayout := &wgpu.BindGroupLayout{}
-	expectedLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(expectedLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageVertex},
 	})
 	wrongLayout := &wgpu.BindGroupLayout{}
-	wrongLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(wrongLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageFragment},
 	})
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
-	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{expectedLayout})
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
+	wgpu.SetTestRenderPipelineBindGroupLayouts(pipeline, []*wgpu.BindGroupLayout{expectedLayout})
 	pass.SetPipeline(pipeline)
 
 	// Set a bind group with incompatible layout.
 	group := &wgpu.BindGroup{}
-	group.SetTestLayout(wrongLayout)
+	wgpu.SetTestBindGroupLayout(group, wrongLayout)
 	pass.SetBindGroup(0, group, nil)
 
 	pass.Draw(gputypes.DrawArgs{VertexCount: 3, InstanceCount: 1})
@@ -2626,7 +2640,7 @@ func TestDrawMissingVertexBufferSentinel(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(2) // needs 2
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 2) // needs 2
 	pass.SetPipeline(pipeline)
 
 	// Set only 1 vertex buffer.
@@ -2658,7 +2672,7 @@ func TestDrawMissingIndexBufferSentinel(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	pass.DrawIndexed(gputypes.DrawIndexedArgs{IndexCount: 3, InstanceCount: 1}) // no index buffer
@@ -2678,7 +2692,7 @@ func TestDrawMissingIndexBufferIndirectSentinel(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2725,7 +2739,7 @@ func TestDispatchMissingBindGroupSentinel(t *testing.T) {
 
 	layout := &wgpu.BindGroupLayout{}
 	pipeline := &wgpu.ComputePipeline{}
-	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{layout})
+	wgpu.SetTestComputePipelineBindGroupLayouts(pipeline, []*wgpu.BindGroupLayout{layout})
 	pass.SetPipeline(pipeline)
 
 	// No bind group at index 0.
@@ -2746,20 +2760,20 @@ func TestDispatchIncompatibleBindGroupSentinel(t *testing.T) {
 	defer device.Release()
 
 	expectedLayout := &wgpu.BindGroupLayout{}
-	expectedLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(expectedLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageCompute},
 	})
 	wrongLayout := &wgpu.BindGroupLayout{}
-	wrongLayout.SetTestEntries([]gputypes.BindGroupLayoutEntry{
+	wgpu.SetTestBindGroupLayoutEntries(wrongLayout, []gputypes.BindGroupLayoutEntry{
 		{Binding: 0, Visibility: gputypes.ShaderStageFragment},
 	})
 
 	pipeline := &wgpu.ComputePipeline{}
-	pipeline.SetTestBindGroupLayouts([]*wgpu.BindGroupLayout{expectedLayout})
+	wgpu.SetTestComputePipelineBindGroupLayouts(pipeline, []*wgpu.BindGroupLayout{expectedLayout})
 	pass.SetPipeline(pipeline)
 
 	group := &wgpu.BindGroup{}
-	group.SetTestLayout(wrongLayout)
+	wgpu.SetTestBindGroupLayout(group, wrongLayout)
 	pass.SetBindGroup(0, group, nil)
 
 	pass.Dispatch(1, 1, 1)
@@ -2863,8 +2877,8 @@ func TestDrawIndexedFormatMismatchSentinel(t *testing.T) {
 	// Pipeline with StripIndexFormat = Uint32.
 	u32 := gputypes.IndexFormatUint32
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
-	pipeline.SetTestStripIndexFormat(&u32)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
+	wgpu.SetTestRenderPipelineStripIndexFormat(pipeline, &u32)
 	pass.SetPipeline(pipeline)
 
 	// Set index buffer with Uint16 format (mismatch).
@@ -2898,8 +2912,8 @@ func TestDrawIndexedFormatMatchesStripFormat(t *testing.T) {
 	// Pipeline with StripIndexFormat = Uint16.
 	u16 := gputypes.IndexFormatUint16
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
-	pipeline.SetTestStripIndexFormat(&u16)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
+	wgpu.SetTestRenderPipelineStripIndexFormat(pipeline, &u16)
 	pass.SetPipeline(pipeline)
 
 	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2929,8 +2943,8 @@ func TestDrawIndexedNoStripFormatSkipsCheck(t *testing.T) {
 
 	// Pipeline without StripIndexFormat (non-strip topology).
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
-	// No SetTestStripIndexFormat — nil by default.
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
+	// No SetTestRenderPipelineStripIndexFormat — nil by default.
 	pass.SetPipeline(pipeline)
 
 	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -2961,8 +2975,8 @@ func TestDrawIndexedIndirectFormatMismatchSentinel(t *testing.T) {
 	// Pipeline with StripIndexFormat = Uint16.
 	u16 := gputypes.IndexFormatUint16
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
-	pipeline.SetTestStripIndexFormat(&u16)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
+	wgpu.SetTestRenderPipelineStripIndexFormat(pipeline, &u16)
 	pass.SetPipeline(pipeline)
 
 	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -3008,7 +3022,7 @@ func TestDrawIndirectBufferMissingUsageSentinel(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	// Buffer WITHOUT Indirect usage.
@@ -3039,7 +3053,7 @@ func TestDrawIndirectOffsetUnalignedSentinel(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -3069,7 +3083,7 @@ func TestDrawIndirectValidBufferAndOffset(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	buf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -3100,7 +3114,7 @@ func TestDrawIndexedIndirectBufferMissingUsageSentinel(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{
@@ -3143,7 +3157,7 @@ func TestDrawIndexedIndirectOffsetUnalignedSentinel(t *testing.T) {
 	defer device.Release()
 
 	pipeline := &wgpu.RenderPipeline{}
-	pipeline.SetTestRequiredVertexBuffers(0)
+	wgpu.SetTestRenderPipelineRequiredVertexBuffers(pipeline, 0)
 	pass.SetPipeline(pipeline)
 
 	idxBuf, bufErr := device.CreateBuffer(&wgpu.BufferDescriptor{

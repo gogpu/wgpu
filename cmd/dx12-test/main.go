@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/dx12"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/dx12"
 )
 
 func main() {

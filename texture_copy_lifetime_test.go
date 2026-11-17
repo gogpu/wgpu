@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
 )
 
 type delayedCompletionQueue struct {
@@ -32,7 +32,7 @@ func TestCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 		t.Fatalf("CreateBuffer: %v", err)
 	}
 	defer buffer.Release()
-	ref := buffer.core.Ref
+	ref := buffer.impl.CoreBuffer().Ref
 
 	enc, err := device.CreateCommandEncoder(nil)
 	if err != nil {
@@ -43,7 +43,7 @@ func TestCopyUsageConflictDoesNotCloneBufferRef(t *testing.T) {
 	if got := ref.RefCount(); got != 1 {
 		t.Fatalf("failed copy changed buffer refcount to %d, want 1", got)
 	}
-	if got := len(enc.trackedRefs); got != 0 {
+	if got := len(enc.impl.TrackedRefs()); got != 0 {
 		t.Fatalf("failed copy retained %d resource refs, want 0", got)
 	}
 	if _, err := enc.Finish(); err == nil {
@@ -87,7 +87,7 @@ func TestBindGroupHoldsTextureViewRefs(t *testing.T) {
 		t.Fatalf("CreateBindGroup: %v", err)
 	}
 
-	refs := map[string]*core.ResourceRef{"view": view.ref, "texture": texture.ref()}
+	refs := map[string]*core.ResourceRef{"view": view.impl.Ref(), "texture": texture.impl.Ref()}
 	checkRefCounts := func(when string, want int32) {
 		t.Helper()
 		for name, ref := range refs {
@@ -101,7 +101,7 @@ func TestBindGroupHoldsTextureViewRefs(t *testing.T) {
 	texture.Release()
 	checkRefCounts("after user Release", 1)
 	group.Release()
-	device.destroyQueue().FlushAll()
+	device.impl.DestroyQueue().FlushAll()
 	checkRefCounts("after the bind group is destroyed", 0)
 }
 
@@ -145,12 +145,14 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, device := newTestDeviceWithTracker(t)
+			var delayed *delayedCompletionQueue
+			device := newTestDeviceWithHALQueue(t, func(q hal.Queue) hal.Queue {
+				delayed = &delayedCompletionQueue{Queue: q}
+				return delayed
+			})
 			defer device.Release()
 
 			queue := device.Queue()
-			delayed := &delayedCompletionQueue{Queue: queue.hal}
-			queue.hal = delayed
 
 			buffer, err := device.CreateBuffer(&BufferDescriptor{
 				Label: "texture-copy-lifetime-buffer",
@@ -163,7 +165,7 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 			texture := createCopyScopeTexture(t, device, "texture-copy-lifetime", tt.textureUse)
 			defer texture.Release()
 
-			refs := map[string]*core.ResourceRef{"buffer": buffer.core.Ref, "texture": texture.ref()}
+			refs := map[string]*core.ResourceRef{"buffer": buffer.impl.CoreBuffer().Ref, "texture": texture.impl.Ref()}
 			checkRefCounts := func(when string, want int32) {
 				t.Helper()
 				for name, ref := range refs {
@@ -185,13 +187,13 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 			}
 			tt.record(enc, buffer, texture)
 			checkRefCounts("after encoding", 2)
-			checkTracked("encoder", enc.trackedRefs)
+			checkTracked("encoder", enc.impl.TrackedRefs())
 
 			cb, err := enc.Finish()
 			if err != nil {
 				t.Fatalf("Finish: %v", err)
 			}
-			checkTracked("command buffer", cb.trackedRefs)
+			checkTracked("command buffer", cb.impl.TrackedRefs())
 			submission, err := queue.Submit(cb)
 			if err != nil {
 				t.Fatalf("Submit: %v", err)
@@ -201,10 +203,10 @@ func TestTextureCopyRefsHeldUntilQueueRetirement(t *testing.T) {
 			buffer.Release()
 			texture.Release()
 			checkRefCounts("after user Release", 1)
-			device.destroyQueue().Triage(submission - 1)
+			device.impl.DestroyQueue().Triage(submission - 1)
 			checkRefCounts("before retirement", 1)
 			delayed.completed = submission
-			device.destroyQueue().Triage(delayed.PollCompleted())
+			device.impl.DestroyQueue().Triage(delayed.PollCompleted())
 			checkRefCounts("after retirement", 0)
 		})
 	}

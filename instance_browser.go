@@ -2,11 +2,14 @@
 
 package wgpu
 
-import (
-	"syscall/js"
+// This file is the public declaration layer over internal/instance on the
+// browser build (ADR-070 S12). The implementation moved to internal/instance;
+// what stays here is the frozen public Instance type, the creation function and
+// the canvas creation glue, which names the public target types and js.Value.
 
+import (
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/internal/browser"
+	"github.com/gogpu/wgpu/internal/instance"
 )
 
 // InstanceDescriptor configures instance creation.
@@ -25,8 +28,16 @@ type InstanceDescriptor struct {
 
 // Instance is the entry point for GPU operations.
 // On browser, this wraps navigator.gpu via internal/browser.Instance.
+//
+// The implementation lives in internal/instance (ADR-070 S12); this type is the
+// declaration layer the public API is frozen on.
+//
+// released is declaration-layer state, not an implementation fact: a wrapper
+// without an implementation cannot record its release in it, and the browser
+// build's zero value answers its HAL kind until it is released. Release is its
+// single writer (ADR-070 S12 settle); nothing else assigns it.
 type Instance struct {
-	browser  *browser.Instance
+	impl     *instance.Instance
 	released bool
 }
 
@@ -34,11 +45,11 @@ type Instance struct {
 // On browser, this accesses navigator.gpu. The desc parameter is accepted
 // for API compatibility but Backends/Flags are ignored (browser has one backend).
 func CreateInstance(desc *InstanceDescriptor) (*Instance, error) {
-	bi, err := browser.NewInstance()
+	impl, err := instance.Create()
 	if err != nil {
 		return nil, err
 	}
-	return &Instance{browser: bi}, nil
+	return &Instance{impl: impl}, nil
 }
 
 // RequestAdapter requests a GPU adapter matching the options.
@@ -48,43 +59,36 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 		return nil, ErrReleased
 	}
 
-	// Build JS options object from Go types.
-	var jsOpts js.Value
+	// The descriptor boundary (shape 1): the public options become the core
+	// request type. A nil pointer stays nil so the browser path builds
+	// js.Undefined exactly as it did pre-move.
+	var coreOpts *gputypes.RequestAdapterOptions
 	if opts != nil {
-		jsOpts = browser.BuildRequestAdapterOptions(opts.PowerPreference, opts.ForceFallbackAdapter)
-	} else {
-		jsOpts = js.Undefined()
+		coreOpts = &gputypes.RequestAdapterOptions{
+			PowerPreference:      opts.PowerPreference,
+			ForceFallbackAdapter: opts.ForceFallbackAdapter,
+		}
 	}
 
-	ba, err := i.browser.RequestAdapter(jsOpts)
+	impl, err := i.impl.RequestAdapter(coreOpts)
 	if err != nil {
 		return nil, err
 	}
-
-	// Extract features and limits from the JS adapter.
-	features := browser.ExtractFeatures(ba.Features())
-	limits := browser.ExtractLimits(ba.Limits())
-
-	// WebGPU browser API does not expose detailed adapter info.
-	// Return minimal info matching Rust wgpu's WebAdapter::get_info().
-	info := gputypes.AdapterInfo{
-		Name: "WebGPU Adapter",
-	}
-
-	return &Adapter{
-		browser:  ba,
-		info:     info,
-		features: features,
-		limits:   limits,
-	}, nil
+	return &Adapter{impl: impl}, nil
 }
 
-// CreateSurface and CreateSurfaceFromCanvas are defined in surface_browser.go.
+// isReleased reports whether the instance is released. A nil wrapper is
+// released; a wrapper without an implementation (the zero value) is not, which
+// is the zero-value answer the build always had.
+func (i *Instance) isReleased() bool {
+	if i == nil || i.released {
+		return true
+	}
+	return i.impl != nil && i.impl.IsReleased()
+}
 
 // Release releases the instance. Surfaces must be released explicitly.
 func (i *Instance) Release() {
-	if i.released {
-		return
-	}
 	i.released = true
+	i.impl.Release()
 }

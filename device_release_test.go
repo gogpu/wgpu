@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 // releaseTrackingDevice embeds a real HAL device and records only the two
@@ -48,11 +48,7 @@ func TestDeviceReleaseWaitsBeforeHALDestroy(t *testing.T) {
 
 	events := make([]string, 0, 2)
 	tracked := &releaseTrackingDevice{Device: opened.Device, events: &events}
-	device := &Device{
-		core:  core.NewDevice(tracked, nil, 0, limits, "release-order-test"),
-		queue: &Queue{hal: opened.Queue, halDevice: tracked},
-	}
-	device.queue.device = device
+	device := newTestDeviceWithQueue(core.NewDevice(tracked, nil, 0, limits, "release-order-test"), nil, opened.Queue, nil)
 
 	device.Release()
 

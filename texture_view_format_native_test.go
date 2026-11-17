@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal/noop"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal/noop"
 )
 
 // newDownlevelDevice builds a device whose adapter reports the given downlevel
@@ -18,9 +18,7 @@ func newDownlevelDevice(t *testing.T, flags gputypes.DownlevelFlags) *Device {
 	raw := &noop.Device{}
 	adapter := &core.Adapter{DownlevelCapabilities: gputypes.DownlevelCapabilities{Flags: flags}}
 	coreDevice := core.NewDevice(raw, adapter, 0, gputypes.DefaultLimits(), "downlevel-test")
-	queue := &Queue{hal: &noop.Queue{}, halDevice: raw}
-	device := &Device{core: coreDevice, queue: queue}
-	queue.device = device
+	device := newTestDeviceWithQueue(coreDevice, nil, &noop.Queue{}, nil)
 	t.Cleanup(device.Release)
 	return device
 }

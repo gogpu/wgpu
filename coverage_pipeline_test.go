@@ -104,7 +104,7 @@ func TestRenderPipelineWithVertexBuffers(t *testing.T) {
 	defer pipeline.Release()
 
 	// The pipeline should remember 2 vertex buffer layouts.
-	// We can verify by using SetTestRequiredVertexBuffers if needed,
+	// We can verify by using SetTestRenderPipelineRequiredVertexBuffers if needed,
 	// but the main assertion is that creation succeeds with >1 VB layout.
 	if pipeline == nil {
 		t.Fatal("CreateRenderPipeline with vertex buffers returned nil")
@@ -193,7 +193,7 @@ func TestRenderPipelineHasRef(t *testing.T) {
 	}
 	defer pipeline.Release()
 
-	if pipeline.TestRef() == nil {
+	if wgpu.RenderPipelineTestRef(pipeline) == nil {
 		t.Error("RenderPipeline should have a non-nil ResourceRef after creation")
 	}
 }
@@ -222,7 +222,7 @@ func TestComputePipelineHasRef(t *testing.T) {
 	}
 	defer pipeline.Release()
 
-	if pipeline.TestRef() == nil {
+	if wgpu.ComputePipelineTestRef(pipeline) == nil {
 		t.Error("ComputePipeline should have a non-nil ResourceRef after creation")
 	}
 }
@@ -351,7 +351,7 @@ func TestBindGroupHasRef(t *testing.T) {
 	}
 	defer bg.Release()
 
-	if bg.TestRef() == nil {
+	if wgpu.BindGroupTestRef(bg) == nil {
 		t.Error("BindGroup should have a non-nil ResourceRef")
 	}
 }

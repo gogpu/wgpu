@@ -1,0 +1,3496 @@
+//go:build !(js && wasm)
+
+package core
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/gogpu/gputypes"
+	"github.com/gogpu/wgpu/internal/hal"
+)
+
+// validTextureDesc returns a valid 2D texture descriptor for tests.
+func validTextureDesc() *hal.TextureDescriptor {
+	return &hal.TextureDescriptor{
+		Label:         "test",
+		Size:          hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1},
+		MipLevelCount: 1,
+		SampleCount:   1,
+		Dimension:     gputypes.TextureDimension2D,
+		Format:        gputypes.TextureFormatRGBA8Unorm,
+		Usage:         gputypes.TextureUsageTextureBinding,
+	}
+}
+
+// --- ValidateTextureDescriptor tests ---
+
+func TestValidateTextureDescriptor_Valid(t *testing.T) {
+	err := ValidateTextureDescriptor(validTextureDesc(), gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for valid descriptor, got: %v", err)
+	}
+}
+
+// TestValidateTextureDescriptor_CompressedShape checks the compressed-format
+// rules of WebGPU "validating GPUTextureDescriptor" as Rust wgpu-core's
+// create_texture applies them: 2D only (3D needs the sliced-3D features,
+// which gputypes does not offer yet), width and height multiples of the block.
+func TestValidateTextureDescriptor_CompressedShape(t *testing.T) {
+	features := gputypes.Features(gputypes.FeatureTextureCompressionBC) |
+		gputypes.Features(gputypes.FeatureTextureCompressionETC2)
+	tests := []struct {
+		name   string
+		format gputypes.TextureFormat
+		dim    gputypes.TextureDimension
+		size   hal.Extent3D
+		want   CreateTextureErrorKind // -1: valid
+	}{
+		{"BC1 8x8 2D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 1}, -1},
+		{"BC1 8x8 2D array", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 8, Height: 8, DepthOrArrayLayers: 6}, -1},
+		{"BC1 5x5 2D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 5, Height: 5, DepthOrArrayLayers: 1}, CreateTextureErrorNotMultipleOfBlockSize},
+		{"BC7 4x6 2D", gputypes.TextureFormatBC7RGBAUnorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 4, Height: 6, DepthOrArrayLayers: 1}, CreateTextureErrorNotMultipleOfBlockSize},
+		{"ETC2 6x4 2D", gputypes.TextureFormatETC2RGB8Unorm, gputypes.TextureDimension2D, hal.Extent3D{Width: 6, Height: 4, DepthOrArrayLayers: 1}, CreateTextureErrorNotMultipleOfBlockSize},
+		{"BC1 4x1 1D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension1D, hal.Extent3D{Width: 4, Height: 1, DepthOrArrayLayers: 1}, CreateTextureErrorInvalidCompressedDimension},
+		{"BC1 4x4x4 3D", gputypes.TextureFormatBC1RGBAUnorm, gputypes.TextureDimension3D, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 4}, CreateTextureErrorInvalidCompressedDimension},
+		{"ETC2 4x4x4 3D", gputypes.TextureFormatETC2RGB8Unorm, gputypes.TextureDimension3D, hal.Extent3D{Width: 4, Height: 4, DepthOrArrayLayers: 4}, CreateTextureErrorInvalidCompressedDimension},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			desc := validTextureDesc()
+			desc.Format, desc.Dimension, desc.Size = tt.format, tt.dim, tt.size
+			err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), features)
+			if tt.want < 0 {
+				if err != nil {
+					t.Fatalf("want valid, got %v", err)
+				}
+				return
+			}
+			var cte *CreateTextureError
+			if !errors.As(err, &cte) || cte.Kind != tt.want {
+				t.Fatalf("got %v, want CreateTextureError kind %d", err, tt.want)
+			}
+			if cte.Format != tt.format || cte.Error() == "" {
+				t.Errorf("error %q does not carry format %v", cte.Error(), tt.format)
+			}
+		})
+	}
+}
+
+func TestValidateTextureDescriptor_InvalidDimension(t *testing.T) {
+	desc := validTextureDesc()
+	desc.Dimension = gputypes.TextureDimensionUndefined
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for undefined dimension")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorInvalidDimension {
+		t.Errorf("expected InvalidDimension, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_InvalidFormat(t *testing.T) {
+	desc := validTextureDesc()
+	desc.Format = gputypes.TextureFormatUndefined
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for undefined format")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorInvalidFormat {
+		t.Errorf("expected InvalidFormat, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_ZeroDimension(t *testing.T) {
+	tests := []struct {
+		name   string
+		width  uint32
+		height uint32
+		depth  uint32
+	}{
+		{"zero width", 0, 256, 1},
+		{"zero height", 256, 0, 1},
+		{"zero depth", 256, 256, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			desc := validTextureDesc()
+			desc.Size = hal.Extent3D{Width: tt.width, Height: tt.height, DepthOrArrayLayers: tt.depth}
+
+			err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if err == nil {
+				t.Fatal("expected error for zero dimension")
+			}
+			var cte *CreateTextureError
+			if !errors.As(err, &cte) {
+				t.Fatalf("expected CreateTextureError, got %T", err)
+			}
+			if cte.Kind != CreateTextureErrorZeroDimension {
+				t.Errorf("expected ZeroDimension, got %v", cte.Kind)
+			}
+			if cte.RequestedWidth != tt.width || cte.RequestedHeight != tt.height || cte.RequestedDepth != tt.depth {
+				t.Errorf("expected requested dims %d,%d,%d, got %d,%d,%d",
+					tt.width, tt.height, tt.depth,
+					cte.RequestedWidth, cte.RequestedHeight, cte.RequestedDepth)
+			}
+		})
+	}
+}
+
+func TestValidateTextureDescriptor_MaxDimension1D(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	desc := validTextureDesc()
+	desc.Dimension = gputypes.TextureDimension1D
+	desc.Size = hal.Extent3D{Width: limits.MaxTextureDimension1D + 1, Height: 1, DepthOrArrayLayers: 1}
+
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for exceeding 1D max dimension")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMaxDimension {
+		t.Errorf("expected MaxDimension, got %v", cte.Kind)
+	}
+	if cte.MaxDimension != limits.MaxTextureDimension1D {
+		t.Errorf("expected MaxDimension %d, got %d", limits.MaxTextureDimension1D, cte.MaxDimension)
+	}
+}
+
+func TestValidateTextureDescriptor_MaxDimension2D(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	desc := validTextureDesc()
+	desc.Size = hal.Extent3D{Width: limits.MaxTextureDimension2D + 1, Height: 1, DepthOrArrayLayers: 1}
+
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for exceeding 2D max dimension")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMaxDimension {
+		t.Errorf("expected MaxDimension, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_MaxDimension3D(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	desc := validTextureDesc()
+	desc.Dimension = gputypes.TextureDimension3D
+	desc.Size = hal.Extent3D{Width: limits.MaxTextureDimension3D + 1, Height: 1, DepthOrArrayLayers: 1}
+
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for exceeding 3D max dimension")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMaxDimension {
+		t.Errorf("expected MaxDimension, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_MaxArrayLayers(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	desc := validTextureDesc()
+	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: limits.MaxTextureArrayLayers + 1}
+
+	err := ValidateTextureDescriptor(desc, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for exceeding max array layers")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMaxArrayLayers {
+		t.Errorf("expected MaxArrayLayers, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_EmptyUsage(t *testing.T) {
+	desc := validTextureDesc()
+	desc.Usage = gputypes.TextureUsageNone
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for empty usage")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorEmptyUsage {
+		t.Errorf("expected EmptyUsage, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_InvalidUsage(t *testing.T) {
+	desc := validTextureDesc()
+	desc.Usage = gputypes.TextureUsage(1 << 30) // Unknown flag
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for invalid usage")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorInvalidUsage {
+		t.Errorf("expected InvalidUsage, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_InvalidMipLevelCount_Zero(t *testing.T) {
+	desc := validTextureDesc()
+	desc.MipLevelCount = 0
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for zero mip level count")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorInvalidMipLevelCount {
+		t.Errorf("expected InvalidMipLevelCount, got %v", cte.Kind)
+	}
+	if cte.RequestedMips != 0 {
+		t.Errorf("expected RequestedMips 0, got %d", cte.RequestedMips)
+	}
+}
+
+func TestValidateTextureDescriptor_InvalidMipLevelCount_TooMany(t *testing.T) {
+	desc := validTextureDesc()
+	desc.Size = hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1}
+	desc.MipLevelCount = 100 // max for 256x256 is 9
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for too many mip levels")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorInvalidMipLevelCount {
+		t.Errorf("expected InvalidMipLevelCount, got %v", cte.Kind)
+	}
+	if cte.RequestedMips != 100 {
+		t.Errorf("expected RequestedMips 100, got %d", cte.RequestedMips)
+	}
+	if cte.MaxMips != 9 {
+		t.Errorf("expected MaxMips 9, got %d", cte.MaxMips)
+	}
+}
+
+func TestValidateTextureDescriptor_InvalidSampleCount(t *testing.T) {
+	for _, sc := range []uint32{0, 2, 3, 5, 8, 16} {
+		desc := validTextureDesc()
+		desc.SampleCount = sc
+
+		err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+		if err == nil {
+			t.Fatalf("expected error for sample count %d", sc)
+		}
+		var cte *CreateTextureError
+		if !errors.As(err, &cte) {
+			t.Fatalf("expected CreateTextureError for sample count %d, got %T", sc, err)
+		}
+		if cte.Kind != CreateTextureErrorInvalidSampleCount {
+			t.Errorf("expected InvalidSampleCount for %d, got %v", sc, cte.Kind)
+		}
+		if cte.RequestedSamples != sc {
+			t.Errorf("expected RequestedSamples %d, got %d", sc, cte.RequestedSamples)
+		}
+	}
+}
+
+func TestValidateTextureDescriptor_MultisampleMipLevel(t *testing.T) {
+	desc := validTextureDesc()
+	desc.SampleCount = 4
+	desc.MipLevelCount = 2
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for multisampled texture with mip levels > 1")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMultisampleMipLevel {
+		t.Errorf("expected MultisampleMipLevel, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_MultisampleDimension(t *testing.T) {
+	desc := validTextureDesc()
+	desc.Dimension = gputypes.TextureDimension3D
+	desc.SampleCount = 4
+	desc.MipLevelCount = 1
+	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1}
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for multisampled non-2D texture")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMultisampleDimension {
+		t.Errorf("expected MultisampleDimension, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_MultisampleArrayLayers(t *testing.T) {
+	desc := validTextureDesc()
+	desc.SampleCount = 4
+	desc.MipLevelCount = 1
+	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 2}
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for multisampled texture with array layers > 1")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMultisampleArrayLayers {
+		t.Errorf("expected MultisampleArrayLayers, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_MultisampleStorageBinding(t *testing.T) {
+	desc := validTextureDesc()
+	desc.SampleCount = 4
+	desc.MipLevelCount = 1
+	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1}
+	desc.Usage = gputypes.TextureUsageTextureBinding | gputypes.TextureUsageStorageBinding
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for multisampled texture with storage binding")
+	}
+	var cte *CreateTextureError
+	if !errors.As(err, &cte) {
+		t.Fatalf("expected CreateTextureError, got %T", err)
+	}
+	if cte.Kind != CreateTextureErrorMultisampleStorageBinding {
+		t.Errorf("expected MultisampleStorageBinding, got %v", cte.Kind)
+	}
+}
+
+func TestValidateTextureDescriptor_ValidMultisample(t *testing.T) {
+	desc := validTextureDesc()
+	desc.SampleCount = 4
+	desc.MipLevelCount = 1
+	desc.Size = hal.Extent3D{Width: 64, Height: 64, DepthOrArrayLayers: 1}
+	desc.Usage = gputypes.TextureUsageRenderAttachment
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for valid multisampled texture, got: %v", err)
+	}
+}
+
+func TestValidateTextureDescriptor_ValidMaxMips(t *testing.T) {
+	desc := validTextureDesc()
+	desc.Size = hal.Extent3D{Width: 256, Height: 256, DepthOrArrayLayers: 1}
+	desc.MipLevelCount = 9 // log2(256) + 1 = 9
+
+	err := ValidateTextureDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for max valid mip count, got: %v", err)
+	}
+}
+
+// --- ValidateSamplerDescriptor tests ---
+
+func TestValidateSamplerDescriptor_Valid(t *testing.T) {
+	desc := &hal.SamplerDescriptor{
+		Label:        "test",
+		LodMinClamp:  0,
+		LodMaxClamp:  32,
+		MagFilter:    gputypes.FilterModeLinear,
+		MinFilter:    gputypes.FilterModeLinear,
+		MipmapFilter: gputypes.FilterModeLinear,
+		Anisotropy:   1,
+	}
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateSamplerDescriptor_NegativeLodMinClamp(t *testing.T) {
+	desc := &hal.SamplerDescriptor{
+		Label:       "test",
+		LodMinClamp: -1.0,
+		LodMaxClamp: 32,
+	}
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for negative LodMinClamp")
+	}
+	var cse *CreateSamplerError
+	if !errors.As(err, &cse) {
+		t.Fatalf("expected CreateSamplerError, got %T", err)
+	}
+	if cse.Kind != CreateSamplerErrorInvalidLodMinClamp {
+		t.Errorf("expected InvalidLodMinClamp, got %v", cse.Kind)
+	}
+}
+
+func TestValidateSamplerDescriptor_LodMaxClampLessThanMin(t *testing.T) {
+	desc := &hal.SamplerDescriptor{
+		Label:       "test",
+		LodMinClamp: 10.0,
+		LodMaxClamp: 5.0,
+	}
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for LodMaxClamp < LodMinClamp")
+	}
+	var cse *CreateSamplerError
+	if !errors.As(err, &cse) {
+		t.Fatalf("expected CreateSamplerError, got %T", err)
+	}
+	if cse.Kind != CreateSamplerErrorInvalidLodMaxClamp {
+		t.Errorf("expected InvalidLodMaxClamp, got %v", cse.Kind)
+	}
+	if cse.LodMinClamp != 10.0 || cse.LodMaxClamp != 5.0 {
+		t.Errorf("expected LodMinClamp=10, LodMaxClamp=5, got %f, %f", cse.LodMinClamp, cse.LodMaxClamp)
+	}
+}
+
+func TestValidateSamplerDescriptor_AnisotropyRequiresLinear(t *testing.T) {
+	desc := &hal.SamplerDescriptor{
+		Label:        "test",
+		LodMinClamp:  0,
+		LodMaxClamp:  32,
+		MagFilter:    gputypes.FilterModeNearest,
+		MinFilter:    gputypes.FilterModeLinear,
+		MipmapFilter: gputypes.FilterModeLinear,
+		Anisotropy:   4,
+	}
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for anisotropy with non-linear filtering")
+	}
+	var cse *CreateSamplerError
+	if !errors.As(err, &cse) {
+		t.Fatalf("expected CreateSamplerError, got %T", err)
+	}
+	if cse.Kind != CreateSamplerErrorAnisotropyRequiresLinearFiltering {
+		t.Errorf("expected AnisotropyRequiresLinearFiltering, got %v", cse.Kind)
+	}
+}
+
+func TestValidateSamplerDescriptor_ZeroAnisotropyIsValid(t *testing.T) {
+	desc := &hal.SamplerDescriptor{
+		Label:       "test",
+		LodMinClamp: 0,
+		LodMaxClamp: 32,
+		MagFilter:   gputypes.FilterModeNearest,
+		MinFilter:   gputypes.FilterModeNearest,
+		Anisotropy:  0, // treated as 1
+	}
+	err := ValidateSamplerDescriptor(desc, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for zero anisotropy, got: %v", err)
+	}
+}
+
+// --- ValidateShaderModuleDescriptor tests ---
+
+func TestValidateShaderModuleDescriptor_ValidWGSL(t *testing.T) {
+	desc := &hal.ShaderModuleDescriptor{
+		Label:  "test",
+		Source: hal.ShaderSource{WGSL: "@vertex fn main() -> @builtin(position) vec4f { return vec4f(); }"},
+	}
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateShaderModuleDescriptor_ValidSPIRV(t *testing.T) {
+	desc := &hal.ShaderModuleDescriptor{
+		Label:  "test",
+		Source: hal.ShaderSource{SPIRV: []uint32{0x07230203, 0x00010000}},
+	}
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateShaderModuleDescriptor_NoSource(t *testing.T) {
+	desc := &hal.ShaderModuleDescriptor{Label: "test"}
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for no source")
+	}
+	var csme *CreateShaderModuleError
+	if !errors.As(err, &csme) {
+		t.Fatalf("expected CreateShaderModuleError, got %T", err)
+	}
+	if csme.Kind != CreateShaderModuleErrorNoSource {
+		t.Errorf("expected NoSource, got %v", csme.Kind)
+	}
+}
+
+func TestValidateShaderModuleDescriptor_DualSource(t *testing.T) {
+	desc := &hal.ShaderModuleDescriptor{
+		Label: "test",
+		Source: hal.ShaderSource{
+			WGSL:  "@vertex fn main() {}",
+			SPIRV: []uint32{0x07230203},
+		},
+	}
+	err := ValidateShaderModuleDescriptor(desc, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for dual source")
+	}
+	var csme *CreateShaderModuleError
+	if !errors.As(err, &csme) {
+		t.Fatalf("expected CreateShaderModuleError, got %T", err)
+	}
+	if csme.Kind != CreateShaderModuleErrorDualSource {
+		t.Errorf("expected DualSource, got %v", csme.Kind)
+	}
+}
+
+// --- ValidateRenderPipelineDescriptor tests ---
+
+func TestValidateRenderPipelineDescriptor_Valid(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "fs_main",
+			Targets:    []gputypes.ColorTargetState{{}},
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_MissingVertexModule(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     nil,
+			EntryPoint: "vs_main",
+		},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for nil vertex module")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorMissingVertexModule {
+		t.Errorf("expected MissingVertexModule, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_MissingVertexEntryPoint(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "",
+		},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for empty vertex entry point")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorMissingVertexEntryPoint {
+		t.Errorf("expected MissingVertexEntryPoint, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_MissingFragmentModule(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Fragment: &hal.FragmentState{
+			Module:     nil,
+			EntryPoint: "fs_main",
+			Targets:    []gputypes.ColorTargetState{{}},
+		},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for nil fragment module")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorMissingFragmentModule {
+		t.Errorf("expected MissingFragmentModule, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_MissingFragmentEntryPoint(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "",
+			Targets:    []gputypes.ColorTargetState{{}},
+		},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for empty fragment entry point")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorMissingFragmentEntryPoint {
+		t.Errorf("expected MissingFragmentEntryPoint, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_NoFragmentTargets(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "fs_main",
+			Targets:    []gputypes.ColorTargetState{},
+		},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for empty fragment targets")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorNoFragmentTargets {
+		t.Errorf("expected NoFragmentTargets, got %v", crpe.Kind)
+	}
+}
+
+// TestValidateRenderPipelineDescriptor_DepthOnlyFragment: a fragment stage
+// with no color targets is valid when the pipeline has a depth-stencil state,
+// for example a shadow map with alpha-tested discard. WebGPU requires at
+// least one attachment, a color target or the depth-stencil state
+// (GPURenderPipelineDescriptor validation), as Rust wgpu-core does.
+func TestValidateRenderPipelineDescriptor_DepthOnlyFragment(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label:  "shadow",
+		Vertex: hal.VertexState{Module: mockShaderModule{}, EntryPoint: "vs_main"},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "fs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth32Float,
+			DepthWriteEnabled: true,
+			DepthCompare:      gputypes.CompareFunctionLess,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	if err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0)); err != nil {
+		t.Fatalf("depth-only pipeline with a fragment stage: %v", err)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_TooManyColorTargets(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	targets := make([]gputypes.ColorTargetState, limits.MaxColorAttachments+1)
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "fs_main",
+			Targets:    targets,
+		},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for too many color targets")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorTooManyColorTargets {
+		t.Errorf("expected TooManyColorTargets, got %v", crpe.Kind)
+	}
+	if crpe.TargetCount != limits.MaxColorAttachments+1 {
+		t.Errorf("expected TargetCount %d, got %d", limits.MaxColorAttachments+1, crpe.TargetCount)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_InvalidSampleCount(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Multisample: gputypes.MultisampleState{Count: 3},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for invalid sample count")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorInvalidSampleCount {
+		t.Errorf("expected InvalidSampleCount, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_NoFragment(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for depth-only pipeline, got: %v", err)
+	}
+}
+
+// --- ValidateComputePipelineDescriptor tests ---
+
+func TestValidateComputePipelineDescriptor_Valid(t *testing.T) {
+	desc := &hal.ComputePipelineDescriptor{
+		Label: "test",
+		Compute: hal.ComputeState{
+			Module:     mockShaderModule{},
+			EntryPoint: "main",
+		},
+	}
+	err := ValidateComputePipelineDescriptor(desc)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateComputePipelineDescriptor_MissingModule(t *testing.T) {
+	desc := &hal.ComputePipelineDescriptor{
+		Label: "test",
+		Compute: hal.ComputeState{
+			Module:     nil,
+			EntryPoint: "main",
+		},
+	}
+	err := ValidateComputePipelineDescriptor(desc)
+	if err == nil {
+		t.Fatal("expected error for nil module")
+	}
+	var ccpe *CreateComputePipelineError
+	if !errors.As(err, &ccpe) {
+		t.Fatalf("expected CreateComputePipelineError, got %T", err)
+	}
+	if ccpe.Kind != CreateComputePipelineErrorMissingModule {
+		t.Errorf("expected MissingModule, got %v", ccpe.Kind)
+	}
+}
+
+func TestValidateComputePipelineDescriptor_MissingEntryPoint(t *testing.T) {
+	desc := &hal.ComputePipelineDescriptor{
+		Label: "test",
+		Compute: hal.ComputeState{
+			Module:     mockShaderModule{},
+			EntryPoint: "",
+		},
+	}
+	err := ValidateComputePipelineDescriptor(desc)
+	if err == nil {
+		t.Fatal("expected error for empty entry point")
+	}
+	var ccpe *CreateComputePipelineError
+	if !errors.As(err, &ccpe) {
+		t.Fatalf("expected CreateComputePipelineError, got %T", err)
+	}
+	if ccpe.Kind != CreateComputePipelineErrorMissingEntryPoint {
+		t.Errorf("expected MissingEntryPoint, got %v", ccpe.Kind)
+	}
+}
+
+// --- ValidateBindGroupLayoutDescriptor tests ---
+
+func TestValidateBindGroupLayoutDescriptor_Valid(t *testing.T) {
+	desc := &hal.BindGroupLayoutDescriptor{
+		Label: "test",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0},
+			{Binding: 1},
+		},
+	}
+	err := ValidateBindGroupLayoutDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupLayoutDescriptor_DuplicateBinding(t *testing.T) {
+	desc := &hal.BindGroupLayoutDescriptor{
+		Label: "test",
+		Entries: []gputypes.BindGroupLayoutEntry{
+			{Binding: 0},
+			{Binding: 1},
+			{Binding: 0}, // duplicate
+		},
+	}
+	err := ValidateBindGroupLayoutDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for duplicate binding")
+	}
+	var cble *CreateBindGroupLayoutError
+	if !errors.As(err, &cble) {
+		t.Fatalf("expected CreateBindGroupLayoutError, got %T", err)
+	}
+	if cble.Kind != CreateBindGroupLayoutErrorDuplicateBinding {
+		t.Errorf("expected DuplicateBinding, got %v", cble.Kind)
+	}
+	if cble.DuplicateBinding != 0 {
+		t.Errorf("expected DuplicateBinding 0, got %d", cble.DuplicateBinding)
+	}
+}
+
+func TestValidateBindGroupLayoutDescriptor_TooManyBindings(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	entries := make([]gputypes.BindGroupLayoutEntry, limits.MaxBindingsPerBindGroup+1)
+	for i := range entries {
+		entries[i].Binding = uint32(i)
+	}
+	desc := &hal.BindGroupLayoutDescriptor{
+		Label:   "test",
+		Entries: entries,
+	}
+	err := ValidateBindGroupLayoutDescriptor(desc, limits)
+	if err == nil {
+		t.Fatal("expected error for too many bindings")
+	}
+	var cble *CreateBindGroupLayoutError
+	if !errors.As(err, &cble) {
+		t.Fatalf("expected CreateBindGroupLayoutError, got %T", err)
+	}
+	if cble.Kind != CreateBindGroupLayoutErrorTooManyBindings {
+		t.Errorf("expected TooManyBindings, got %v", cble.Kind)
+	}
+}
+
+// --- ValidateBindGroupDescriptor tests ---
+
+func TestValidateBindGroupDescriptor_Valid(t *testing.T) {
+	layoutEntries := []gputypes.BindGroupLayoutEntry{
+		{Binding: 0},
+		{Binding: 1},
+		{Binding: 2},
+	}
+	desc := &hal.BindGroupDescriptor{
+		Label:  "test",
+		Layout: mockBindGroupLayout{},
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0},
+			{Binding: 1},
+			{Binding: 2},
+		},
+	}
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MissingLayout(t *testing.T) {
+	desc := &hal.BindGroupDescriptor{
+		Label:  "test",
+		Layout: nil,
+	}
+	// layoutEntries value does not matter -- nil layout is checked first.
+	err := ValidateBindGroupDescriptor(desc, nil, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for nil layout")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMissingLayout {
+		t.Errorf("expected MissingLayout, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BindingsNumMismatch(t *testing.T) {
+	layoutEntries := []gputypes.BindGroupLayoutEntry{
+		{Binding: 0},
+		{Binding: 1},
+		{Binding: 2},
+		{Binding: 3},
+	}
+	desc := &hal.BindGroupDescriptor{
+		Label:  "test",
+		Layout: mockBindGroupLayout{},
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0},
+			{Binding: 2},
+			{Binding: 3},
+		},
+	}
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for entry count mismatch (3 entries vs 4 layout entries)")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBindingsNumMismatch {
+		t.Errorf("expected BindingsNumMismatch, got %v", cbge.Kind)
+	}
+	if cbge.Expected != 4 {
+		t.Errorf("expected Expected=4, got %d", cbge.Expected)
+	}
+	if cbge.Actual != 3 {
+		t.Errorf("expected Actual=3, got %d", cbge.Actual)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MissingBindingDeclaration(t *testing.T) {
+	layoutEntries := []gputypes.BindGroupLayoutEntry{
+		{Binding: 0},
+		{Binding: 1},
+	}
+	desc := &hal.BindGroupDescriptor{
+		Label:  "test",
+		Layout: mockBindGroupLayout{},
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0},
+			{Binding: 5}, // not declared in layout
+		},
+	}
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for binding 5 not declared in layout")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMissingBindingDeclaration {
+		t.Errorf("expected MissingBindingDeclaration, got %v", cbge.Kind)
+	}
+	if cbge.Binding != 5 {
+		t.Errorf("expected Binding=5, got %d", cbge.Binding)
+	}
+}
+
+func TestValidateBindGroupDescriptor_DuplicateBinding(t *testing.T) {
+	layoutEntries := []gputypes.BindGroupLayoutEntry{
+		{Binding: 0},
+		{Binding: 1},
+	}
+	desc := &hal.BindGroupDescriptor{
+		Label:  "test",
+		Layout: mockBindGroupLayout{},
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0},
+			{Binding: 0}, // duplicate
+		},
+	}
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, nil, nil, nil, gputypes.Limits{}, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for duplicate binding 0")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorDuplicateBinding {
+		t.Errorf("expected DuplicateBinding, got %v", cbge.Kind)
+	}
+	if cbge.Binding != 0 {
+		t.Errorf("expected Binding=0, got %d", cbge.Binding)
+	}
+}
+
+// --- ValidatePipelineLayoutDescriptor tests ---
+
+func TestValidatePipelineLayoutDescriptor_Valid(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	layouts := make([]hal.BindGroupLayout, limits.MaxBindGroups)
+	for i := range layouts {
+		layouts[i] = mockBindGroupLayout{}
+	}
+	desc := &hal.PipelineLayoutDescriptor{
+		Label:            "test",
+		BindGroupLayouts: layouts,
+	}
+	err := ValidatePipelineLayoutDescriptor(desc, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for valid descriptor with %d bind group layouts, got: %v",
+			limits.MaxBindGroups, err)
+	}
+}
+
+func TestValidatePipelineLayoutDescriptor_Empty(t *testing.T) {
+	desc := &hal.PipelineLayoutDescriptor{
+		Label:            "test",
+		BindGroupLayouts: nil,
+	}
+	err := ValidatePipelineLayoutDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for empty bind group layouts, got: %v", err)
+	}
+}
+
+func TestValidatePipelineLayoutDescriptor_TooManyGroups(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+	layouts := make([]hal.BindGroupLayout, limits.MaxBindGroups+1)
+	for i := range layouts {
+		layouts[i] = mockBindGroupLayout{}
+	}
+	desc := &hal.PipelineLayoutDescriptor{
+		Label:            "test",
+		BindGroupLayouts: layouts,
+	}
+	err := ValidatePipelineLayoutDescriptor(desc, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for too many bind group layouts")
+	}
+	var cple *CreatePipelineLayoutError
+	if !errors.As(err, &cple) {
+		t.Fatalf("expected CreatePipelineLayoutError, got %T", err)
+	}
+	if cple.Kind != CreatePipelineLayoutErrorTooManyGroups {
+		t.Errorf("expected TooManyGroups, got %v", cple.Kind)
+	}
+	if cple.Count != int(limits.MaxBindGroups)+1 {
+		t.Errorf("expected Count %d, got %d", limits.MaxBindGroups+1, cple.Count)
+	}
+	if cple.MaxGroups != limits.MaxBindGroups {
+		t.Errorf("expected MaxGroups %d, got %d", limits.MaxBindGroups, cple.MaxGroups)
+	}
+}
+
+// --- ValidateRenderPipelineDescriptor format type guard tests ---
+
+func TestValidateRenderPipelineDescriptor_ColorTargetDepthFormat(t *testing.T) {
+	depthFormats := []gputypes.TextureFormat{
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8,
+	}
+
+	for _, f := range depthFormats {
+		t.Run(f.String(), func(t *testing.T) {
+			desc := &hal.RenderPipelineDescriptor{
+				Label: "test",
+				Vertex: hal.VertexState{
+					Module:     mockShaderModule{},
+					EntryPoint: "vs_main",
+				},
+				Fragment: &hal.FragmentState{
+					Module:     mockShaderModule{},
+					EntryPoint: "fs_main",
+					Targets:    []gputypes.ColorTargetState{{Format: f}},
+				},
+				Multisample: gputypes.MultisampleState{Count: 1},
+			}
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if err == nil {
+				t.Fatalf("expected error for depth/stencil format %s as color target", f)
+			}
+			var crpe *CreateRenderPipelineError
+			if !errors.As(err, &crpe) {
+				t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+			}
+			if crpe.Kind != CreateRenderPipelineErrorColorTargetDepthFormat {
+				t.Errorf("expected ColorTargetDepthFormat, got %v", crpe.Kind)
+			}
+			if crpe.TargetIndex != 0 {
+				t.Errorf("expected TargetIndex 0, got %d", crpe.TargetIndex)
+			}
+			if !strings.Contains(crpe.Error(), "color aspect") {
+				t.Errorf("expected error to mention 'color aspect', got %q", crpe.Error())
+			}
+		})
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_ColorTargetDepthFormat_SecondTarget(t *testing.T) {
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "fs_main",
+			Targets: []gputypes.ColorTargetState{
+				{Format: gputypes.TextureFormatRGBA8Unorm},   // valid color format
+				{Format: gputypes.TextureFormatDepth32Float}, // invalid: depth format
+			},
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for depth format as second color target")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorColorTargetDepthFormat {
+		t.Errorf("expected ColorTargetDepthFormat, got %v", crpe.Kind)
+	}
+	if crpe.TargetIndex != 1 {
+		t.Errorf("expected TargetIndex 1, got %d", crpe.TargetIndex)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_DepthStencilColorFormat(t *testing.T) {
+	colorFormats := []gputypes.TextureFormat{
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatR8Unorm,
+		gputypes.TextureFormatRGBA16Float,
+	}
+
+	for _, f := range colorFormats {
+		t.Run(f.String(), func(t *testing.T) {
+			desc := &hal.RenderPipelineDescriptor{
+				Label: "test",
+				Vertex: hal.VertexState{
+					Module:     mockShaderModule{},
+					EntryPoint: "vs_main",
+				},
+				DepthStencil: &hal.DepthStencilState{
+					Format: f, // color format used as depth/stencil — invalid
+				},
+				Multisample: gputypes.MultisampleState{Count: 1},
+			}
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if err == nil {
+				t.Fatalf("expected error for color format %s as depth/stencil", f)
+			}
+			var crpe *CreateRenderPipelineError
+			if !errors.As(err, &crpe) {
+				t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+			}
+			if crpe.Kind != CreateRenderPipelineErrorDepthStencilColorFormat {
+				t.Errorf("expected DepthStencilColorFormat, got %v", crpe.Kind)
+			}
+			if !strings.Contains(crpe.Error(), "not a depth/stencil format") {
+				t.Errorf("expected error to mention 'not a depth/stencil format', got %q", crpe.Error())
+			}
+		})
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_ValidDepthStencil(t *testing.T) {
+	depthFormats := []gputypes.TextureFormat{
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth24PlusStencil8,
+		gputypes.TextureFormatDepth32Float,
+		gputypes.TextureFormatDepth32FloatStencil8,
+		gputypes.TextureFormatStencil8,
+	}
+
+	for _, f := range depthFormats {
+		t.Run(f.String(), func(t *testing.T) {
+			desc := &hal.RenderPipelineDescriptor{
+				Label: "test",
+				Vertex: hal.VertexState{
+					Module:     mockShaderModule{},
+					EntryPoint: "vs_main",
+				},
+				DepthStencil: &hal.DepthStencilState{
+					Format: f, // valid depth/stencil format
+					// Explicitly disable depth testing so stencil-only formats
+					// (Stencil8) don't trigger RP9b (FormatNotDepth).
+					DepthCompare: gputypes.CompareFunctionAlways,
+				},
+				Multisample: gputypes.MultisampleState{Count: 1},
+			}
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if err != nil {
+				t.Fatalf("expected nil error for valid depth/stencil format %s, got: %v", f, err)
+			}
+		})
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_ValidColorTargetFormats(t *testing.T) {
+	colorFormats := []gputypes.TextureFormat{
+		gputypes.TextureFormatRGBA8Unorm,
+		gputypes.TextureFormatBGRA8Unorm,
+		gputypes.TextureFormatR8Unorm,
+		gputypes.TextureFormatRGBA16Float,
+		gputypes.TextureFormatRGBA32Float,
+	}
+
+	for _, f := range colorFormats {
+		t.Run(f.String(), func(t *testing.T) {
+			desc := &hal.RenderPipelineDescriptor{
+				Label: "test",
+				Vertex: hal.VertexState{
+					Module:     mockShaderModule{},
+					EntryPoint: "vs_main",
+				},
+				Fragment: &hal.FragmentState{
+					Module:     mockShaderModule{},
+					EntryPoint: "fs_main",
+					Targets:    []gputypes.ColorTargetState{{Format: f}},
+				},
+				Multisample: gputypes.MultisampleState{Count: 1},
+			}
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if err != nil {
+				t.Fatalf("expected nil error for valid color format %s, got: %v", f, err)
+			}
+		})
+	}
+}
+
+// --- maxMips tests ---
+
+func TestMaxMips(t *testing.T) {
+	tests := []struct {
+		name      string
+		dimension gputypes.TextureDimension
+		w, h, d   uint32
+		want      uint32
+	}{
+		{"1x1 2D", gputypes.TextureDimension2D, 1, 1, 1, 1},
+		{"2x2 2D", gputypes.TextureDimension2D, 2, 2, 1, 2},
+		{"256x256 2D", gputypes.TextureDimension2D, 256, 256, 1, 9},
+		{"1024x1 1D", gputypes.TextureDimension1D, 1024, 1, 1, 11},
+		{"16x16x16 3D", gputypes.TextureDimension3D, 16, 16, 16, 5},
+		{"256x128 2D", gputypes.TextureDimension2D, 256, 128, 1, 9},
+		{"0 dimension", gputypes.TextureDimension2D, 0, 0, 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := maxMips(tt.dimension, tt.w, tt.h, tt.d)
+			if got != tt.want {
+				t.Errorf("maxMips(%v, %d, %d, %d) = %d, want %d",
+					tt.dimension, tt.w, tt.h, tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- Error string tests ---
+
+func TestCreateTextureError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateTextureError
+		contains string
+	}{
+		{
+			name:     "zero dimension",
+			err:      &CreateTextureError{Kind: CreateTextureErrorZeroDimension, Label: "test"},
+			contains: "must be greater than 0",
+		},
+		{
+			name:     "max dimension",
+			err:      &CreateTextureError{Kind: CreateTextureErrorMaxDimension, Label: "test", MaxDimension: 8192},
+			contains: "exceeds maximum",
+		},
+		{
+			name:     "empty usage",
+			err:      &CreateTextureError{Kind: CreateTextureErrorEmptyUsage, Label: "test"},
+			contains: "must not be empty",
+		},
+		{
+			name:     "invalid format",
+			err:      &CreateTextureError{Kind: CreateTextureErrorInvalidFormat, Label: "test"},
+			contains: "must not be undefined",
+		},
+		{
+			name:     "invalid dimension",
+			err:      &CreateTextureError{Kind: CreateTextureErrorInvalidDimension, Label: "test"},
+			contains: "must not be undefined",
+		},
+		{
+			name:     "invalid sample count",
+			err:      &CreateTextureError{Kind: CreateTextureErrorInvalidSampleCount, Label: "test", RequestedSamples: 3},
+			contains: "must be 1 or 4",
+		},
+		{
+			name:     "multisampled mip level",
+			err:      &CreateTextureError{Kind: CreateTextureErrorMultisampleMipLevel, Label: "test"},
+			contains: "multisampled",
+		},
+		{
+			name:     "HAL error",
+			err:      &CreateTextureError{Kind: CreateTextureErrorHAL, Label: "test", HALError: errors.New("backend error")},
+			contains: "HAL error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+func TestCreateSamplerError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateSamplerError
+		contains string
+	}{
+		{
+			name:     "invalid lod min",
+			err:      &CreateSamplerError{Kind: CreateSamplerErrorInvalidLodMinClamp, Label: "test", LodMinClamp: -1},
+			contains: "LodMinClamp",
+		},
+		{
+			name:     "invalid lod max",
+			err:      &CreateSamplerError{Kind: CreateSamplerErrorInvalidLodMaxClamp, Label: "test"},
+			contains: "LodMaxClamp",
+		},
+		{
+			name:     "anisotropy linear",
+			err:      &CreateSamplerError{Kind: CreateSamplerErrorAnisotropyRequiresLinearFiltering, Label: "test", Anisotropy: 4},
+			contains: "linear",
+		},
+		{
+			name:     "HAL error",
+			err:      &CreateSamplerError{Kind: CreateSamplerErrorHAL, Label: "test", HALError: errors.New("backend")},
+			contains: "HAL error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+func TestCreateShaderModuleError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateShaderModuleError
+		contains string
+	}{
+		{
+			name:     "no source",
+			err:      &CreateShaderModuleError{Kind: CreateShaderModuleErrorNoSource, Label: "test"},
+			contains: "either WGSL or SPIRV",
+		},
+		{
+			name:     "dual source",
+			err:      &CreateShaderModuleError{Kind: CreateShaderModuleErrorDualSource, Label: "test"},
+			contains: "must not provide both",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+func TestCreateRenderPipelineError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateRenderPipelineError
+		contains string
+	}{
+		{
+			name:     "missing vertex module",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorMissingVertexModule, Label: "test"},
+			contains: "vertex shader module",
+		},
+		{
+			name:     "too many targets",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorTooManyColorTargets, Label: "test", TargetCount: 10, MaxTargets: 8},
+			contains: "exceeds maximum",
+		},
+		{
+			name:     "color target depth format",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorColorTargetDepthFormat, Label: "test", TargetIndex: 0, Format: "Depth32Float"},
+			contains: "color aspect",
+		},
+		{
+			name:     "depth stencil color format",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthStencilColorFormat, Label: "test", Format: "RGBA8Unorm"},
+			contains: "not a depth/stencil format",
+		},
+		{
+			name:     "depth format no depth aspect",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthFormatNoDepthAspect, Label: "test", Format: "Stencil8"},
+			contains: "does not have a depth aspect",
+		},
+		{
+			name:     "depth format no stencil aspect",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorDepthFormatNoStencilAspect, Label: "test", Format: "Depth16Unorm"},
+			contains: "does not have a stencil aspect",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+func TestCreateComputePipelineError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateComputePipelineError
+		contains string
+	}{
+		{
+			name:     "missing module",
+			err:      &CreateComputePipelineError{Kind: CreateComputePipelineErrorMissingModule, Label: "test"},
+			contains: "compute shader module",
+		},
+		{
+			name:     "missing entry point",
+			err:      &CreateComputePipelineError{Kind: CreateComputePipelineErrorMissingEntryPoint, Label: "test"},
+			contains: "entry point",
+		},
+		{
+			name: "workgroup size exceeded",
+			err: &CreateComputePipelineError{
+				Kind: CreateComputePipelineErrorWorkgroupSizeExceeded, Label: "test",
+				Dimension: "X", Size: 512, Limit: 256,
+			},
+			contains: "workgroup_size X = 512 exceeds device limit 256",
+		},
+		{
+			name: "workgroup size zero",
+			err: &CreateComputePipelineError{
+				Kind: CreateComputePipelineErrorWorkgroupSizeZero, Label: "test",
+				Dimension: "Y",
+			},
+			contains: "workgroup_size Y must not be zero",
+		},
+		{
+			name: "too many invocations",
+			err: &CreateComputePipelineError{
+				Kind: CreateComputePipelineErrorTooManyInvocations, Label: "test",
+				TotalInvocations: 2048, Limit: 256,
+			},
+			contains: "total workgroup invocations 2048 exceeds device limit 256",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+func TestCreatePipelineLayoutError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreatePipelineLayoutError
+		contains string
+	}{
+		{
+			name:     "too many groups",
+			err:      &CreatePipelineLayoutError{Kind: CreatePipelineLayoutErrorTooManyGroups, Label: "test", Count: 5, MaxGroups: 4},
+			contains: "exceeds device limit",
+		},
+		{
+			name:     "HAL error",
+			err:      &CreatePipelineLayoutError{Kind: CreatePipelineLayoutErrorHAL, Label: "test", HALError: errors.New("backend")},
+			contains: "HAL error",
+		},
+		{
+			name:     "unnamed label",
+			err:      &CreatePipelineLayoutError{Kind: CreatePipelineLayoutErrorTooManyGroups, Label: "", Count: 8, MaxGroups: 4},
+			contains: "<unnamed>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+func TestCreateBindGroupLayoutError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateBindGroupLayoutError
+		contains string
+	}{
+		{
+			name:     "duplicate binding",
+			err:      &CreateBindGroupLayoutError{Kind: CreateBindGroupLayoutErrorDuplicateBinding, Label: "test", DuplicateBinding: 3},
+			contains: "duplicate binding",
+		},
+		{
+			name:     "too many bindings",
+			err:      &CreateBindGroupLayoutError{Kind: CreateBindGroupLayoutErrorTooManyBindings, Label: "test", BindingCount: 2000, MaxBindings: 1000},
+			contains: "exceeds maximum",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+func TestCreateBindGroupError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateBindGroupError
+		contains string
+	}{
+		{
+			name:     "missing layout",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorMissingLayout, Label: "test"},
+			contains: "must not be nil",
+		},
+		{
+			name:     "bindings num mismatch",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorBindingsNumMismatch, Label: "test", Expected: 4, Actual: 3},
+			contains: "does not match",
+		},
+		{
+			name:     "missing binding declaration",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorMissingBindingDeclaration, Label: "test", Binding: 5},
+			contains: "binding 5",
+		},
+		{
+			name:     "duplicate binding",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorDuplicateBinding, Label: "test", Binding: 2},
+			contains: "binding 2",
+		},
+		{
+			name:     "buffer usage mismatch",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorBufferUsageMismatch, Label: "test", Binding: 0, ExpectedUsage: 0x40, ActualUsage: 0x80},
+			contains: "usage mismatch",
+		},
+		{
+			name:     "buffer offset alignment",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorBufferOffsetAlignment, Label: "test", Binding: 1, Offset: 100, Alignment: 256},
+			contains: "not aligned",
+		},
+		{
+			name:     "buffer binding size too large",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorBufferBindingSizeTooLarge, Label: "test", Binding: 0, Size: 100000, MaxSize: 65536},
+			contains: "exceeds maximum",
+		},
+		{
+			name:     "buffer bounds overflow",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorBufferBoundsOverflow, Label: "test", Binding: 0, Offset: 100, Size: 200, BufferSize: 256},
+			contains: "overflows",
+		},
+		{
+			name:     "buffer binding zero size",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorBufferBindingZeroSize, Label: "test", Binding: 0},
+			contains: "zero",
+		},
+		{
+			name:     "storage buffer size alignment",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorStorageBufferSizeAlignment, Label: "test", Binding: 0, Size: 13},
+			contains: "not a multiple of 4",
+		},
+		{
+			name:     "min binding size mismatch",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorMinBindingSizeMismatch, Label: "test", Binding: 0, Size: 32, MinBindingSize: 64},
+			contains: "less than minimum",
+		},
+		{
+			name:     "HAL error",
+			err:      &CreateBindGroupError{Kind: CreateBindGroupErrorHAL, Label: "test", HALError: errors.New("backend")},
+			contains: "HAL error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if msg == "" {
+				t.Error("Error message should not be empty")
+			}
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}
+
+// --- ValidateBindGroupDescriptor buffer validation tests (VAL-A2) ---
+
+// validBindGroupBufferSetup returns a valid bind group descriptor, layout entries,
+// buffer infos, and limits for buffer validation tests. The setup has a single
+// uniform buffer binding at slot 0.
+func validBindGroupBufferSetup() (
+	*hal.BindGroupDescriptor,
+	[]gputypes.BindGroupLayoutEntry,
+	[]BindGroupBufferInfo,
+	gputypes.Limits,
+) {
+	limits := gputypes.DefaultLimits()
+	layoutEntries := []gputypes.BindGroupLayoutEntry{
+		{
+			Binding: 0,
+			Buffer: &gputypes.BufferBindingLayout{
+				Type: gputypes.BufferBindingTypeUniform,
+			},
+		},
+	}
+	desc := &hal.BindGroupDescriptor{
+		Label:  "test",
+		Layout: mockBindGroupLayout{},
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0},
+		},
+	}
+	bufferInfos := []BindGroupBufferInfo{
+		{
+			Binding:    0,
+			Usage:      gputypes.BufferUsageUniform,
+			BufferSize: 1024,
+			Offset:     0,
+			Size:       256,
+		},
+	}
+	return desc, layoutEntries, bufferInfos, limits
+}
+
+func TestValidateBindGroupDescriptor_BufferValid(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for valid buffer binding, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferValidImplicitSize(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Size == 0 means "rest of buffer from offset".
+	bufferInfos[0].Size = 0
+	bufferInfos[0].Offset = 256
+	bufferInfos[0].BufferSize = 1024
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for valid implicit-size buffer binding, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferUsageMismatch_UniformAsStorage(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout wants uniform, but buffer only has storage usage.
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for buffer usage mismatch")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferUsageMismatch {
+		t.Errorf("expected BufferUsageMismatch, got %v", cbge.Kind)
+	}
+	if cbge.Binding != 0 {
+		t.Errorf("expected Binding=0, got %d", cbge.Binding)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferUsageMismatch_StorageAsUniform(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Change layout to storage binding.
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeStorage
+	// Buffer only has uniform usage, not storage.
+	bufferInfos[0].Usage = gputypes.BufferUsageUniform
+	bufferInfos[0].Size = 64 // multiple of 4 to avoid storage alignment error
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for storage binding with uniform-only buffer")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferUsageMismatch {
+		t.Errorf("expected BufferUsageMismatch, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferOffsetMisaligned_Uniform(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Default MinUniformBufferOffsetAlignment is 256. Use offset 100.
+	bufferInfos[0].Offset = 100
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for misaligned uniform buffer offset")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferOffsetAlignment {
+		t.Errorf("expected BufferOffsetAlignment, got %v", cbge.Kind)
+	}
+	if cbge.Offset != 100 {
+		t.Errorf("expected Offset=100, got %d", cbge.Offset)
+	}
+	if cbge.Alignment != 256 {
+		t.Errorf("expected Alignment=256, got %d", cbge.Alignment)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferOffsetMisaligned_Storage(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeStorage
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+	bufferInfos[0].Offset = 128 // 128 is not aligned to 256 (MinStorageBufferOffsetAlignment)
+	bufferInfos[0].Size = 128
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for misaligned storage buffer offset")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferOffsetAlignment {
+		t.Errorf("expected BufferOffsetAlignment, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferOffsetAligned(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// 256 is exactly aligned to MinUniformBufferOffsetAlignment (256).
+	bufferInfos[0].Offset = 256
+	bufferInfos[0].Size = 256
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for aligned offset, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferBindingSizeTooLarge_Uniform(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// DefaultLimits MaxUniformBufferBindingSize is 65536. Use a larger size.
+	bufferInfos[0].Size = 65537
+	bufferInfos[0].BufferSize = 1 << 20 // 1 MiB buffer to avoid bounds error
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for binding size exceeding max uniform buffer binding size")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferBindingSizeTooLarge {
+		t.Errorf("expected BufferBindingSizeTooLarge, got %v", cbge.Kind)
+	}
+	if cbge.MaxSize != 65536 {
+		t.Errorf("expected MaxSize=65536, got %d", cbge.MaxSize)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferBindingSizeTooLarge_Storage(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeStorage
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+	// DefaultLimits MaxStorageBufferBindingSize is 134217728 (128 MiB).
+	// Use a size that exceeds it and is 4-byte aligned.
+	bufferInfos[0].Size = 134217732     // 128 MiB + 4
+	bufferInfos[0].BufferSize = 1 << 28 // 256 MiB buffer
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for binding size exceeding max storage buffer binding size")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferBindingSizeTooLarge {
+		t.Errorf("expected BufferBindingSizeTooLarge, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferBoundsOverflow_ExplicitSize(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// offset=512, size=600, buffer=1024: 512+600=1112 > 1024
+	bufferInfos[0].Offset = 512
+	bufferInfos[0].Size = 600
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for buffer bounds overflow")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferBoundsOverflow {
+		t.Errorf("expected BufferBoundsOverflow, got %v", cbge.Kind)
+	}
+	if cbge.Offset != 512 {
+		t.Errorf("expected Offset=512, got %d", cbge.Offset)
+	}
+	if cbge.Size != 600 {
+		t.Errorf("expected Size=600, got %d", cbge.Size)
+	}
+	if cbge.BufferSize != 1024 {
+		t.Errorf("expected BufferSize=1024, got %d", cbge.BufferSize)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferBoundsOverflow_ImplicitSize(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Size=0 (implicit), offset > bufferSize
+	bufferInfos[0].Size = 0
+	bufferInfos[0].Offset = 2048
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for buffer offset beyond buffer end with implicit size")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	// Offset > BufferSize: effectiveSize = 0, caught by zero-size check before bounds check.
+	if cbge.Kind != CreateBindGroupErrorBufferBindingZeroSize {
+		t.Errorf("expected BufferBindingZeroSize (offset beyond buffer), got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferBindingZeroSize_ExplicitZeroBuffer(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Buffer of size 0 with implicit size binding: effective size = 0.
+	bufferInfos[0].Size = 0
+	bufferInfos[0].Offset = 0
+	bufferInfos[0].BufferSize = 0
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for zero effective binding size")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorBufferBindingZeroSize {
+		t.Errorf("expected BufferBindingZeroSize, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_StorageBufferSizeNotMultipleOf4(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeStorage
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+	bufferInfos[0].Size = 13 // not a multiple of 4
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for storage buffer size not multiple of 4")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorStorageBufferSizeAlignment {
+		t.Errorf("expected StorageBufferSizeAlignment, got %v", cbge.Kind)
+	}
+	if cbge.Size != 13 {
+		t.Errorf("expected Size=13, got %d", cbge.Size)
+	}
+}
+
+func TestValidateBindGroupDescriptor_StorageBufferSizeMultipleOf4_ReadOnly(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeReadOnlyStorage
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+	bufferInfos[0].Size = 15 // not a multiple of 4
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for read-only storage buffer size not multiple of 4")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorStorageBufferSizeAlignment {
+		t.Errorf("expected StorageBufferSizeAlignment, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_StorageBufferValid(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeStorage
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+	bufferInfos[0].Size = 256 // aligned, multiple of 4, within limits
+	bufferInfos[0].Offset = 0
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for valid storage buffer binding, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferNoBufferLayoutEntry(t *testing.T) {
+	// Buffer info provided for a binding whose layout entry is a sampler, not a buffer.
+	// The buffer validation should skip this entry gracefully.
+	layoutEntries := []gputypes.BindGroupLayoutEntry{
+		{
+			Binding: 0,
+			Sampler: &gputypes.SamplerBindingLayout{
+				Type: gputypes.SamplerBindingTypeFiltering,
+			},
+		},
+	}
+	desc := &hal.BindGroupDescriptor{
+		Label:  "test",
+		Layout: mockBindGroupLayout{},
+		Entries: []gputypes.BindGroupEntry{
+			{Binding: 0},
+		},
+	}
+	bufferInfos := []BindGroupBufferInfo{
+		{
+			Binding:    0,
+			Usage:      gputypes.BufferUsageUniform,
+			BufferSize: 1024,
+			Offset:     0,
+			Size:       256,
+		},
+	}
+	limits := gputypes.DefaultLimits()
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error when buffer info binding has no buffer layout, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_BufferBoundsExact(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Exact fit: offset + size == bufferSize
+	bufferInfos[0].Offset = 0
+	bufferInfos[0].Size = 1024
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for exact-fit buffer binding, got: %v", err)
+	}
+}
+
+// --- VAL-B1: MinBindingSize early check tests ---
+
+func TestValidateBindGroupDescriptor_MinBindingSize_TooSmall(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=64, buffer effective size=32 -> error.
+	layoutEntries[0].Buffer.MinBindingSize = 64
+	bufferInfos[0].Size = 32
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for effective size < MinBindingSize")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMinBindingSizeMismatch {
+		t.Errorf("expected MinBindingSizeMismatch, got %v", cbge.Kind)
+	}
+	if cbge.Size != 32 {
+		t.Errorf("expected Size=32, got %d", cbge.Size)
+	}
+	if cbge.MinBindingSize != 64 {
+		t.Errorf("expected MinBindingSize=64, got %d", cbge.MinBindingSize)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_Exact(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=64, buffer effective size=64 -> pass.
+	layoutEntries[0].Buffer.MinBindingSize = 64
+	bufferInfos[0].Size = 64
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for effective size == MinBindingSize, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_Larger(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=64, buffer effective size=128 -> pass.
+	layoutEntries[0].Buffer.MinBindingSize = 64
+	bufferInfos[0].Size = 128
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for effective size > MinBindingSize, got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_ZeroMeansNoCheck(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=0 (no constraint), small binding -> pass.
+	layoutEntries[0].Buffer.MinBindingSize = 0
+	bufferInfos[0].Size = 4
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for MinBindingSize=0 (no constraint), got: %v", err)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_ImplicitSize(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Layout declares MinBindingSize=512.
+	// Buffer is 256 bytes, offset=0, Size=0 (implicit: effectiveSize = 256).
+	// 256 < 512 -> error.
+	layoutEntries[0].Buffer.MinBindingSize = 512
+	bufferInfos[0].Size = 0
+	bufferInfos[0].Offset = 0
+	bufferInfos[0].BufferSize = 256
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for implicit effective size < MinBindingSize")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMinBindingSizeMismatch {
+		t.Errorf("expected MinBindingSizeMismatch, got %v", cbge.Kind)
+	}
+}
+
+func TestValidateBindGroupDescriptor_MinBindingSize_StorageBuffer(t *testing.T) {
+	desc, layoutEntries, bufferInfos, limits := validBindGroupBufferSetup()
+	// Test with storage buffer binding type.
+	layoutEntries[0].Buffer.Type = gputypes.BufferBindingTypeStorage
+	layoutEntries[0].Buffer.MinBindingSize = 128
+	bufferInfos[0].Usage = gputypes.BufferUsageStorage
+	bufferInfos[0].Size = 64 // multiple of 4, but less than MinBindingSize
+	bufferInfos[0].BufferSize = 1024
+
+	err := ValidateBindGroupDescriptor(desc, layoutEntries, bufferInfos, nil, nil, limits, gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for storage buffer effective size < MinBindingSize")
+	}
+	var cbge *CreateBindGroupError
+	if !errors.As(err, &cbge) {
+		t.Fatalf("expected CreateBindGroupError, got %T", err)
+	}
+	if cbge.Kind != CreateBindGroupErrorMinBindingSizeMismatch {
+		t.Errorf("expected MinBindingSizeMismatch, got %v", cbge.Kind)
+	}
+}
+
+// --- VAL-B4: Depth/stencil format aspect granularity tests ---
+
+func TestValidateRenderPipelineDescriptor_Depth16Unorm_StencilOpsEnabled(t *testing.T) {
+	// Depth16Unorm has NO stencil aspect. Enabling stencil ops should error.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format: gputypes.TextureFormatDepth16Unorm,
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationReplace, // non-Keep -> stencil enabled
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for Depth16Unorm with stencil ops enabled (no stencil aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoStencilAspect {
+		t.Errorf("expected DepthFormatNoStencilAspect, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Stencil8_DepthWriteEnabled(t *testing.T) {
+	// Stencil8 has NO depth aspect. Enabling depth write should error.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatStencil8,
+			DepthWriteEnabled: true,
+			DepthCompare:      gputypes.CompareFunctionAlways,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for Stencil8 with depth write enabled (no depth aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoDepthAspect {
+		t.Errorf("expected DepthFormatNoDepthAspect, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Stencil8_DepthCompareNotAlways(t *testing.T) {
+	// Stencil8 has NO depth aspect. DepthCompare != Always triggers isDepthEnabled.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:       gputypes.TextureFormatStencil8,
+			DepthCompare: gputypes.CompareFunctionLess, // not Always -> depth enabled
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for Stencil8 with DepthCompare=Less (no depth aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoDepthAspect {
+		t.Errorf("expected DepthFormatNoDepthAspect, got %v", crpe.Kind)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Depth24PlusStencil8_BothEnabled(t *testing.T) {
+	// Depth24PlusStencil8 has BOTH depth and stencil aspects. Should pass.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatDepth24PlusStencil8,
+			DepthWriteEnabled: true,
+			DepthCompare:      gputypes.CompareFunctionLess,
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionNotEqual,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationReplace,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for Depth24PlusStencil8 with both depth+stencil enabled, got: %v", err)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Depth32Float_StencilOpsEnabled(t *testing.T) {
+	// Depth32Float has NO stencil aspect. Enabling stencil ops should error.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:       gputypes.TextureFormatDepth32Float,
+			DepthCompare: gputypes.CompareFunctionAlways,
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionLess, // non-Always compare -> stencil enabled
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err == nil {
+		t.Fatal("expected error for Depth32Float with stencil ops enabled (no stencil aspect)")
+	}
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) {
+		t.Fatalf("expected CreateRenderPipelineError, got %T", err)
+	}
+	if crpe.Kind != CreateRenderPipelineErrorDepthFormatNoStencilAspect {
+		t.Errorf("expected DepthFormatNoStencilAspect, got %v", crpe.Kind)
+	}
+}
+
+// TestValidateRenderPipelineDescriptor_DepthOnly_StencilFacesZeroMasks: the
+// spec requires a stencil aspect when a stencil face is not the default,
+// whatever the masks (index.bs, GPUDepthStencilState validation). Zero masks
+// are literal and do not turn the stencil test off, so a depth-only format
+// with real stencil faces is an error.
+func TestValidateRenderPipelineDescriptor_DepthOnly_StencilFacesZeroMasks(t *testing.T) {
+	keep := hal.StencilOperationKeep
+	desc := &hal.RenderPipelineDescriptor{
+		Label:  "test",
+		Vertex: hal.VertexState{Module: mockShaderModule{}, EntryPoint: "vs_main"},
+		DepthStencil: &hal.DepthStencilState{
+			Format:       gputypes.TextureFormatDepth32Float,
+			DepthCompare: gputypes.CompareFunctionAlways,
+			StencilFront: hal.StencilFaceState{Compare: gputypes.CompareFunctionNotEqual, FailOp: keep, DepthFailOp: keep, PassOp: keep},
+			StencilBack:  hal.StencilFaceState{Compare: gputypes.CompareFunctionAlways, FailOp: keep, DepthFailOp: keep, PassOp: keep},
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	var crpe *CreateRenderPipelineError
+	if !errors.As(err, &crpe) || crpe.Kind != CreateRenderPipelineErrorDepthFormatNoStencilAspect {
+		t.Fatalf("Depth32Float with a stencil face and zero masks: got %v, want DepthFormatNoStencilAspect", err)
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_DepthOnly_NoStencilOps(t *testing.T) {
+	// Depth-only format with stencil ops all set to IGNORE (default) -> should pass.
+	depthOnlyFormats := []gputypes.TextureFormat{
+		gputypes.TextureFormatDepth16Unorm,
+		gputypes.TextureFormatDepth24Plus,
+		gputypes.TextureFormatDepth32Float,
+	}
+	for _, f := range depthOnlyFormats {
+		t.Run(f.String(), func(t *testing.T) {
+			desc := &hal.RenderPipelineDescriptor{
+				Label: "test",
+				Vertex: hal.VertexState{
+					Module:     mockShaderModule{},
+					EntryPoint: "vs_main",
+				},
+				DepthStencil: &hal.DepthStencilState{
+					Format:            f,
+					DepthWriteEnabled: true,
+					DepthCompare:      gputypes.CompareFunctionLess,
+					// Stencil faces = IGNORE (all Keep + Compare=Always)
+					StencilFront: hal.StencilFaceState{
+						Compare: gputypes.CompareFunctionAlways,
+						FailOp:  hal.StencilOperationKeep,
+						PassOp:  hal.StencilOperationKeep,
+					},
+					StencilBack: hal.StencilFaceState{
+						Compare: gputypes.CompareFunctionAlways,
+						FailOp:  hal.StencilOperationKeep,
+						PassOp:  hal.StencilOperationKeep,
+					},
+				},
+				Multisample: gputypes.MultisampleState{Count: 1},
+			}
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if err != nil {
+				t.Fatalf("expected nil error for depth-only format %s with stencil IGNORE, got: %v", f, err)
+			}
+		})
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_Stencil8_NoDepthOps(t *testing.T) {
+	// Stencil8 with depth disabled (compare=Always, write=false) -> should pass.
+	desc := &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+		},
+		DepthStencil: &hal.DepthStencilState{
+			Format:            gputypes.TextureFormatStencil8,
+			DepthWriteEnabled: false,
+			DepthCompare:      gputypes.CompareFunctionAlways, // depth disabled
+			StencilFront: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionNotEqual,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationReplace,
+			},
+			StencilBack: hal.StencilFaceState{
+				Compare: gputypes.CompareFunctionAlways,
+				FailOp:  hal.StencilOperationKeep,
+				PassOp:  hal.StencilOperationKeep,
+			},
+			StencilReadMask:  0xFF,
+			StencilWriteMask: 0xFF,
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+	err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+	if err != nil {
+		t.Fatalf("expected nil error for Stencil8 with depth disabled, got: %v", err)
+	}
+}
+
+// =============================================================================
+// MRT (Multiple Render Targets) Validation Tests
+// =============================================================================
+
+// testTexture creates a core.Texture with the given parameters for MRT tests.
+// The Texture has no HAL handle but carries format, size, and sampleCount metadata
+// needed for render pass validation.
+func testTexture(format gputypes.TextureFormat, width, height, sampleCount uint32) *Texture {
+	return &Texture{
+		format:        format,
+		dimension:     gputypes.TextureDimension2D,
+		usage:         gputypes.TextureUsageRenderAttachment,
+		size:          gputypes.Extent3D{Width: width, Height: height, DepthOrArrayLayers: 1},
+		mipLevelCount: 1,
+		sampleCount:   sampleCount,
+	}
+}
+
+// testView creates a TextureView backed by the given Texture.
+func testView(tex *Texture) *TextureView {
+	return &TextureView{Parent: tex}
+}
+
+func TestValidateRenderPassDescriptor_Valid_SingleColorAttachment(t *testing.T) {
+	tex := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 1)
+	desc := &RenderPassDescriptor{
+		Label: "SingleColor",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+
+	ctx, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if ctx == nil {
+		t.Fatal("expected non-nil context")
+	}
+	if len(ctx.ColorFormats) != 1 {
+		t.Errorf("expected 1 color format, got %d", len(ctx.ColorFormats))
+	}
+	if ctx.ColorFormats[0] != gputypes.TextureFormatRGBA8Unorm {
+		t.Errorf("expected RGBA8Unorm, got %v", ctx.ColorFormats[0])
+	}
+	if ctx.SampleCount != 1 {
+		t.Errorf("expected sample count 1, got %d", ctx.SampleCount)
+	}
+}
+
+func TestValidateRenderPassDescriptor_Valid_MultipleSameDimensions(t *testing.T) {
+	tex1 := testTexture(gputypes.TextureFormatRGBA8Unorm, 1024, 768, 1)
+	tex2 := testTexture(gputypes.TextureFormatRGBA16Float, 1024, 768, 1)
+	tex3 := testTexture(gputypes.TextureFormatR8Unorm, 1024, 768, 1)
+	desc := &RenderPassDescriptor{
+		Label: "TripleMRT",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex1), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: testView(tex2), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: testView(tex3), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+
+	ctx, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error for valid MRT, got: %v", err)
+	}
+	if len(ctx.ColorFormats) != 3 {
+		t.Errorf("expected 3 color formats, got %d", len(ctx.ColorFormats))
+	}
+}
+
+func TestValidateRenderPassDescriptor_Valid_MSAA(t *testing.T) {
+	tex1 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 4)
+	tex2 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 4)
+	desc := &RenderPassDescriptor{
+		Label: "MSAA-MRT",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex1), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: testView(tex2), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+
+	ctx, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error for valid MSAA MRT, got: %v", err)
+	}
+	if ctx.SampleCount != 4 {
+		t.Errorf("expected sample count 4, got %d", ctx.SampleCount)
+	}
+}
+
+func TestValidateRenderPassDescriptor_TooManyColorAttachments(t *testing.T) {
+	limits := gputypes.DefaultLimits()
+
+	// Create one more attachment than allowed.
+	attachments := make([]RenderPassColorAttachment, limits.MaxColorAttachments+1)
+	for i := range attachments {
+		tex := testTexture(gputypes.TextureFormatRGBA8Unorm, 100, 100, 1)
+		attachments[i] = RenderPassColorAttachment{
+			View:    testView(tex),
+			LoadOp:  gputypes.LoadOpClear,
+			StoreOp: gputypes.StoreOpStore,
+		}
+	}
+
+	desc := &RenderPassDescriptor{
+		Label:            "TooMany",
+		ColorAttachments: attachments,
+	}
+
+	_, err := ValidateRenderPassDescriptor(desc, limits)
+	if err == nil {
+		t.Fatal("expected error for too many color attachments")
+	}
+
+	var rpve *RenderPassValidationError
+	if !errors.As(err, &rpve) {
+		t.Fatalf("expected RenderPassValidationError, got %T: %v", err, err)
+	}
+	if rpve.Kind != RenderPassErrorTooManyColorAttachments {
+		t.Errorf("expected TooManyColorAttachments, got %v", rpve.Kind)
+	}
+	if rpve.Given != limits.MaxColorAttachments+1 {
+		t.Errorf("expected Given=%d, got %d", limits.MaxColorAttachments+1, rpve.Given)
+	}
+	if rpve.Limit != limits.MaxColorAttachments {
+		t.Errorf("expected Limit=%d, got %d", limits.MaxColorAttachments, rpve.Limit)
+	}
+}
+
+func TestValidateRenderPassDescriptor_SampleCountMismatch(t *testing.T) {
+	tex1 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 4)
+	tex2 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 1) // mismatch
+	desc := &RenderPassDescriptor{
+		Label: "SampleMismatch",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex1), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: testView(tex2), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+
+	_, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for sample count mismatch")
+	}
+
+	var rpve *RenderPassValidationError
+	if !errors.As(err, &rpve) {
+		t.Fatalf("expected RenderPassValidationError, got %T: %v", err, err)
+	}
+	if rpve.Kind != RenderPassErrorSampleCountMismatch {
+		t.Errorf("expected SampleCountMismatch, got %v", rpve.Kind)
+	}
+	if rpve.ExpectedSamples != 4 {
+		t.Errorf("expected ExpectedSamples=4, got %d", rpve.ExpectedSamples)
+	}
+	if rpve.ActualSamples != 1 {
+		t.Errorf("expected ActualSamples=1, got %d", rpve.ActualSamples)
+	}
+	if rpve.AttachmentIndex != 1 {
+		t.Errorf("expected AttachmentIndex=1, got %d", rpve.AttachmentIndex)
+	}
+	if rpve.ReferenceIndex != 0 {
+		t.Errorf("expected ReferenceIndex=0, got %d", rpve.ReferenceIndex)
+	}
+}
+
+func TestValidateRenderPassDescriptor_DimensionMismatch(t *testing.T) {
+	tex1 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 1)
+	tex2 := testTexture(gputypes.TextureFormatRGBA8Unorm, 1024, 768, 1) // mismatch
+	desc := &RenderPassDescriptor{
+		Label: "DimensionMismatch",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex1), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: testView(tex2), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+
+	_, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for dimension mismatch")
+	}
+
+	var rpve *RenderPassValidationError
+	if !errors.As(err, &rpve) {
+		t.Fatalf("expected RenderPassValidationError, got %T: %v", err, err)
+	}
+	if rpve.Kind != RenderPassErrorDimensionMismatch {
+		t.Errorf("expected DimensionMismatch, got %v", rpve.Kind)
+	}
+	if rpve.ExpectedWidth != 800 || rpve.ExpectedHeight != 600 {
+		t.Errorf("expected dimensions 800x600, got %dx%d", rpve.ExpectedWidth, rpve.ExpectedHeight)
+	}
+	if rpve.ActualWidth != 1024 || rpve.ActualHeight != 768 {
+		t.Errorf("expected actual 1024x768, got %dx%d", rpve.ActualWidth, rpve.ActualHeight)
+	}
+	if rpve.AttachmentIndex != 1 {
+		t.Errorf("expected AttachmentIndex=1, got %d", rpve.AttachmentIndex)
+	}
+}
+
+func TestValidateRenderPassDescriptor_WidthOnlyMismatch(t *testing.T) {
+	tex1 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 1)
+	tex2 := testTexture(gputypes.TextureFormatRGBA8Unorm, 900, 600, 1) // width differs
+	desc := &RenderPassDescriptor{
+		Label: "WidthMismatch",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex1), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: testView(tex2), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+
+	_, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for width mismatch")
+	}
+	var rpve *RenderPassValidationError
+	if !errors.As(err, &rpve) {
+		t.Fatalf("expected RenderPassValidationError, got %T", err)
+	}
+	if rpve.Kind != RenderPassErrorDimensionMismatch {
+		t.Errorf("expected DimensionMismatch, got %v", rpve.Kind)
+	}
+}
+
+func TestValidateRenderPassDescriptor_HeightOnlyMismatch(t *testing.T) {
+	tex1 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 1)
+	tex2 := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 700, 1) // height differs
+	desc := &RenderPassDescriptor{
+		Label: "HeightMismatch",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex1), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: testView(tex2), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+	}
+
+	_, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for height mismatch")
+	}
+	var rpve *RenderPassValidationError
+	if !errors.As(err, &rpve) {
+		t.Fatalf("expected RenderPassValidationError, got %T", err)
+	}
+	if rpve.Kind != RenderPassErrorDimensionMismatch {
+		t.Errorf("expected DimensionMismatch, got %v", rpve.Kind)
+	}
+}
+
+func TestValidateRenderPassDescriptor_NilView_Skipped(t *testing.T) {
+	tex := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 1)
+	desc := &RenderPassDescriptor{
+		Label: "NilViewSlot",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(tex), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+			{View: nil, LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore}, // nil = sparse slot
+		},
+	}
+
+	ctx, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error (nil views are valid sparse slots), got: %v", err)
+	}
+	if len(ctx.ColorFormats) != 2 {
+		t.Errorf("expected 2 color format slots, got %d", len(ctx.ColorFormats))
+	}
+	if ctx.ColorFormats[1] != gputypes.TextureFormatUndefined {
+		t.Errorf("expected Undefined for nil slot, got %v", ctx.ColorFormats[1])
+	}
+}
+
+func TestValidateRenderPassDescriptor_DepthStencil_SampleCountMismatch(t *testing.T) {
+	colorTex := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 4)
+	dsTex := testTexture(gputypes.TextureFormatDepth24PlusStencil8, 800, 600, 1) // mismatch
+	desc := &RenderPassDescriptor{
+		Label: "DS-SampleMismatch",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(colorTex), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+		DepthStencilAttachment: &RenderPassDepthStencilAttachment{
+			View: testView(dsTex),
+		},
+	}
+
+	_, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for depth/stencil sample count mismatch")
+	}
+	var rpve *RenderPassValidationError
+	if !errors.As(err, &rpve) {
+		t.Fatalf("expected RenderPassValidationError, got %T", err)
+	}
+	if rpve.Kind != RenderPassErrorSampleCountMismatch {
+		t.Errorf("expected SampleCountMismatch, got %v", rpve.Kind)
+	}
+	if rpve.AttachmentIndex != -1 {
+		t.Errorf("expected AttachmentIndex=-1 (depth/stencil), got %d", rpve.AttachmentIndex)
+	}
+}
+
+func TestValidateRenderPassDescriptor_DepthStencil_DimensionMismatch(t *testing.T) {
+	colorTex := testTexture(gputypes.TextureFormatRGBA8Unorm, 800, 600, 1)
+	dsTex := testTexture(gputypes.TextureFormatDepth24PlusStencil8, 1024, 768, 1) // mismatch
+	desc := &RenderPassDescriptor{
+		Label: "DS-DimensionMismatch",
+		ColorAttachments: []RenderPassColorAttachment{
+			{View: testView(colorTex), LoadOp: gputypes.LoadOpClear, StoreOp: gputypes.StoreOpStore},
+		},
+		DepthStencilAttachment: &RenderPassDepthStencilAttachment{
+			View: testView(dsTex),
+		},
+	}
+
+	_, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for depth/stencil dimension mismatch")
+	}
+	var rpve *RenderPassValidationError
+	if !errors.As(err, &rpve) {
+		t.Fatalf("expected RenderPassValidationError, got %T", err)
+	}
+	if rpve.Kind != RenderPassErrorDimensionMismatch {
+		t.Errorf("expected DimensionMismatch, got %v", rpve.Kind)
+	}
+}
+
+func TestValidateRenderPassDescriptor_EmptyAttachments(t *testing.T) {
+	desc := &RenderPassDescriptor{
+		Label:            "Empty",
+		ColorAttachments: nil,
+	}
+
+	ctx, err := ValidateRenderPassDescriptor(desc, gputypes.DefaultLimits())
+	if err != nil {
+		t.Fatalf("expected nil error for empty attachments, got: %v", err)
+	}
+	if ctx.SampleCount != 1 {
+		t.Errorf("expected default sample count 1, got %d", ctx.SampleCount)
+	}
+}
+
+func TestValidateRenderPassDescriptor_NilDescriptor(t *testing.T) {
+	_, err := ValidateRenderPassDescriptor(nil, gputypes.DefaultLimits())
+	if err == nil {
+		t.Fatal("expected error for nil descriptor")
+	}
+}
+
+// =============================================================================
+// RenderPassContext.CheckCompatible Tests (draw-time pipeline validation)
+// =============================================================================
+
+func TestRenderPassContext_CheckCompatible_Valid(t *testing.T) {
+	passCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA16Float},
+		SampleCount:  4,
+	}
+	pipelineCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA16Float},
+		SampleCount:  4,
+	}
+
+	err := passCtx.CheckCompatible(pipelineCtx, "TestPipeline")
+	if err != nil {
+		t.Fatalf("expected nil error for compatible contexts, got: %v", err)
+	}
+}
+
+func TestRenderPassContext_CheckCompatible_ColorTargetCountMismatch(t *testing.T) {
+	passCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA8Unorm},
+		SampleCount:  1,
+	}
+	pipelineCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm}, // 1 vs 2
+		SampleCount:  1,
+	}
+
+	err := passCtx.CheckCompatible(pipelineCtx, "MismatchPipeline")
+	if err == nil {
+		t.Fatal("expected error for color target count mismatch")
+	}
+
+	var rpce *RenderPassCompatibilityError
+	if !errors.As(err, &rpce) {
+		t.Fatalf("expected RenderPassCompatibilityError, got %T: %v", err, err)
+	}
+	if rpce.Kind != RenderPassCompatibilityErrorColorTargetCount {
+		t.Errorf("expected ColorTargetCount, got %v", rpce.Kind)
+	}
+	if rpce.PipelineTargets != 1 {
+		t.Errorf("expected PipelineTargets=1, got %d", rpce.PipelineTargets)
+	}
+	if rpce.PassAttachments != 2 {
+		t.Errorf("expected PassAttachments=2, got %d", rpce.PassAttachments)
+	}
+}
+
+func TestRenderPassContext_CheckCompatible_ColorTargetFormatMismatch(t *testing.T) {
+	passCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm},
+		SampleCount:  1,
+	}
+	pipelineCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatBGRA8Unorm}, // format mismatch
+		SampleCount:  1,
+	}
+
+	err := passCtx.CheckCompatible(pipelineCtx, "FormatPipeline")
+	if err == nil {
+		t.Fatal("expected error for color target format mismatch")
+	}
+
+	var rpce *RenderPassCompatibilityError
+	if !errors.As(err, &rpce) {
+		t.Fatalf("expected RenderPassCompatibilityError, got %T: %v", err, err)
+	}
+	if rpce.Kind != RenderPassCompatibilityErrorColorTargetFormat {
+		t.Errorf("expected ColorTargetFormat, got %v", rpce.Kind)
+	}
+	if rpce.TargetIndex != 0 {
+		t.Errorf("expected TargetIndex=0, got %d", rpce.TargetIndex)
+	}
+	if !strings.Contains(rpce.Error(), "BGRA8Unorm") {
+		t.Errorf("expected error to mention BGRA8Unorm, got: %s", rpce.Error())
+	}
+}
+
+func TestRenderPassContext_CheckCompatible_SampleCountMismatch(t *testing.T) {
+	passCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm},
+		SampleCount:  4,
+	}
+	pipelineCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm},
+		SampleCount:  1, // mismatch
+	}
+
+	err := passCtx.CheckCompatible(pipelineCtx, "SamplePipeline")
+	if err == nil {
+		t.Fatal("expected error for sample count mismatch")
+	}
+
+	var rpce *RenderPassCompatibilityError
+	if !errors.As(err, &rpce) {
+		t.Fatalf("expected RenderPassCompatibilityError, got %T: %v", err, err)
+	}
+	if rpce.Kind != RenderPassCompatibilityErrorSampleCount {
+		t.Errorf("expected SampleCount, got %v", rpce.Kind)
+	}
+	if rpce.PipelineSamples != 1 {
+		t.Errorf("expected PipelineSamples=1, got %d", rpce.PipelineSamples)
+	}
+	if rpce.PassSamples != 4 {
+		t.Errorf("expected PassSamples=4, got %d", rpce.PassSamples)
+	}
+}
+
+func TestRenderPassContext_CheckCompatible_SecondFormatMismatch(t *testing.T) {
+	passCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatRGBA16Float},
+		SampleCount:  1,
+	}
+	pipelineCtx := &RenderPassContext{
+		ColorFormats: []gputypes.TextureFormat{gputypes.TextureFormatRGBA8Unorm, gputypes.TextureFormatR8Unorm}, // second mismatch
+		SampleCount:  1,
+	}
+
+	err := passCtx.CheckCompatible(pipelineCtx, "SecondFormatPipeline")
+	if err == nil {
+		t.Fatal("expected error for second format mismatch")
+	}
+
+	var rpce *RenderPassCompatibilityError
+	if !errors.As(err, &rpce) {
+		t.Fatalf("expected RenderPassCompatibilityError, got %T", err)
+	}
+	if rpce.TargetIndex != 1 {
+		t.Errorf("expected TargetIndex=1, got %d", rpce.TargetIndex)
+	}
+}
+
+// =============================================================================
+// Error String Tests for MRT errors
+// =============================================================================
+
+func TestRenderPassValidationError_ErrorStrings(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *RenderPassValidationError
+		contains string
+	}{
+		{
+			name: "TooManyColorAttachments",
+			err: &RenderPassValidationError{
+				Kind:  RenderPassErrorTooManyColorAttachments,
+				Label: "MyPass",
+				Given: 10,
+				Limit: 8,
+			},
+			contains: "color attachment count 10 exceeds device limit",
+		},
+		{
+			name: "SampleCountMismatch",
+			err: &RenderPassValidationError{
+				Kind:            RenderPassErrorSampleCountMismatch,
+				Label:           "MyPass",
+				AttachmentIndex: 1,
+				ExpectedSamples: 4,
+				ActualSamples:   1,
+				ReferenceIndex:  0,
+			},
+			contains: "sample count",
+		},
+		{
+			name: "DimensionMismatch",
+			err: &RenderPassValidationError{
+				Kind:            RenderPassErrorDimensionMismatch,
+				Label:           "MyPass",
+				AttachmentIndex: 2,
+				ExpectedWidth:   800,
+				ExpectedHeight:  600,
+				ActualWidth:     1024,
+				ActualHeight:    768,
+				ReferenceIndex:  0,
+			},
+			contains: "the color attachment at index 0's texture view has extent 800x600 but is followed by the color attachment at index 2's texture view which has 1024x768",
+		},
+		{
+			// The depth/stencil attachment (index -1) is named as Rust
+			// wgpu-core's AttachmentErrorLocation::Depth, not "[-1]".
+			name: "SampleCountMismatch depth",
+			err: &RenderPassValidationError{
+				Kind: RenderPassErrorSampleCountMismatch, Label: "MyPass",
+				AttachmentIndex: -1, ExpectedSamples: 4, ActualSamples: 1,
+			},
+			contains: "attachments have differing sample counts: the color attachment at index 0's texture view has count 4 but is followed by the depth attachment's texture view which has count 1",
+		},
+		{
+			name: "DimensionMismatch depth",
+			err: &RenderPassValidationError{
+				Kind: RenderPassErrorDimensionMismatch, Label: "MyPass", AttachmentIndex: -1,
+				ExpectedWidth: 16, ExpectedHeight: 16, ActualWidth: 8, ActualHeight: 8,
+			},
+			contains: "attachments have differing sizes: the color attachment at index 0's texture view has extent 16x16 but is followed by the depth attachment's texture view which has 8x8",
+		},
+		{
+			name: "DimensionMismatch resolve target",
+			err: &RenderPassValidationError{
+				Kind: RenderPassErrorDimensionMismatch, Label: "MyPass", AttachmentIndex: 1,
+				ResolveTarget: true, ReferenceIndex: 1,
+				ExpectedWidth: 16, ExpectedHeight: 16, ActualWidth: 8, ActualHeight: 8,
+			},
+			contains: "the color attachment at index 1's texture view has extent 16x16 but is followed by the color attachment at index 1's resolve texture view which has 8x8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("error message %q does not contain %q", msg, tt.contains)
+			}
+			if strings.Contains(msg, "[-1]") {
+				t.Errorf("error message %q names the depth attachment [-1]", msg)
+			}
+		})
+	}
+}
+
+func TestRenderPassCompatibilityError_ErrorStrings(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *RenderPassCompatibilityError
+		contains string
+	}{
+		{
+			name: "ColorTargetCount",
+			err: &RenderPassCompatibilityError{
+				Kind:            RenderPassCompatibilityErrorColorTargetCount,
+				PipelineLabel:   "MyPipeline",
+				PipelineTargets: 1,
+				PassAttachments: 2,
+			},
+			contains: "1 fragment targets",
+		},
+		{
+			name: "ColorTargetFormat",
+			err: &RenderPassCompatibilityError{
+				Kind:           RenderPassCompatibilityErrorColorTargetFormat,
+				PipelineLabel:  "MyPipeline",
+				TargetIndex:    0,
+				PipelineFormat: "RGBA8Unorm",
+				PassFormat:     "BGRA8Unorm",
+			},
+			contains: "RGBA8Unorm",
+		},
+		{
+			name: "SampleCount",
+			err: &RenderPassCompatibilityError{
+				Kind:            RenderPassCompatibilityErrorSampleCount,
+				PipelineLabel:   "MyPipeline",
+				PipelineSamples: 1,
+				PassSamples:     4,
+			},
+			contains: "sample count",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if !strings.Contains(msg, tt.contains) {
+				t.Errorf("error message %q does not contain %q", msg, tt.contains)
+			}
+		})
+	}
+}
+
+func TestIsRenderPassValidationError(t *testing.T) {
+	err := &RenderPassValidationError{Kind: RenderPassErrorTooManyColorAttachments}
+	if !IsRenderPassValidationError(err) {
+		t.Error("expected IsRenderPassValidationError to return true")
+	}
+	if IsRenderPassValidationError(errors.New("not a render pass error")) {
+		t.Error("expected IsRenderPassValidationError to return false for unrelated error")
+	}
+}
+
+func TestIsRenderPassCompatibilityError(t *testing.T) {
+	err := &RenderPassCompatibilityError{Kind: RenderPassCompatibilityErrorColorTargetCount}
+	if !IsRenderPassCompatibilityError(err) {
+		t.Error("expected IsRenderPassCompatibilityError to return true")
+	}
+	if IsRenderPassCompatibilityError(errors.New("not a compatibility error")) {
+		t.Error("expected IsRenderPassCompatibilityError to return false for unrelated error")
+	}
+}
+
+// --- RP10: vertex buffer layout validation ---
+
+func vertexStrideDesc(buffers ...gputypes.VertexBufferLayout) *hal.RenderPipelineDescriptor {
+	return &hal.RenderPipelineDescriptor{
+		Label: "test",
+		Vertex: hal.VertexState{
+			Module:     mockShaderModule{},
+			EntryPoint: "vs_main",
+			Buffers:    buffers,
+		},
+		Fragment: &hal.FragmentState{
+			Module:     mockShaderModule{},
+			EntryPoint: "fs_main",
+			Targets:    []gputypes.ColorTargetState{{}},
+		},
+		Multisample: gputypes.MultisampleState{Count: 1},
+	}
+}
+
+func TestValidateRenderPipelineDescriptor_VertexBuffers(t *testing.T) {
+	float32x4 := func(offset uint64) gputypes.VertexAttribute {
+		return gputypes.VertexAttribute{Format: gputypes.VertexFormatFloat32x4, Offset: offset}
+	}
+	layout := func(stride uint64, attrs ...gputypes.VertexAttribute) gputypes.VertexBufferLayout {
+		return gputypes.VertexBufferLayout{ArrayStride: stride, StepMode: gputypes.VertexStepModeVertex, Attributes: attrs}
+	}
+	// at moves an attribute to a shader location.
+	at := func(attr gputypes.VertexAttribute, location uint32) gputypes.VertexAttribute {
+		attr.ShaderLocation = location
+		return attr
+	}
+	attr := func(format gputypes.VertexFormat, offset uint64, location uint32) gputypes.VertexAttribute {
+		return gputypes.VertexAttribute{Format: format, Offset: offset, ShaderLocation: location}
+	}
+	// buffersWithOneAttribute returns n buffers of one Float32 attribute each,
+	// at locations 0..n-1.
+	buffersWithOneAttribute := func(n int) []gputypes.VertexBufferLayout {
+		bufs := make([]gputypes.VertexBufferLayout, n)
+		for i := range bufs {
+			bufs[i] = layout(4, attr(gputypes.VertexFormatFloat32, 0, uint32(i)))
+		}
+		return bufs
+	}
+	// attributesInOneBuffer returns one buffer of n Float32 attributes at
+	// locations 0..n-1.
+	attributesInOneBuffer := func(n int) []gputypes.VertexBufferLayout {
+		attrs := make([]gputypes.VertexAttribute, n)
+		for i := range attrs {
+			attrs[i] = attr(gputypes.VertexFormatFloat32, uint64(4*i), uint32(i))
+		}
+		return []gputypes.VertexBufferLayout{layout(uint64(4*n), attrs...)}
+	}
+
+	tests := []struct {
+		name    string
+		buffers []gputypes.VertexBufferLayout
+		limits  func(*gputypes.Limits)
+		// wantKind is checked only when wantErr is true.
+		wantErr      bool
+		wantKind     CreateRenderPipelineErrorKind
+		wantBuffer   uint32
+		wantStride   uint64
+		wantAttrIdx  uint32
+		wantLocation uint32
+	}{
+		// Rust wgpu-core validate_vertex_buffers (create_render_pipeline,
+		// wgpu-core/src/device/resource.rs) and WebGPU GPUVertexBufferLayout.
+		{name: "maxVertexBuffers buffers", buffers: buffersWithOneAttribute(8)},
+		{
+			name:     "more buffers than maxVertexBuffers",
+			buffers:  buffersWithOneAttribute(9),
+			wantErr:  true,
+			wantKind: CreateRenderPipelineErrorTooManyVertexBuffers,
+		},
+		{name: "unorm8x2 at offset 2", buffers: []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatUnorm8x2, 2, 0))}},
+		{
+			name:        "unorm8x2 at offset 1 is misaligned",
+			buffers:     []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatUnorm8x2, 1, 0))},
+			wantErr:     true,
+			wantKind:    CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:  4,
+			wantAttrIdx: 0,
+		},
+		{
+			name:         "float32 at offset 2 is misaligned",
+			buffers:      []gputypes.VertexBufferLayout{layout(8, attr(gputypes.VertexFormatFloat32, 0, 0), attr(gputypes.VertexFormatFloat32, 2, 3))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:   8,
+			wantAttrIdx:  1,
+			wantLocation: 3,
+		},
+		{
+			name:         "unorm16x2 at offset 1 is misaligned",
+			buffers:      []gputypes.VertexBufferLayout{layout(8, attr(gputypes.VertexFormatUnorm16x2, 1, 0))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:   8,
+			wantAttrIdx:  0,
+			wantLocation: 0,
+		},
+		{
+			// Reachable only on an adapter whose stride limit is above 2^28.
+			name:         "offset 2^28 is too large",
+			buffers:      []gputypes.VertexBufferLayout{layout(0x10000010, attr(gputypes.VertexFormatFloat32, 0x10000000, 1))},
+			limits:       func(l *gputypes.Limits) { l.MaxVertexBufferArrayStride = 0x20000000 },
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeInvalidOffset,
+			wantStride:   0x10000010,
+			wantLocation: 1,
+		},
+		{name: "location maxVertexAttributes-1", buffers: []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatFloat32, 0, 15))}},
+		{
+			name:         "location maxVertexAttributes",
+			buffers:      []gputypes.VertexBufferLayout{layout(4, attr(gputypes.VertexFormatFloat32, 0, 16))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeLocationTooLarge,
+			wantStride:   4,
+			wantLocation: 16,
+		},
+		{
+			name:         "location used twice in one buffer",
+			buffers:      []gputypes.VertexBufferLayout{layout(8, attr(gputypes.VertexFormatFloat32, 0, 2), attr(gputypes.VertexFormatFloat32, 4, 2))},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorShaderLocationClash,
+			wantStride:   8,
+			wantAttrIdx:  1,
+			wantLocation: 2,
+		},
+		{
+			name: "location used twice across buffers",
+			buffers: []gputypes.VertexBufferLayout{
+				layout(4, attr(gputypes.VertexFormatFloat32, 0, 5)),
+				layout(4, attr(gputypes.VertexFormatFloat32, 0, 5)),
+			},
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorShaderLocationClash,
+			wantBuffer:   1,
+			wantStride:   4,
+			wantLocation: 5,
+		},
+		{name: "maxVertexAttributes attributes", buffers: attributesInOneBuffer(16)},
+		{
+			// A 17th attribute needs a location of 16 or a repeated one:
+			// unique locations below maxVertexAttributes bound the total.
+			name:         "more attributes than maxVertexAttributes",
+			buffers:      attributesInOneBuffer(17),
+			wantErr:      true,
+			wantKind:     CreateRenderPipelineErrorVertexAttributeLocationTooLarge,
+			wantStride:   68,
+			wantAttrIdx:  16,
+			wantLocation: 16,
+		},
+		{name: "no vertex buffers"},
+		{name: "stride 4", buffers: []gputypes.VertexBufferLayout{layout(4, gputypes.VertexAttribute{Format: gputypes.VertexFormatFloat32})}},
+		{name: "stride 2048 (default limit)", buffers: []gputypes.VertexBufferLayout{layout(2048, float32x4(0))}},
+		{name: "attribute exactly fills the stride", buffers: []gputypes.VertexBufferLayout{layout(32, float32x4(0), at(float32x4(16), 1))}},
+		{
+			name:    "stride above an unset limit is not checked",
+			buffers: []gputypes.VertexBufferLayout{layout(4096, float32x4(0))},
+			limits:  func(l *gputypes.Limits) { l.MaxVertexBufferArrayStride = 0 },
+		},
+		{name: "stride 0 (broadcast)", buffers: []gputypes.VertexBufferLayout{layout(0, float32x4(0))}},
+		{
+			name:       "stride 30 is misaligned",
+			buffers:    []gputypes.VertexBufferLayout{layout(32, float32x4(0)), layout(30, float32x4(0))},
+			wantErr:    true,
+			wantKind:   CreateRenderPipelineErrorVertexStrideMisaligned,
+			wantBuffer: 1,
+			wantStride: 30,
+		},
+		{
+			name:       "stride 2052 exceeds the limit",
+			buffers:    []gputypes.VertexBufferLayout{layout(2052, float32x4(0))},
+			wantErr:    true,
+			wantKind:   CreateRenderPipelineErrorVertexStrideTooLarge,
+			wantStride: 2052,
+		},
+		{
+			name:        "attribute runs past the stride",
+			buffers:     []gputypes.VertexBufferLayout{layout(28, float32x4(0), float32x4(16))},
+			wantErr:     true,
+			wantKind:    CreateRenderPipelineErrorVertexAttributeOutOfStride,
+			wantStride:  28,
+			wantAttrIdx: 1,
+		},
+		{
+			name:        "stride 0 attribute is bounded by the limit",
+			buffers:     []gputypes.VertexBufferLayout{layout(0, float32x4(2040))},
+			wantErr:     true,
+			wantKind:    CreateRenderPipelineErrorVertexAttributeOutOfStride,
+			wantStride:  0,
+			wantAttrIdx: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			limits := gputypes.DefaultLimits()
+			if tt.limits != nil {
+				tt.limits(&limits)
+			}
+			err := ValidateRenderPipelineDescriptor(vertexStrideDesc(tt.buffers...), limits, gputypes.Features(0))
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("expected nil error, got: %v", err)
+				}
+				return
+			}
+			var crpe *CreateRenderPipelineError
+			if !errors.As(err, &crpe) {
+				t.Fatalf("expected CreateRenderPipelineError, got %T (%v)", err, err)
+			}
+			if crpe.Kind != tt.wantKind {
+				t.Fatalf("expected kind %v, got %v (%v)", tt.wantKind, crpe.Kind, err)
+			}
+			if crpe.BufferIndex != tt.wantBuffer {
+				t.Errorf("BufferIndex = %d, want %d", crpe.BufferIndex, tt.wantBuffer)
+			}
+			if crpe.ArrayStride != tt.wantStride {
+				t.Errorf("ArrayStride = %d, want %d", crpe.ArrayStride, tt.wantStride)
+			}
+			if crpe.AttributeIndex != tt.wantAttrIdx {
+				t.Errorf("AttributeIndex = %d, want %d", crpe.AttributeIndex, tt.wantAttrIdx)
+			}
+			if crpe.ShaderLocation != tt.wantLocation {
+				t.Errorf("ShaderLocation = %d, want %d", crpe.ShaderLocation, tt.wantLocation)
+			}
+			if crpe.Error() == "" {
+				t.Error("Error message should not be empty")
+			}
+		})
+	}
+}
+
+// TestValidateRenderPipelineDescriptor_VertexFormat checks that a vertex
+// attribute format must be one gputypes defines. WebGPU's IDL rejects an
+// unknown GPUVertexFormat before the algorithm runs (a TypeError, not a
+// validation error); a Go caller can build one, and every other vertex check
+// treats it as a no-op because its size is 0, so the pipeline would reach the
+// backend with a format no backend maps (hal/gles/command.go vertexFormatToGL
+// falls back to Float32x4). Dawn validates it as a creation error
+// (dawn/src/dawn/native/RenderPipeline.cpp:118 ValidateVertexFormat).
+func TestValidateRenderPipelineDescriptor_VertexFormat(t *testing.T) {
+	layout := func(format gputypes.VertexFormat) gputypes.VertexBufferLayout {
+		return gputypes.VertexBufferLayout{
+			ArrayStride: 16,
+			StepMode:    gputypes.VertexStepModeVertex,
+			Attributes: []gputypes.VertexAttribute{{
+				Format:         format,
+				ShaderLocation: 1,
+			}},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		format  gputypes.VertexFormat
+		wantErr bool
+	}{
+		{name: "first defined format", format: gputypes.VertexFormatUint8x2},
+		{name: "last defined format", format: gputypes.VertexFormatUnorm1010102},
+		{name: "undefined", format: gputypes.VertexFormatUndefined, wantErr: true},
+		{name: "first value past the defined set", format: gputypes.VertexFormat(0x20), wantErr: true},
+		{name: "arbitrary unknown value", format: gputypes.VertexFormat(0xDEADBEEF), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			desc := vertexStrideDesc(layout(tt.format))
+			err := ValidateRenderPipelineDescriptor(desc, gputypes.DefaultLimits(), gputypes.Features(0))
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("expected nil error, got: %v", err)
+				}
+				return
+			}
+			var crpe *CreateRenderPipelineError
+			if !errors.As(err, &crpe) {
+				t.Fatalf("expected CreateRenderPipelineError, got %T (%v)", err, err)
+			}
+			if crpe.Kind != CreateRenderPipelineErrorInvalidVertexFormat {
+				t.Fatalf("expected kind InvalidVertexFormat, got %v (%v)", crpe.Kind, err)
+			}
+			if crpe.AttributeIndex != 0 || crpe.ShaderLocation != 1 {
+				t.Errorf("AttributeIndex = %d, ShaderLocation = %d, want 0 and 1", crpe.AttributeIndex, crpe.ShaderLocation)
+			}
+			if !containsString(crpe.Error(), "not a valid GPUVertexFormat") {
+				t.Errorf("message %q does not say the format is invalid", crpe.Error())
+			}
+		})
+	}
+}
+
+func TestCreateRenderPipelineError_VertexBufferMessages(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CreateRenderPipelineError
+		contains string
+	}{
+		{
+			name:     "misaligned stride",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideMisaligned, Label: "test", BufferIndex: 1, ArrayStride: 30},
+			contains: "arrayStride 30 is not a multiple of 4",
+		},
+		{
+			name:     "stride too large",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideTooLarge, Label: "test", ArrayStride: 2052, MaxArrayStride: 2048},
+			contains: "exceeds maxVertexBufferArrayStride 2048",
+		},
+		{
+			name:     "attribute out of stride",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeOutOfStride, Label: "test", ArrayStride: 28, AttributeIndex: 1, AttributeOffset: 16, AttributeFormat: "Float32x4"},
+			contains: "does not fit in arrayStride 28",
+		},
+		{
+			name:     "attribute out of limit at stride 0",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeOutOfStride, Label: "test", MaxArrayStride: 2048, AttributeOffset: 2040, AttributeFormat: "Float32x4"},
+			contains: "exceeds maxVertexBufferArrayStride 2048",
+		},
+		{
+			name:     "stride zero",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexStrideZero, Label: "test"},
+			contains: "broadcast) is not supported on native backends",
+		},
+		{
+			name:     "too many vertex buffers",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorTooManyVertexBuffers, Label: "test", Given: 9, Limit: 8},
+			contains: "9 vertex buffers exceed maxVertexBuffers 8",
+		},
+		{
+			name:     "misaligned attribute offset",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeInvalidOffset, Label: "test", ShaderLocation: 3, AttributeOffset: 2, AttributeFormat: "Float32"},
+			contains: "offset 2 is not a multiple of min(4, size of Float32)",
+		},
+		{
+			name:     "attribute offset too large",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeInvalidOffset, Label: "test", AttributeOffset: 0x10000000, AttributeFormat: "Float32"},
+			contains: "offset 268435456 is not below 2^28",
+		},
+		{
+			name:     "location too large",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorVertexAttributeLocationTooLarge, Label: "test", ShaderLocation: 16, Limit: 16},
+			contains: "shaderLocation 16 is not below maxVertexAttributes 16",
+		},
+		{
+			name:     "location clash",
+			err:      &CreateRenderPipelineError{Kind: CreateRenderPipelineErrorShaderLocationClash, Label: "test", ShaderLocation: 5},
+			contains: "shaderLocation 5 is used by more than one attribute",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if msg := tt.err.Error(); !strings.Contains(msg, tt.contains) {
+				t.Errorf("expected error to contain %q, got %q", tt.contains, msg)
+			}
+		})
+	}
+}

@@ -3,39 +3,26 @@
 package wgpu
 
 import (
-	"fmt"
-
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core"
-	"github.com/gogpu/wgpu/hal"
+	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/device"
+	"github.com/gogpu/wgpu/internal/encoder"
+	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/pendingwrites"
 )
 
-// NewDeviceFromHAL creates a Device wrapping existing HAL device and queue objects.
-// This constructor is used by backends that manage their own HAL lifecycle
-// (e.g., the Rust FFI backend via wgpu-native) and need to expose their
-// HAL objects through the wgpu public API.
+// newDeviceFromHAL is the constructor behind the wgputest factory and the
+// test hooks. The public NewDeviceFromHAL leaves the API in v0.35.0 (ADR-070
+// §15: no internal type in a public signature); a consumer that needs a device
+// around HAL objects asks the backend or the wgputest seam instead.
 //
-// Ownership of halDevice and halQueue is transferred to the returned Device.
-// The caller must not destroy them directly after this call.
-func NewDeviceFromHAL(
-	halDevice hal.Device,
-	halQueue hal.Queue,
-	features gputypes.Features,
-	limits gputypes.Limits,
-	label string,
-) (*Device, error) {
-	if halDevice == nil {
-		return nil, fmt.Errorf("wgpu: halDevice is nil")
-	}
-	if halQueue == nil {
-		return nil, fmt.Errorf("wgpu: halQueue is nil")
-	}
-	return newDeviceFromHAL(halDevice, halQueue, features, limits, label), nil
-}
-
-// newDeviceFromHAL is the constructor behind NewDeviceFromHAL and the
-// wgputest factory (ADR-070 rev 2 §2.4). Callers must pass non-nil HAL
-// objects.
+// It is the root bridge of the S11 Move: the core device, the queue and the
+// pending-write batch are built here, where internal/pendingwrites is a legal
+// import, and the implementation is handed the three objects it owns. Building
+// them inside internal/device would add a device -> pendingwrites edge the
+// golden does not cover (ADR-070 S11 §8.5).
+//
+// Callers must pass non-nil HAL objects.
 func newDeviceFromHAL(
 	halDevice hal.Device,
 	halQueue hal.Queue,
@@ -44,8 +31,6 @@ func newDeviceFromHAL(
 	label string,
 ) *Device {
 	// Create a core.Adapter stub for the core.Device constructor.
-	// The Rust backend doesn't go through the adapter registry, so we
-	// create a minimal adapter that satisfies the core.Device requirements.
 	coreAdapter := &core.Adapter{
 		Features: features,
 		Limits:   limits,
@@ -54,59 +39,15 @@ func newDeviceFromHAL(
 	coreDevice := core.NewDevice(halDevice, coreAdapter, features, limits, label)
 
 	// Single shared encoder pool for both user command encoders and PendingWrites.
-	pool := newEncoderPool(halDevice)
+	pool := encoder.NewPool(halDevice)
 
-	queue := &Queue{
-		hal:       halQueue,
-		halDevice: halDevice,
-		pending:   newPendingWrites(halDevice, halQueue, pool, coreDevice.Tracker()),
-	}
+	q := newQueue(halQueue, pendingwrites.New(halDevice, halQueue, pool, coreDevice.Tracker()))
 
 	coreDevice.SetAssociatedQueue(&core.Queue{Label: label + " Queue"})
 
-	device := &Device{
-		core:           coreDevice,
-		queue:          queue,
-		cmdEncoderPool: pool,
-	}
-	queue.device = device
+	impl := device.New(coreDevice, q.impl, pool)
+	dev := &Device{impl: impl, queue: q}
+	q.impl.SetDevice(impl)
 
-	return device
-}
-
-// NewSurfaceFromHAL creates a Surface wrapping an existing HAL surface.
-// This constructor is used by backends that create surfaces externally
-// (e.g., the Rust FFI backend).
-//
-// Ownership of halSurface is transferred to the returned Surface.
-func NewSurfaceFromHAL(halSurface hal.Surface, label string) *Surface {
-	coreSurface := core.NewSurface(halSurface, label)
-	return &Surface{
-		core: coreSurface,
-	}
-}
-
-// NewTextureFromHAL creates a Texture wrapping an existing HAL texture.
-// Used for backward compatibility and testing.
-func NewTextureFromHAL(halTexture hal.Texture, device *Device, format gputypes.TextureFormat) *Texture {
-	return &Texture{hal: halTexture, device: device, format: format}
-}
-
-// NewTextureViewFromHAL creates a TextureView wrapping an existing HAL texture view.
-func NewTextureViewFromHAL(halView hal.TextureView, device *Device) *TextureView {
-	return &TextureView{hal: halView, device: device}
-}
-
-// NewSamplerFromHAL creates a Sampler wrapping an existing HAL sampler.
-func NewSamplerFromHAL(halSampler hal.Sampler, device *Device) *Sampler {
-	return &Sampler{hal: halSampler, device: device}
-}
-
-// HalDevice returns the underlying HAL device for advanced use cases.
-// This enables interop with code that needs direct HAL access (e.g., gg
-// GPU accelerator, DeviceProvider interfaces).
-//
-// Returns nil if the device has been released or has no HAL backend.
-func (d *Device) HalDevice() hal.Device {
-	return d.halDevice()
+	return dev
 }

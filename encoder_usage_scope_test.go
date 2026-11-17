@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/gogpu/gputypes"
-	"github.com/gogpu/wgpu/core/track"
+	"github.com/gogpu/wgpu/internal/core/track"
 )
 
 // These tests pin the WebGPU usage-scope rule: a usage conflict is only
@@ -109,8 +109,8 @@ func TestRenderPassThenCopyTextureToBufferSameEncoder(t *testing.T) {
 	}})
 	cb := mustFinish(t, enc)
 
-	idx := tex.coreTexture.TrackingData().Index()
-	tracker := cb.core.TextureScope()
+	idx := tex.impl.CoreTexture().TrackingData().Index()
+	tracker := cb.impl.Core().TextureScope()
 	if got := tracker.StartUsage(idx); got != track.TextureUsesColorTarget {
 		t.Errorf("first usage in command buffer = %v, want ColorTarget", got)
 	}
@@ -142,8 +142,8 @@ func TestCopyBufferToTextureThenRenderAttachmentSameEncoder(t *testing.T) {
 	runColorPass(t, enc, view, gputypes.LoadOpLoad, nil)
 	cb := mustFinish(t, enc)
 
-	idx := tex.coreTexture.TrackingData().Index()
-	tracker := cb.core.TextureScope()
+	idx := tex.impl.CoreTexture().TrackingData().Index()
+	tracker := cb.impl.Core().TextureScope()
 	if got := tracker.StartUsage(idx); got != track.TextureUsesCopyDst {
 		t.Errorf("first usage in command buffer = %v, want CopyDst", got)
 	}
@@ -223,8 +223,8 @@ func TestCopyBufferToBufferThenVertexBufferSameEncoder(t *testing.T) {
 	})
 	cb := mustFinish(t, enc)
 
-	idx := vertices.core.TrackingData().Index()
-	tracker := cb.core.BufferScope()
+	idx := vertices.impl.CoreBuffer().TrackingData().Index()
+	tracker := cb.impl.Core().BufferScope()
 	if got := tracker.StartUsage(idx); got != track.BufferUsesCopyDst {
 		t.Errorf("first usage in command buffer = %v, want CopyDst", got)
 	}
@@ -257,8 +257,8 @@ func TestRenderCopyRenderSameTextureSameEncoder(t *testing.T) {
 	runColorPass(t, enc, view, gputypes.LoadOpLoad, nil)
 	cb := mustFinish(t, enc)
 
-	idx := tex.coreTexture.TrackingData().Index()
-	tracker := cb.core.TextureScope()
+	idx := tex.impl.CoreTexture().TrackingData().Index()
+	tracker := cb.impl.Core().TextureScope()
 	if got := tracker.StartUsage(idx); got != track.TextureUsesColorTarget {
 		t.Errorf("first usage = %v, want ColorTarget", got)
 	}

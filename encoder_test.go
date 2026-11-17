@@ -285,7 +285,7 @@ func TestEncoderTrackedRefsTransferOnFinish(t *testing.T) {
 	enc.CopyBufferToBuffer(srcBuf, 0, dstBuf, 0, 64)
 
 	// After encoding, encoder should have tracked refs.
-	refs := enc.TestTrackedRefs()
+	refs := wgpu.CommandEncoderTestTrackedRefs(enc)
 	if len(refs) == 0 {
 		t.Log("encoder tracked refs may be nil on mock device (no core.Buffer.Ref)")
 	}
@@ -296,12 +296,12 @@ func TestEncoderTrackedRefsTransferOnFinish(t *testing.T) {
 	}
 
 	// After Finish, encoder refs should be transferred to CommandBuffer.
-	if enc.TestTrackedRefs() != nil {
+	if wgpu.CommandEncoderTestTrackedRefs(enc) != nil {
 		t.Error("encoder tracked refs should be nil after Finish")
 	}
 
 	// CommandBuffer should carry the refs.
-	cbRefs := cmdBuf.TestTrackedRefs()
+	cbRefs := wgpu.CommandBufferTestTrackedRefs(cmdBuf)
 	if len(refs) > 0 && len(cbRefs) == 0 {
 		t.Error("command buffer should carry tracked refs from encoder")
 	}
@@ -328,10 +328,10 @@ func TestCommandBufferReleaseFull(t *testing.T) {
 	cmdBuf.Release()
 
 	// After Release, halEncoder should be nil.
-	if cmdBuf.TestHALEncoder() != nil {
+	if wgpu.CommandBufferTestHALEncoder(cmdBuf) != nil {
 		t.Error("halEncoder should be nil after Release")
 	}
-	if cmdBuf.TestTrackedRefs() != nil {
+	if wgpu.CommandBufferTestTrackedRefs(cmdBuf) != nil {
 		t.Error("trackedRefs should be nil after Release")
 	}
 }
@@ -351,7 +351,7 @@ func TestComputePass_DirectWriteTrackedRefs(t *testing.T) {
 	}
 
 	// Before compute pass, encoder has no tracked refs.
-	if refs := enc.TestTrackedRefs(); len(refs) != 0 {
+	if refs := wgpu.CommandEncoderTestTrackedRefs(enc); len(refs) != 0 {
 		t.Fatalf("encoder should have 0 tracked refs before pass, got %d", len(refs))
 	}
 
@@ -399,7 +399,7 @@ func TestComputePass_DirectWriteTrackedRefs(t *testing.T) {
 
 	// After SetBindGroup INSIDE the pass, encoder should already have tracked refs
 	// (direct write, no intermediate pass-level slice).
-	refsBeforeEnd := enc.TestTrackedRefs()
+	refsBeforeEnd := wgpu.CommandEncoderTestTrackedRefs(enc)
 	if len(refsBeforeEnd) == 0 {
 		t.Log("encoder tracked refs empty — may be mock device without ResourceRef")
 	} else {
@@ -411,7 +411,7 @@ func TestComputePass_DirectWriteTrackedRefs(t *testing.T) {
 	}
 
 	// After End(), encoder refs should be the SAME count (no additional copy).
-	refsAfterEnd := enc.TestTrackedRefs()
+	refsAfterEnd := wgpu.CommandEncoderTestTrackedRefs(enc)
 	if len(refsAfterEnd) != len(refsBeforeEnd) {
 		t.Errorf("encoder refs changed at End(): before=%d, after=%d (should be same — direct write)",
 			len(refsBeforeEnd), len(refsAfterEnd))
@@ -423,12 +423,12 @@ func TestComputePass_DirectWriteTrackedRefs(t *testing.T) {
 	}
 
 	// After Finish, encoder should be nil (transferred to CB).
-	if enc.TestTrackedRefs() != nil {
+	if wgpu.CommandEncoderTestTrackedRefs(enc) != nil {
 		t.Error("encoder should have nil trackedRefs after Finish")
 	}
 
 	// CommandBuffer should carry all refs.
-	if cbRefs := cmdBuf.TestTrackedRefs(); len(refsBeforeEnd) > 0 && len(cbRefs) == 0 {
+	if cbRefs := wgpu.CommandBufferTestTrackedRefs(cmdBuf); len(refsBeforeEnd) > 0 && len(cbRefs) == 0 {
 		t.Error("command buffer should carry tracked refs")
 	}
 

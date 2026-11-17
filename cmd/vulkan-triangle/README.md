@@ -74,7 +74,7 @@ Window (Win32) → Surface (VK_KHR_win32_surface)
 
 ### No CGO Required
 
-All Vulkan calls go through goffi (Pure Go FFI) via the `hal/vulkan/vk` package.
+All Vulkan calls go through goffi (Pure Go FFI) via the `internal/hal/vulkan/vk` package.
 No C compiler needed.
 
 ## Building
@@ -129,7 +129,7 @@ Average FPS: 60.0
 
 ### Build Errors
 
-**Error**: `cannot find package "github.com/gogpu/wgpu/hal/vulkan"`
+**Error**: `cannot find package "github.com/gogpu/wgpu/internal/hal/vulkan"`
 - Make sure you're in the `wgpu` repository
 - Run `go mod tidy`
 
@@ -193,7 +193,7 @@ This test follows the **minimal WebGPU workflow**:
 
 Key differences from WebGPU:
 - Vulkan requires explicit swapchain management
-- Memory allocation is explicit (using `hal/vulkan/memory` allocator)
+- Memory allocation is explicit (using `internal/hal/vulkan/memory` allocator)
 - No automatic resource tracking (manual Destroy calls)
 
 ## Future Enhancements

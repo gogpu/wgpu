@@ -8,7 +8,7 @@ import (
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu"
-	"github.com/gogpu/wgpu/core"
+	"github.com/gogpu/wgpu/internal/core"
 )
 
 // =============================================================================
@@ -51,7 +51,7 @@ func TestBindGroup_ReleaseUsesRefDrop(t *testing.T) {
 		t.Fatalf("CreateBindGroup: %v", err)
 	}
 
-	ref := bg.TestRef()
+	ref := wgpu.BindGroupTestRef(bg)
 	if ref == nil {
 		t.Fatal("BindGroup should have a non-nil ResourceRef")
 	}
@@ -129,7 +129,7 @@ func TestBindGroup_ReleaseWithoutClone_DestroysImmediately(t *testing.T) {
 		t.Fatalf("CreateBindGroup: %v", err)
 	}
 
-	ref := bg.TestRef()
+	ref := wgpu.BindGroupTestRef(bg)
 	pendingBefore := dq.Len()
 
 	// Release with no Clone → refcount 1→0 → onZero fires → dq.Defer.
@@ -175,7 +175,7 @@ func TestRenderPipeline_ReleaseUsesRefDrop(t *testing.T) {
 		t.Fatalf("CreateRenderPipeline: %v", err)
 	}
 
-	ref := pipeline.TestRef()
+	ref := wgpu.RenderPipelineTestRef(pipeline)
 	if ref == nil {
 		t.Fatal("RenderPipeline should have a non-nil ResourceRef")
 	}
@@ -234,7 +234,7 @@ func TestComputePipeline_ReleaseUsesRefDrop(t *testing.T) {
 		t.Skipf("CreateComputePipeline not supported: %v", err)
 	}
 
-	ref := pipeline.TestRef()
+	ref := wgpu.ComputePipelineTestRef(pipeline)
 	if ref == nil {
 		t.Fatal("ComputePipeline should have a non-nil ResourceRef")
 	}
@@ -316,7 +316,7 @@ func TestBindGroup_WithBuffer_ReleaseUsesRefDrop(t *testing.T) {
 		t.Fatalf("CreateBindGroup: %v", err)
 	}
 
-	ref := bg.TestRef()
+	ref := wgpu.BindGroupTestRef(bg)
 	if ref == nil {
 		t.Fatal("BindGroup should have ResourceRef")
 	}
@@ -401,8 +401,8 @@ func TestMixedResourceLifecycle_TrackedSubmission(t *testing.T) {
 		t.Fatalf("CreateRenderPipeline: %v", err)
 	}
 
-	bgRef := bg.TestRef()
-	rpRef := pipeline.TestRef()
+	bgRef := wgpu.BindGroupTestRef(bg)
+	rpRef := wgpu.RenderPipelineTestRef(pipeline)
 
 	// Simulate encoding: Clone refs for the submission.
 	bgRef.Clone()

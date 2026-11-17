@@ -1,69 +1,46 @@
 //go:build rust
 
+// Copyright 2026 The GoGPU Authors
+// SPDX-License-Identifier: MIT
+
 package wgpu
 
-import rwgpu "github.com/go-webgpu/webgpu/wgpu"
+import "github.com/gogpu/wgpu/internal/resource"
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
-// On Rust backend, this wraps go-webgpu/webgpu BindGroupLayout.
+//
+// The implementation lives in internal/resource (ADR-070); Release is one
+// delegation.
 type BindGroupLayout struct {
-	r        *rwgpu.BindGroupLayout
-	device   *Device
-	released bool
+	impl *resource.BindGroupLayout
 }
 
 // Release destroys the bind group layout.
-func (l *BindGroupLayout) Release() {
-	if l.released {
-		return
-	}
-	l.released = true
-	if l.r != nil {
-		l.r.Release()
-	}
-}
+func (l *BindGroupLayout) Release() { l.impl.Release() }
 
 // PipelineLayout defines the bind group layout arrangement for a pipeline.
-// On Rust backend, this wraps go-webgpu/webgpu PipelineLayout.
+//
+// The implementation lives in internal/resource (ADR-070); Release is one
+// delegation.
 type PipelineLayout struct {
-	r        *rwgpu.PipelineLayout
-	device   *Device
-	released bool
+	impl *resource.PipelineLayout
 }
 
 // Release destroys the pipeline layout.
-func (l *PipelineLayout) Release() {
-	if l.released {
-		return
-	}
-	l.released = true
-	if l.r != nil {
-		l.r.Release()
-	}
-}
-
-// LateBufferBindingInfo records the actual buffer binding size for a layout entry
-// with MinBindingSize == 0.
-type LateBufferBindingInfo struct {
-	BindingIndex uint32
-	Size         uint64
-}
+func (l *PipelineLayout) Release() { l.impl.Release() }
 
 // BindGroup represents bound GPU resources for shader access.
-// On Rust backend, this wraps go-webgpu/webgpu BindGroup.
+//
+// The implementation lives in internal/resource (ADR-070); Release is one
+// delegation.
 type BindGroup struct {
-	r        *rwgpu.BindGroup
-	device   *Device
-	released bool
+	impl *resource.BindGroup
 }
 
 // Release marks the bind group for destruction.
 func (g *BindGroup) Release() {
-	if g.released {
+	if g.impl == nil {
 		return
 	}
-	g.released = true
-	if g.r != nil {
-		g.r.Release()
-	}
+	g.impl.Release()
 }

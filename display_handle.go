@@ -3,6 +3,8 @@ package wgpu
 import (
 	"errors"
 	"fmt"
+
+	"github.com/gogpu/wgpu/internal/surface"
 )
 
 // ErrInvalidDisplayHandle is returned by CreateInstance for a DisplayHandle
@@ -11,7 +13,9 @@ var ErrInvalidDisplayHandle = errors.New("wgpu: invalid display handle")
 
 // ErrMismatchingDisplayHandle is returned by surface creation when the
 // instance has a Display and an Xlib or Wayland target uses another display.
-var ErrMismatchingDisplayHandle = errors.New("wgpu: surface display differs from the instance display")
+// The value is internal/surface's, the package that runs the check, so
+// errors.Is keeps working through the public API.
+var ErrMismatchingDisplayHandle = surface.ErrMismatchingDisplayHandle
 
 type displayKind uint8
 
@@ -55,6 +59,13 @@ func (h DisplayHandle) validate() error {
 	return nil
 }
 
+// displayMirror builds the surface domain's view of the public handle: the
+// destination cannot name this type, so the root declaration layer converts at
+// the call boundary, field by field (ADR-070 §15.6, R9).
+func displayMirror(h DisplayHandle) surface.DisplayHandle {
+	return surface.DisplayHandle{Kind: surface.DisplayKind(h.kind), Ptr: h.ptr}
+}
+
 // checkSurfaceDisplay applies the instance display to a surface target, the
 // same way on every build (Rust wgpu-core create_surface,
 // MismatchingDisplayHandle). With a display set, an Xlib or Wayland target
@@ -62,49 +73,20 @@ func (h DisplayHandle) validate() error {
 // screen Rust also compares is not part of the check. Other target kinds
 // (HWND, whose display handle is the hinstance, Metal, Android, headless,
 // canvas) have no display to compare. Without a display, nothing is checked.
+// The rule lives in internal/surface; this is the public declaration layer.
 func checkSurfaceDisplay(instance DisplayHandle, target SurfaceTargetUnsafe) error {
-	if instance.IsZero() {
-		return nil
-	}
-	var kind displayKind
-	switch target.kind {
-	case surfaceTargetXlibWindow:
-		kind = displayKindXlib
-	case surfaceTargetWaylandSurface:
-		kind = displayKindWayland
-	default:
-		return nil
-	}
-	if (DisplayHandle{kind: kind, ptr: target.displayHandle}) != instance {
-		return fmt.Errorf("%w: instance %s, surface %s", ErrMismatchingDisplayHandle,
-			instance.describe(), DisplayHandle{kind: kind, ptr: target.displayHandle}.describe())
-	}
-	return nil
+	return surface.CheckSurfaceDisplay(displayMirror(instance), targetMirror(target))
 }
 
 // legacySurfaceTarget maps the legacy CreateSurface(display, window) handles
 // by the instance display's kind, so a set Display, not the WAYLAND_DISPLAY
-// environment, decides between Xlib and Wayland. ok is false without one.
+// environment, decides between Xlib and Wayland. ok is false without one. The
+// mapping lives in internal/surface; this is the public declaration layer.
 func (h DisplayHandle) legacySurfaceTarget(displayHandle, windowHandle uintptr) (target SurfaceTargetUnsafe, ok bool) {
-	switch h.kind {
-	case displayKindXlib:
-		return SurfaceTargetFromXlibWindow(displayHandle, windowHandle), true
-	case displayKindWayland:
-		return SurfaceTargetFromWaylandSurface(displayHandle, windowHandle), true
-	default:
-		return SurfaceTargetUnsafe{}, false
-	}
-}
-
-// describe returns a diagnostic form of the handle for error messages. It is
-// not String: the public surface of DisplayHandle is IsZero only (ADR-077).
-func (h DisplayHandle) describe() string {
-	switch h.kind {
-	case displayKindXlib:
-		return fmt.Sprintf("Xlib display 0x%x", h.ptr)
-	case displayKindWayland:
-		return fmt.Sprintf("Wayland display 0x%x", h.ptr)
-	default:
-		return "no display"
-	}
+	mirror, ok := displayMirror(h).LegacyTarget(displayHandle, windowHandle)
+	return SurfaceTargetUnsafe{
+		kind:          surfaceTargetKind(mirror.Kind),
+		displayHandle: mirror.Display,
+		windowHandle:  mirror.Window,
+	}, ok
 }

@@ -28,7 +28,7 @@ func TestSurfaceTextureWrappersCarryFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateView: %v", err)
 	}
-	if got := view.texture.Format(); got != want {
-		t.Errorf("CreateView().texture.Format() = %v, want %v", got, want)
+	if got := view.Texture().Format(); got != want {
+		t.Errorf("CreateView().Texture().Format() = %v, want %v", got, want)
 	}
 }

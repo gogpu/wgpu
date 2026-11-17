@@ -140,8 +140,8 @@ audit_source_selection() {
 		env_args+=("CC=$clang_path")
 	fi
 
-	vulkan_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./hal/vulkan)
-	backend_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./hal/allbackends)
+	vulkan_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./internal/hal/vulkan)
+	backend_files=$(cd "$root" && env "${env_args[@]}" go list -f '{{.GoFiles}}' ./internal/hal/allbackends)
 	for file in api_android.go init_android.go platform_android.go; do
 		grep -q "$file" <<<"$vulkan_files"
 	done
@@ -156,7 +156,7 @@ audit_source_selection() {
 	fi
 
 	(cd "$root" && env "${env_args[@]}" go list -tags "$vulkan_only_tags" -deps ./examples/triangle-headless) >"$dependencies"
-	if grep -Eq 'github.com/gogpu/wgpu/hal/(gles|software)$' "$dependencies"; then
+	if grep -Eq 'github.com/gogpu/wgpu/internal/hal/(gles|software)$' "$dependencies"; then
 		echo "the Vulkan-only Android dependency graph contains a GLES or software fallback" >&2
 		exit 1
 	fi
