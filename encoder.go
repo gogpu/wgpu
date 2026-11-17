@@ -71,7 +71,14 @@ func (e *CommandEncoder) CopyTextureToTexture(src, dst *Texture, regions []Textu
 // automatically from the state left by earlier commands of the same encoder,
 // so explicit barriers are only needed for states the encoder cannot see.
 // Each explicit barrier also updates the encoder's tracker: later commands
-// transition from the barrier's NewUsage instead of repeating it.
+// transition from the barrier's NewUsage instead of repeating it, on the
+// mip levels and array layers of the barrier's Range alone.
+//
+// A Range count of 0 selects every mip level or array layer from its base
+// on. A Range that selects a mip level or array layer its texture does not
+// have is a validation error: Finish returns it, and none of the call's
+// barriers is recorded.
+//
 // On Metal, GLES, and software backends the barrier itself is a no-op.
 func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	e.impl.TransitionTextures(encoderTextureBarriers(barriers))

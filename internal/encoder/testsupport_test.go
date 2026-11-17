@@ -108,13 +108,21 @@ func newTestCoreEncoder(t *testing.T, device *core.Device) *core.CoreCommandEnco
 // index, the state the copy-usage helpers read.
 func newTrackedTexture(t *testing.T, device *core.Device, view testDeviceView, label string, usage gputypes.TextureUsage) *resource.Texture {
 	t.Helper()
+	return newTrackedTextureWithMipLevels(t, device, view, label, usage, 1)
+}
+
+// newTrackedTextureWithMipLevels returns a tracked 2D texture of mipLevels
+// mip levels and one array layer.
+func newTrackedTextureWithMipLevels(t *testing.T, device *core.Device, view testDeviceView, label string, usage gputypes.TextureUsage, mipLevels uint32) *resource.Texture {
+	t.Helper()
+	size := uint32(1) << (mipLevels - 1)
 	coreTex := core.NewTexture(
 		testHALTexture{}, device,
 		gputypes.TextureFormatRGBA8Unorm,
 		gputypes.TextureDimension2D,
 		usage|gputypes.TextureUsageTextureBinding|gputypes.TextureUsageRenderAttachment,
-		gputypes.Extent3D{Width: 1, Height: 1, DepthOrArrayLayers: 1},
-		1, 1, label,
+		gputypes.Extent3D{Width: size, Height: size, DepthOrArrayLayers: 1},
+		mipLevels, 1, label,
 	)
 	t.Cleanup(coreTex.Destroy)
 	return resource.NewTexture(testHALTexture{}, view, gputypes.TextureFormatRGBA8Unorm, nil, coreTex)

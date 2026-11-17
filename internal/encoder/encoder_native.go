@@ -632,13 +632,17 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 	}
 	halBarriers := make([]hal.TextureBarrier, 0, len(barriers))
 	validBarriers := make([]TextureBarrier, 0, len(barriers))
-	for _, b := range barriers {
+	for i, b := range barriers {
 		if b.Texture != nil && b.Texture.ResolveHAL() == nil {
 			e.SetError(fmt.Errorf("wgpu: CommandEncoder.TransitionTextures: texture is released: %w", core.ErrReleased))
 			return
 		}
 		if b.Texture == nil || b.Texture.ResolveHAL() == nil {
 			continue
+		}
+		if err := checkBarrierRange(b.Texture.CoreTexture(), b.Range); err != nil {
+			e.SetError(fmt.Errorf("wgpu: CommandEncoder.TransitionTextures: barrier %d: %w", i, err))
+			return
 		}
 		e.trackTexture(b.Texture)
 		halBarriers = append(halBarriers, b.toHAL())
@@ -650,6 +654,30 @@ func (e *CommandEncoder) TransitionTextures(barriers []TextureBarrier) {
 			e.core.RecordTextureSubresourceTransition(b.Texture.CoreTexture(), halBarriers[i].Range, b.Usage.OldUsage, b.Usage.NewUsage)
 		}
 	}
+}
+
+// checkBarrierRange returns an error if r selects a mip level or array layer
+// texture does not have, as WebGPU refuses a texture view's out-of-range
+// subresources: the barrier would reach the HAL with them. A count of 0
+// selects every level or layer from the base on.
+func checkBarrierRange(texture *core.Texture, r TextureRange) error {
+	if texture == nil {
+		return nil
+	}
+	mipLevels, arrayLayers := texture.MipLevelCount(), texture.ArrayLayerCount()
+	if !rangeWithin(r.BaseMipLevel, r.MipLevelCount, mipLevels) ||
+		!rangeWithin(r.BaseArrayLayer, r.ArrayLayerCount, arrayLayers) {
+		return fmt.Errorf("range of %d mip levels from %d and %d array layers from %d (0 meaning the rest)"+
+			" exceeds the texture's %d mip levels and %d array layers",
+			r.MipLevelCount, r.BaseMipLevel, r.ArrayLayerCount, r.BaseArrayLayer, mipLevels, arrayLayers)
+	}
+	return nil
+}
+
+// rangeWithin reports whether count items from base, every one from base on
+// when count is 0, lie within total items.
+func rangeWithin(base, count, total uint32) bool {
+	return base < total && count <= total-base
 }
 
 // CopyBufferToTexture copies data from a buffer to a texture.

@@ -262,6 +262,80 @@ func TestTransitionTexturesUpdatesEncoderTracker(t *testing.T) {
 	commandBuffer.Release()
 }
 
+// TestTransitionTexturesRecordsItsSubresources checks that an explicit
+// barrier over one mip level moves that level alone in the encoder tracker:
+// a following copy into the whole texture transitions that level from the
+// barrier's new usage, and records no barrier for the level the explicit
+// one left alone, used here for the first time.
+func TestTransitionTexturesRecordsItsSubresources(t *testing.T) {
+	t.Parallel()
+
+	device, view := newTestCoreDevice(t)
+	texture := newTrackedTextureWithMipLevels(t, device, view, "explicit-subresource",
+		gputypes.TextureUsageCopySrc|gputypes.TextureUsageCopyDst, 2)
+	t.Cleanup(texture.Release)
+	encoder := &CommandEncoder{core: newTestCoreEncoder(t, device)}
+	t.Cleanup(encoder.DiscardEncoding)
+
+	encoder.TransitionTextures([]TextureBarrier{{
+		Texture: texture,
+		Range:   TextureRange{BaseMipLevel: 1, MipLevelCount: 1},
+		Usage: TextureUsageTransition{
+			OldUsage: gputypes.TextureUsageRenderAttachment,
+			NewUsage: gputypes.TextureUsageCopySrc,
+		},
+	}})
+
+	capture := &copyBarrierCaptureEncoder{}
+	if !encoder.recordCopyUsages(capture,
+		[]copyTextureUsage{{texture: texture, usage: track.TextureUsesCopyDst}}, nil) {
+		t.Fatal("copy after the explicit transition rejected")
+	}
+	if len(capture.textureBarriers) != 1 {
+		t.Fatalf("copy recorded %d texture barriers, want 1, for the level the explicit barrier moved",
+			len(capture.textureBarriers))
+	}
+	barrier := capture.textureBarriers[0]
+	if barrier.Range.BaseMipLevel != 1 || barrier.Range.MipLevelCount != 1 {
+		t.Errorf("barrier range = %+v, want mip level 1 alone", barrier.Range)
+	}
+	if barrier.Usage.OldUsage != gputypes.TextureUsageCopySrc || barrier.Usage.NewUsage != gputypes.TextureUsageCopyDst {
+		t.Errorf("barrier = %v -> %v, want CopySrc -> CopyDst", barrier.Usage.OldUsage, barrier.Usage.NewUsage)
+	}
+}
+
+// TestTransitionTexturesRefusesRangeOutsideTexture checks that a barrier
+// whose range selects a mip level or array layer its texture does not have
+// fails the encoder instead of being narrowed to the texture.
+func TestTransitionTexturesRefusesRangeOutsideTexture(t *testing.T) {
+	t.Parallel()
+
+	for _, r := range []TextureRange{
+		{BaseMipLevel: 1, MipLevelCount: 5},
+		{BaseMipLevel: 2},
+		{BaseArrayLayer: 1},
+		{ArrayLayerCount: 2},
+	} {
+		device, view := newTestCoreDevice(t)
+		texture := newTrackedTextureWithMipLevels(t, device, view, "out-of-range",
+			gputypes.TextureUsageCopySrc|gputypes.TextureUsageCopyDst, 2)
+		t.Cleanup(texture.Release)
+		encoder := &CommandEncoder{core: newTestCoreEncoder(t, device)}
+
+		encoder.TransitionTextures([]TextureBarrier{{
+			Texture: texture,
+			Range:   r,
+			Usage: TextureUsageTransition{
+				OldUsage: gputypes.TextureUsageRenderAttachment,
+				NewUsage: gputypes.TextureUsageCopySrc,
+			},
+		}})
+		if _, err := encoder.Finish(); err == nil {
+			t.Errorf("range %+v of a 2-level, 1-layer texture: Finish succeeded, want the barrier refused", r)
+		}
+	}
+}
+
 // TestClearBufferTracksCopyDstUsage: ClearBuffer writes the buffer as a copy
 // destination, so the encoder tracker moves it to COPY_DST (ordering it after
 // the earlier vertex use) and the encoder keeps the buffer alive until the
