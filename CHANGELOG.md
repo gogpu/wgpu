@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.35.1] - 2026-11-17
 
 ### Added
 
@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`(*Device).PopErrorScope()` changed signature**: it returns `(*GPUError, error)` where it returned `*GPUError`.
   An empty-stack pop no longer panics. On the rust build an empty stack arrives as the binding's own error, wrapped
   (`errors.As` reaches its value); the per-build sentinels keep `errors.Is` identity within each build.
+- **naga v0.22.5** (from v0.22.4). A fixes-only PATCH with no public API change and no consumer action: the DXIL and
+  GLSL writers refuse a subgroup scan (`subgroupMin`/`Max`/`And`/`Or`/`Xor`) on a shape they cannot expand instead
+  of emitting invalid code, and DXIL expands a vector subgroup operand per component. The downstream gate compared
+  the writer output of the release code with v0.22.4 — 1240 cases across the four targets (SPIR-V, MSL, HLSL, GLSL),
+  identical or rejected by both, zero deltas — so no shader compiles differently.
 - **Why this is a PATCH**: the error scopes were a claimed-but-unimplemented feature — the native path captured
   nothing and the browser path panicked — and there are **zero call sites** of the method in the ecosystem
   (measured 2026-11-17 across all GoGPU repositories and go-webgpu). The compile-breaking signature change is the

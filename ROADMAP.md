@@ -19,8 +19,9 @@
 
 ---
 
-## Current State: v0.35.0
+## Current State: v0.35.1
 
+✅ **The Metal command-buffer budget fix, error scopes on every build and naga v0.22.5 (v0.35.1)** — an encoder records one command buffer where its backend transitions nothing (Metal, software), so a frame of many render passes no longer blocks inside Metal's 64-uncompleted-command-buffer limit; Metal's queue is created with a larger budget and an exhausted budget fails with a clear error instead of blocking (#428); `PopErrorScope` is wired and reshaped on every backend with `errors.Is` classification; a failed `Poll` no longer resolves pending maps; usage scopes are subresource-correct (#424); the Objective-C runtime resolves lazily and never caches a zero selector; naga v0.22.5
 ✅ **The internal-layout release (v0.35.0, ADR-070)** — the implementation moves into `internal/`; the public package set is three packages — the root declaration layer, a thin `hal` (`BackendKind` + `Handles`: 16 names, no functions, no imports) and `wgputest`; four `HAL()` accessors on every build tag return the native handles; the Pure Go software backend registers by default and is selected explicitly (`BackendsSoftware`, or `ForceFallbackAdapter`), the default adapter mask stays hardware-only; the backends register themselves, so the per-backend blank imports go away; gputypes v0.9.1, naga v0.22.4; behaviour is unchanged outside the migration notes in the [CHANGELOG](CHANGELOG.md)
 
 ✅ **Vulkan presents what it acquired and survives device loss (v0.34.15)** — present barriers are tracked submissions whose fence is waited before the command pool is reset, every acquired surface presents, a surface is configured only on a queue family that can present to it and answers capabilities from any surface, and Unconfigure on a lost device destroys its swapchain; DX12 `ClearBuffer` clears its range; naga v0.21.12

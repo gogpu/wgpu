@@ -37,7 +37,7 @@
 | **Compute** | Compute shaders and GPU→CPU readback on every native backend (software: see its known gaps below) |
 | **Present** | Damage-aware presentation — compositor dirty rects |
 | **Ray Tracing** | Not usable yet: HAL code only, no public API, not run on a GPU. Public inline ray queries are planned, Vulkan first ([status](docs/RAY-TRACING.md), [#369](https://github.com/gogpu/wgpu/issues/369)) |
-| **Debug** | Leak detection, error scopes (native backends; not yet in the browser backend), validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
+| **Debug** | Leak detection, error scopes on every build, validation layers, DRED diagnostics (DX12), structured logging (`log/slog`) |
 | **Build** | Zero CGO, simple `go build` |
 
 ---
