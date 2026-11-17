@@ -70,7 +70,7 @@ func TestGPUErrorUnwrapIdentityPerCategory(t *testing.T) {
 				t.Fatalf("errors.Is(%v, %v) = false, want true", err, c.want)
 			}
 			for _, other := range []error{wgpu.ErrValidation, wgpu.ErrOutOfMemory, wgpu.ErrInternal} {
-				if other == c.want {
+				if errors.Is(other, c.want) {
 					continue
 				}
 				if errors.Is(err, other) {

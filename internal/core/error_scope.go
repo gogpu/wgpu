@@ -270,7 +270,7 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 // Note: Error scopes are LIFO -- the last pushed scope is popped first.
 func (d *Device) PopErrorScope() (*GPUError, error) {
 	if d == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // (nil, nil) is the error-scope contract's capture-nothing answer, not a missing error
 	}
 	return d.errorScopes().PopErrorScope()
 }
