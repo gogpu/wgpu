@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now record the whole encoder into one command buffer, the shape Dawn uses; Metal's queue is created with a larger
   command-buffer budget, and an exhausted budget fails the encoder with a clear error instead of blocking. Issue
   #428.
+- **Metal: the Objective-C runtime resolves lazily and a zero selector is never cached.** A selector first used
+  before `Init` had no resolved symbol — the FFI layer answers zeros for a nil symbol — and that zero was cached
+  for the life of the process, so every later message carrying that selector went out with a nil selector. The
+  accessors now resolve the runtime first and cache only a non-zero result, so the order of initialization no
+  longer matters and a late init cannot leave a poisoned cache behind.
 
 ### Migration
 
