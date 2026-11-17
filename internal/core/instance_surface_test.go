@@ -265,8 +265,15 @@ func TestRequestAdapterWithSurfaceUsesRequestLocalQualification(t *testing.T) {
 	if selected.halAdapter == secondHAL {
 		t.Fatal("selected adapter retained cached HAL adapter")
 	}
-	if selected.halCapabilities != nil {
-		t.Fatal("selected adapter retained cached HAL capabilities")
+	// The physical capabilities travel as a value copy: the request-local
+	// wrapper must not alias the cached pointer, and it must not lose the
+	// capability facts either (issue #429: a dropped RecordsTransitions made
+	// the core silently drop the render pass's intra-pass barriers).
+	if selected.halCapabilities == nil {
+		t.Fatal("selected adapter lost the physical adapter's HAL capabilities")
+	}
+	if selected.halCapabilities == cachedCapabilities {
+		t.Fatal("selected adapter aliases the cached HAL capabilities pointer; want a value copy")
 	}
 	if selected.Info.DeviceType != gputypes.DeviceTypeIntegratedGPU {
 		t.Fatalf("selected device type = %v, want integrated GPU", selected.Info.DeviceType)

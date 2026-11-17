@@ -77,7 +77,12 @@ func (i *fakeGLInstance) EnumerateAdapters(hint hal.Surface) []hal.ExposedAdapte
 			DeviceType: gputypes.DeviceTypeIntegratedGPU,
 			Backend:    gputypes.BackendGL,
 		},
-		Capabilities: hal.Capabilities{Limits: gputypes.DefaultLimits()},
+		Capabilities: hal.Capabilities{
+			// GL records its transitions (glMemoryBarrier), as the real backend
+			// reports; the surface-qualified wrapper must carry this fact.
+			RecordsTransitions: true,
+			Limits:             gputypes.DefaultLimits(),
+		},
 	}}
 }
 

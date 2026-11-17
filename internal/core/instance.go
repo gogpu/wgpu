@@ -625,10 +625,9 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 			// family and checked surface snapshot into Open().
 			qualifiedCore := adapter
 			qualifiedCore.halAdapter = qualified
-			// Capabilities belong to the cached physical adapter. The qualified
-			// wrapper carries request-local surface capabilities through its HAL
-			// adapter and must not alias the cached pointer.
-			qualifiedCore.halCapabilities = nil
+			// Capabilities belong to the cached physical adapter, so the
+			// wrapper carries a value copy, never the cached pointer.
+			qualifiedCore.halCapabilities = qualifiedSurfaceCapabilities(adapter.halCapabilities)
 			qualifiedID := hub.RegisterAdapter(&qualifiedCore)
 			i.mu.Lock()
 			i.surfaceAdapters = append(i.surfaceAdapters, qualifiedID)
@@ -656,6 +655,21 @@ func (i *Instance) requestAdapterWithSurfaceResolver(options *gputypes.RequestAd
 		}
 	}
 	return selectedID, err
+}
+
+// qualifiedSurfaceCapabilities returns the capabilities of a request-local
+// surface-qualified adapter: a value copy of the cached physical adapter's,
+// never the instance's pointer, so the request-local wrapper cannot mutate the
+// cached state. The physical facts must survive the copy — above all
+// RecordsTransitions, because a wrapper that looks like a backend recording no
+// transitions makes the core drop the render pass's intra-pass barriers
+// (issue #429). nil (a mock adapter without HAL capabilities) stays nil.
+func qualifiedSurfaceCapabilities(cached *hal.Capabilities) *hal.Capabilities {
+	if cached == nil {
+		return nil
+	}
+	caps := *cached
+	return &caps
 }
 
 // ReleaseSurfaceAdapter releases a request-local adapter created by
