@@ -1544,13 +1544,19 @@ func (d *Device) WaitIdle() error {
 	// Submit an empty command buffer and wait for it synchronously.
 	// All previously committed command buffers on this queue will complete
 	// before this one starts, so waitUntilCompleted acts as a full barrier.
-	cmdBuffer := MsgSend(d.commandQueue, Sel("commandBuffer"))
-	if cmdBuffer != 0 {
-		Retain(cmdBuffer)
-		_ = MsgSend(cmdBuffer, Sel("commit"))
-		_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
-		Release(cmdBuffer)
+	//
+	// The flush buffer is charged to the command-buffer budget like every other
+	// creation site (see newBudgetedCommandBuffer): without it, WaitIdle cannot
+	// establish its barrier, so a refusal or a failed creation is an error
+	// rather than a silent no-op.
+	cmdBuffer, err := newBudgetedCommandBuffer(d.commandQueue, d.cmdBudget, "WaitIdle")
+	if err != nil {
+		return err
 	}
+	_ = MsgSend(cmdBuffer, Sel("commit"))
+	d.cmdBudget.Release()
+	_ = MsgSend(cmdBuffer, Sel("waitUntilCompleted"))
+	Release(cmdBuffer)
 
 	// GPU is idle — all previously submitted command buffers have completed.
 	// Explicitly advance completedIndex to submissionIndex so that
