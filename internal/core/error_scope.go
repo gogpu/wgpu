@@ -239,6 +239,9 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 //
 // Note: Error scopes are LIFO -- the last pushed scope is popped first.
 func (d *Device) PopErrorScope() (*GPUError, error) {
+	if d == nil {
+		return nil, nil
+	}
 	return d.errorScopes().PopErrorScope()
 }
 

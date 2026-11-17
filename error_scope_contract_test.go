@@ -40,6 +40,17 @@ func TestErrorScopeContractThreeCases(t *testing.T) {
 	}
 }
 
+// TestErrorScopeContractZeroValueDevice pins the native nil-impl parity with
+// the rust build (expert P3-1): a zero-value device answers (nil, nil) and
+// never panics.
+func TestErrorScopeContractZeroValueDevice(t *testing.T) {
+	var d wgpu.Device
+	gpuErr, err := d.PopErrorScope()
+	if gpuErr != nil || err != nil {
+		t.Fatalf("zero-value-device PopErrorScope = (%v, %v), want (nil, nil)", gpuErr, err)
+	}
+}
+
 // TestGPUErrorUnwrapIdentityPerCategory pins errors.Is THROUGH
 // GPUError.Unwrap for the three categories and the negative direction.
 func TestGPUErrorUnwrapIdentityPerCategory(t *testing.T) {
