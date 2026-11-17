@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`(*Device).PopErrorScope()` changed signature**: it returns `(*GPUError, error)` where it returned `*GPUError`.
   An empty-stack pop no longer panics. On the rust build an empty stack arrives as the binding's own error, wrapped
   (`errors.As` reaches its value); the per-build sentinels keep `errors.Is` identity within each build.
+- **Why this is a PATCH**: the error scopes were a claimed-but-unimplemented feature — the native path captured
+  nothing and the browser path panicked — and there are **zero call sites** of the method in the ecosystem
+  (measured 2026-11-17 across all GoGPU repositories and go-webgpu). The compile-breaking signature change is the
+  documented exception the 0.x version rules allow, stated here so nobody discovers it through a compiler error;
+  the migration section says what to change.
 
 ### Migration
 
