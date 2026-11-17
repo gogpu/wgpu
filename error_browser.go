@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gogpu/wgpu/internal/browser"
 	"github.com/gogpu/wgpu/internal/core"
 )
 
@@ -96,8 +97,10 @@ var (
 	// ErrInternal is the category identity of a captured internal GPUError.
 	ErrInternal = errors.New("wgpu: internal error")
 	// ErrErrorScopeEmpty is the PopErrorScope answer for an empty scope stack —
-	// produced by the browser implementation in stage A4, never a panic.
-	ErrErrorScopeEmpty = errors.New("wgpu: PopErrorScope: error scope stack is empty (no matching PushErrorScope)")
+	// it binds the browser backend's own sentinel (per-build identity): the JS
+	// popErrorScope promise's OperationError rejection maps to that value in
+	// internal/browser, and the root name is the same error, never a copy.
+	ErrErrorScopeEmpty = browser.ErrErrorScopeEmpty
 )
 
 // GPUError represents a GPU error.

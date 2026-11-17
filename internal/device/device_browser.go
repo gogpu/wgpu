@@ -47,6 +47,25 @@ func (d *Device) Browser() *browser.Device {
 	return d.browser
 }
 
+// PushErrorScope delegates to the browser device's JS pushErrorScope
+// (error-scope reshape, stage A4). A nil device pushes nothing.
+func (d *Device) PushErrorScope(filter browser.ErrorFilter) error {
+	if d == nil || d.browser == nil {
+		return nil
+	}
+	return d.browser.PushErrorScope(filter)
+}
+
+// PopErrorScope delegates to the browser device's JS popErrorScope. The empty
+// stack arrives as the JS OperationError rejection and maps to the browser
+// sentinel inside internal/browser; the root layer binds that value.
+func (d *Device) PopErrorScope() (*browser.GPUErrorInfo, error) {
+	if d == nil || d.browser == nil {
+		return nil, nil
+	}
+	return d.browser.PopErrorScope()
+}
+
 // IsReleased reports whether the device has been released.
 func (d *Device) IsReleased() bool {
 	return d != nil && d.released

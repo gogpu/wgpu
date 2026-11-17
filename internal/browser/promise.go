@@ -3,7 +3,6 @@
 package browser
 
 import (
-	"fmt"
 	"syscall/js"
 )
 
@@ -49,11 +48,23 @@ func AwaitPromise(promise js.Value) (js.Value, error) {
 	catchFn.Release()
 
 	if result.rejected {
-		msg := extractErrorMessage(result.value)
-		return js.Undefined(), fmt.Errorf("promise rejected: %s", msg)
+		return js.Undefined(), &PromiseRejection{Value: result.value}
 	}
 
 	return result.value, nil
+}
+
+// PromiseRejection carries the JS rejection value of a settled promise, so a
+// caller can inspect it (name, constructor) instead of parsing a message
+// string. It implements error, so existing callers treat it as before.
+type PromiseRejection struct {
+	// Value is the JS rejection value (a JS Error object in practice).
+	Value js.Value
+}
+
+// Error implements the error interface.
+func (e *PromiseRejection) Error() string {
+	return "promise rejected: " + extractErrorMessage(e.Value)
 }
 
 // promiseResult carries either a resolved value or a rejection.

@@ -305,16 +305,32 @@ func (d *Device) WaitForFence(_ *Fence, _ uint64, _ time.Duration) (bool, error)
 }
 
 // PushErrorScope pushes a new error scope onto the device's error scope stack.
-// Phase 2 — not yet implemented for browser.
+// A nil or zero-value device answers nil (nothing to push), matching the other
+// builds' guards.
 func (d *Device) PushErrorScope(filter ErrorFilter) error {
-	panic("wgpu: browser PushErrorScope not yet implemented (Phase 2)")
+	if d == nil || d.impl == nil {
+		return nil
+	}
+	return d.impl.PushErrorScope(browser.ErrorFilter(filter))
 }
 
 // PopErrorScope pops the most recently pushed error scope.
-// Phase 2 — not yet implemented for browser (arrives in stage A4 of the
-// error-scope reshape; until then it panics and the contract test records it).
+//
+// Contract (at most one side is non-nil): a captured error, or (nil, nil) when
+// the scope captured nothing — the common path — or (nil, ErrErrorScopeEmpty)
+// when the stack was empty (the JS OperationError case). It never panics.
 func (d *Device) PopErrorScope() (*GPUError, error) {
-	panic("wgpu: browser PopErrorScope not yet implemented (Phase 2)")
+	if d == nil || d.impl == nil {
+		return nil, nil
+	}
+	info, err := d.impl.PopErrorScope()
+	if err != nil {
+		return nil, err
+	}
+	if info == nil {
+		return nil, nil
+	}
+	return &GPUError{Type: ErrorFilter(info.Type), Message: info.Message}, nil
 }
 
 // WaitIdle waits for all GPU work to complete.

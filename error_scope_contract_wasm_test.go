@@ -13,7 +13,6 @@ package wgpu_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/gogpu/wgpu"
@@ -32,20 +31,16 @@ func TestGPUErrorUnwrapIdentityBrowser(t *testing.T) {
 	}
 }
 
-// TestErrorScopeBrowserPhase2PanicPinned records the staged state: until stage
-// A4 implements the JS scopes, Push/Pop panic. Stage A4 removes the panics and
-// replaces this test with the working contract — the test exists so the panic
-// cannot vanish silently or come back.
-func TestErrorScopeBrowserPhase2PanicPinned(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("browser PopErrorScope must still panic until stage A4")
-		}
-		if s, ok := r.(string); !ok || !strings.Contains(s, "not yet implemented (Phase 2)") {
-			t.Fatalf("unexpected panic value: %v", r)
-		}
-	}()
+// TestErrorScopeContractZeroValueBrowser pins the browser contract after stage
+// A4: a zero-value device answers (nil, nil) and never panics — the Phase-2
+// panics are gone, and this test would catch their return.
+func TestErrorScopeContractZeroValueBrowser(t *testing.T) {
 	var d wgpu.Device
-	_, _ = d.PopErrorScope()
+	if err := d.PushErrorScope(wgpu.ErrorFilterValidation); err != nil {
+		t.Fatalf("zero-value PushErrorScope = %v, want nil", err)
+	}
+	gpuErr, err := d.PopErrorScope()
+	if gpuErr != nil || err != nil {
+		t.Fatalf("zero-value PopErrorScope = (%v, %v), want (nil, nil)", gpuErr, err)
+	}
 }
