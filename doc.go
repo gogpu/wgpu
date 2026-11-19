@@ -57,4 +57,16 @@
 //
 // Instance, Adapter, and Device are safe for concurrent use.
 // Encoders (CommandEncoder, RenderPassEncoder, ComputePassEncoder) are NOT thread-safe.
+//
+// Resources (Buffer, Texture, TextureView, Sampler, ShaderModule, QuerySet,
+// Fence, BindGroup, BindGroupLayout, PipelineLayout and the pipelines) are
+// safe to Release concurrently, from any number of goroutines, together with
+// their other methods: the released flag is a compare-and-swap guard, so
+// exactly one caller wins and at most one HAL destroy is scheduled — the HAL
+// object goes when the last reference drops (on GPU completion for work still
+// in flight). Release is idempotent, and Release on a zero-value resource is
+// a no-op. Every other method of a resource is read-only after construction
+// and safe concurrently, except buffer mapping, where the spec's rule stands:
+// one mapping and one mapped range per buffer at a time, invalid after Unmap
+// or Release.
 package wgpu

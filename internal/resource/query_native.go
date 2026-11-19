@@ -3,20 +3,25 @@
 package resource
 
 import (
+	"sync/atomic"
+
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
 )
 
 // QuerySet represents a set of GPU queries (occlusion, timestamp, etc.).
 type QuerySet struct {
-	core     *core.QuerySet
-	device   core.DeviceView
-	released bool
+	core   *core.QuerySet
+	device core.DeviceView
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 }
 
 // NewQuerySet builds a query set over core state and the shared device view.
 func NewQuerySet(coreSet *core.QuerySet, device core.DeviceView) *QuerySet {
-	return &QuerySet{core: coreSet, device: device}
+	return &QuerySet{core: coreSet, device: device, released: new(atomic.Bool)}
 }
 
 // Core returns the core query set, or nil.
@@ -54,7 +59,7 @@ func (qs *QuerySet) Count() uint32 {
 // HALQuerySet returns the underlying HAL query set while holding the device
 // snatch lock, or nil after the query set or its device has been released.
 func (qs *QuerySet) HALQuerySet() hal.QuerySet {
-	if qs == nil || qs.core == nil || qs.device == nil || qs.device.Core() == nil || qs.released {
+	if qs == nil || qs.core == nil || qs.device == nil || qs.device.Core() == nil || qs.IsReleased() {
 		return nil
 	}
 
@@ -68,7 +73,7 @@ func (qs *QuerySet) HALQuerySet() hal.QuerySet {
 // released, so core validation rejects it. Release defers the core
 // destruction, so the core object alone does not show a released set.
 func (qs *QuerySet) LiveCore() *core.QuerySet {
-	if qs == nil || qs.released {
+	if qs == nil || qs.IsReleased() {
 		return nil
 	}
 	return qs.core
@@ -77,7 +82,7 @@ func (qs *QuerySet) LiveCore() *core.QuerySet {
 // IsReleased reports whether the application released the query set. Release
 // defers the core destruction, so the core object alone does not show it.
 func (qs *QuerySet) IsReleased() bool {
-	return qs != nil && qs.released
+	return qs != nil && qs.released != nil && qs.released.Load()
 }
 
 // Release drops the application's reference to the query set. The HAL query
@@ -86,10 +91,9 @@ func (qs *QuerySet) IsReleased() bool {
 // its timestamp writes or a resolve were recorded stays valid for that work
 // (P1-CORE-021).
 func (qs *QuerySet) Release() {
-	if qs == nil || qs.released {
+	if qs == nil || qs.released == nil || !qs.released.CompareAndSwap(false, true) {
 		return
 	}
-	qs.released = true
 	if qs.core == nil {
 		return
 	}

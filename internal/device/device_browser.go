@@ -210,7 +210,7 @@ func (d *Device) CreateFence() (*resource.Fence, error) {
 	if d.released {
 		return nil, resource.ErrReleased
 	}
-	return &resource.Fence{}, nil
+	return resource.NewFence(), nil
 }
 
 // ResetFence is a no-op on the browser build: fences auto-reset.

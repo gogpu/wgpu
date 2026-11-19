@@ -140,10 +140,13 @@ type Device struct {
 	valid *atomic.Bool
 
 	// errorScopeManager manages the error scope stack for this device.
-	// Initialized lazily on first use. This is a plain pointer because
-	// Device is passed by value in the legacy ID-based API, which
-	// prohibits noCopy types (sync.Once, atomic.Pointer, etc.).
-	// Thread-safety is provided by ErrorScopeManager's internal mutex.
+	// Every constructor sets it (NewDevice and the legacy registration path),
+	// so the Device-level concurrency promise holds with no lazy write on a
+	// concurrent path; the nil-safe accessor in error_scope.go only serves
+	// zero-value Devices. This is a plain pointer because Device is passed by
+	// value in the legacy ID-based API, which prohibits noCopy types
+	// (sync.Once, atomic.Pointer, etc.). Thread-safety is provided by
+	// ErrorScopeManager's internal mutex.
 	errorScopeManager *ErrorScopeManager
 
 	// indirectValidation holds the GPU resources for validating indirect
