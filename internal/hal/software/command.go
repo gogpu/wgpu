@@ -743,6 +743,12 @@ type RenderPassEncoder struct {
 	// (P1-SW-015). nil without a depth aspect.
 	passDepthBuffer *raster.DepthBuffer
 
+	// drawPipe is the raster pipeline the pass's draws run through: created by
+	// the pass's first draw and reset for each further one, so the target
+	// buffers a draw needs are allocated once per pass, not once per draw
+	// (rasterPipeline in draw.go).
+	drawPipe *raster.Pipeline
+
 	// colorTargets holds the texture each color attachment renders into, by
 	// attachment index (resolveColorTargets): the view's texture when it is a
 	// single image, the pass-local target of the view's mip level, array
