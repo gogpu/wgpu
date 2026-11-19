@@ -3,6 +3,8 @@
 package resource
 
 import (
+	"sync/atomic"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
@@ -10,9 +12,12 @@ import (
 
 // Sampler represents a texture sampler.
 type Sampler struct {
-	hal      hal.Sampler
-	device   core.DeviceView
-	released bool
+	hal    hal.Sampler
+	device core.DeviceView
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 	// ref counts the sampler's owners: the application until Release, and
 	// every bind group that binds it until that bind group is destroyed, as
 	// Rust wgpu-core's BindGroup holds an Arc<Sampler>. The HAL sampler is
@@ -26,7 +31,7 @@ type Sampler struct {
 
 // NewSampler builds a sampler over a HAL object and the shared device view.
 func NewSampler(halSampler hal.Sampler, device core.DeviceView, ref *core.ResourceRef, mag, minFilter, mipmap gputypes.FilterMode) *Sampler {
-	return &Sampler{hal: halSampler, device: device, ref: ref, magFilter: mag, minFilter: minFilter, mipmapFilter: mipmap}
+	return &Sampler{hal: halSampler, device: device, ref: ref, magFilter: mag, minFilter: minFilter, mipmapFilter: mipmap, released: new(atomic.Bool)}
 }
 
 // HAL returns the HAL sampler, or nil.
@@ -71,7 +76,7 @@ func (s *Sampler) MipmapFilter() gputypes.FilterMode {
 
 // IsReleased reports whether Release has run on the sampler.
 func (s *Sampler) IsReleased() bool {
-	return s != nil && s.released
+	return s != nil && s.released != nil && s.released.Load()
 }
 
 // Release drops the application's reference to the sampler. The HAL sampler
@@ -79,10 +84,9 @@ func (s *Sampler) IsReleased() bool {
 // completed every submission that may use it: a sampler released after a bind
 // group that binds it was recorded stays valid for that work (P1-CORE-020).
 func (s *Sampler) Release() {
-	if s.released {
+	if s.released == nil || !s.released.CompareAndSwap(false, true) {
 		return
 	}
-	s.released = true
 	if s.ref != nil {
 		s.ref.Drop()
 		return

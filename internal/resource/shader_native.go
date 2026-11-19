@@ -5,6 +5,7 @@ package resource
 import (
 	"bytes"
 	"encoding/binary"
+	"sync/atomic"
 
 	"github.com/gogpu/naga/ir"
 	"github.com/gogpu/naga/valid"
@@ -15,9 +16,12 @@ import (
 
 // ShaderModule represents a compiled shader module.
 type ShaderModule struct {
-	hal      hal.ShaderModule
-	device   core.DeviceView
-	released bool
+	hal    hal.ShaderModule
+	device core.DeviceView
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 	// irModule stores the parsed naga IR for this shader module.
 	// Used for late buffer binding size validation at draw/dispatch time.
 	// Matches Rust wgpu-core's ShaderModule.interface which stores the
@@ -119,7 +123,7 @@ func NewShaderModule(halModule hal.ShaderModule, device core.DeviceView, irModul
 	if irModule != nil {
 		infoPtr = &info
 	}
-	return &ShaderModule{hal: halModule, device: device, irModule: irModule, irInfo: infoPtr}
+	return &ShaderModule{hal: halModule, device: device, irModule: irModule, irInfo: infoPtr, released: new(atomic.Bool)}
 }
 
 // HAL returns the HAL shader module, or nil.
@@ -295,10 +299,9 @@ func extractShaderBindingSizes(module *ir.Module, uses []valid.GlobalUse) map[ir
 // Release destroys the shader module. Destruction is deferred until the GPU
 // completes any submission that may reference this shader module.
 func (m *ShaderModule) Release() {
-	if m.released {
+	if m.released == nil || !m.released.CompareAndSwap(false, true) {
 		return
 	}
-	m.released = true
 
 	halDevice := m.device.HALDevice()
 	if halDevice == nil {

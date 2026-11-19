@@ -3,6 +3,8 @@
 package resource
 
 import (
+	"sync/atomic"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/core/track"
@@ -17,8 +19,11 @@ type Texture struct {
 	// viewFormats is a copy of the TextureDescriptor.ViewFormats the texture
 	// was created with: the formats a view may reinterpret it as
 	// (CreateTextureView). It is a pointer so Texture stays a comparable type.
-	viewFormats  *[]gputypes.TextureFormat
-	released     bool
+	viewFormats *[]gputypes.TextureFormat
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released     *atomic.Bool
 	surface      *core.Surface
 	surfaceLease uint64
 
@@ -47,20 +52,20 @@ type Texture struct {
 // NewTexture builds a texture over a HAL object and the shared device view.
 // The device that creates a texture is the only caller.
 func NewTexture(halTexture hal.Texture, device core.DeviceView, format gputypes.TextureFormat, viewFormats *[]gputypes.TextureFormat, coreTexture *core.Texture) *Texture {
-	return &Texture{hal: halTexture, device: device, format: format, viewFormats: viewFormats, coreTexture: coreTexture}
+	return &Texture{hal: halTexture, device: device, format: format, viewFormats: viewFormats, coreTexture: coreTexture, released: new(atomic.Bool)}
 }
 
 // NewSurfaceTexture builds a texture that borrows a surface image: it carries
 // the surface and lease so the HAL handle is usable only for that acquisition.
 func NewSurfaceTexture(halTexture hal.Texture, device core.DeviceView, format gputypes.TextureFormat, surface *core.Surface, surfaceLease uint64, coreTexture *core.Texture) *Texture {
-	return &Texture{hal: halTexture, device: device, format: format, surface: surface, surfaceLease: surfaceLease, coreTexture: coreTexture}
+	return &Texture{hal: halTexture, device: device, format: format, surface: surface, surfaceLease: surfaceLease, coreTexture: coreTexture, released: new(atomic.Bool)}
 }
 
 // NewDetachedTexture builds a texture that carries only the descriptor's
 // metadata: no device and no HAL object. It backs wgpu's detached-texture
 // factory; Release on it is a no-op.
 func NewDetachedTexture(format gputypes.TextureFormat, viewFormats *[]gputypes.TextureFormat) *Texture {
-	return &Texture{format: format, viewFormats: viewFormats}
+	return &Texture{format: format, viewFormats: viewFormats, released: new(atomic.Bool)}
 }
 
 // HAL returns the HAL texture, or nil for a texture without one.
@@ -103,7 +108,7 @@ func (t *Texture) SurfaceLease() uint64 {
 // one operation; acquisition and presentation are serialized by the render
 // loop, so the lease remains stable across those calls.
 func (t *Texture) ResolveHAL() hal.Texture {
-	if t == nil || t.released {
+	if t == nil || t.IsReleased() {
 		return nil
 	}
 	return t.RecordedHAL()
@@ -128,10 +133,15 @@ func (t *Texture) RecordedHAL() hal.Texture {
 		}
 		return t.hal
 	}
-	if t.released && t.Ref() == nil {
+	if t.IsReleased() && t.Ref() == nil {
 		return nil
 	}
 	return t.hal
+}
+
+// IsReleased reports whether Release has run on the texture.
+func (t *Texture) IsReleased() bool {
+	return t != nil && t.released != nil && t.released.Load()
 }
 
 // Format returns the texture format.
@@ -152,23 +162,20 @@ func (t *Texture) ViewFormatList() []gputypes.TextureFormat {
 // This prevents use-after-free on DX12/Vulkan, as Rust wgpu-core's
 // Arc<Texture> does.
 func (t *Texture) Release() {
-	if t.released {
+	if t.released == nil || !t.released.CompareAndSwap(false, true) {
 		return
 	}
 	// Surface textures are borrowed swapchain images. The wrapper never owns
 	// their HAL lifetime, even while the acquisition is still active.
 	if t.surface != nil {
-		t.released = true
 		return
 	}
 	// A detached texture (wgputest.NewDetachedTexture) has no device and no
 	// HAL object: Release only marks it released. Reaching the deferred
 	// destroy would dereference the nil device view.
 	if t.device == nil {
-		t.released = true
 		return
 	}
-	t.released = true
 
 	if ref := t.Ref(); ref != nil {
 		ref.Drop()
@@ -200,10 +207,13 @@ func (t *Texture) NeedsStencilBlit(aspect gputypes.TextureAspect) bool {
 
 // TextureView represents a view into a texture.
 type TextureView struct {
-	hal          hal.TextureView
-	device       core.DeviceView
-	texture      *Texture
-	released     bool
+	hal     hal.TextureView
+	device  core.DeviceView
+	texture *Texture
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released     *atomic.Bool
 	surface      *core.Surface
 	surfaceLease uint64
 	// ref counts the view's owners: the application, bind groups and command
@@ -269,6 +279,7 @@ func NewTextureView(init *TextureViewInit) *TextureView {
 		mipLevelCount:   init.MipLevelCount,
 		format:          init.Format,
 		aspect:          init.Aspect,
+		released:        new(atomic.Bool),
 	}
 }
 
@@ -376,7 +387,7 @@ func (v *TextureView) SetInternalUsage(usage gputypes.TextureUsage) {
 // Like Texture.ResolveHAL, callers may resolve repeatedly within one serialized
 // encoder operation without extending the surface acquisition lifetime.
 func (v *TextureView) ResolveHAL() hal.TextureView {
-	if v == nil || v.released || v.hal == nil || v.device == nil || v.device.IsReleased() {
+	if v == nil || v.IsReleased() || v.hal == nil || v.device == nil || v.device.IsReleased() {
 		return nil
 	}
 	if v.surface != nil && !v.surface.AcquisitionValid(v.surfaceLease) {
@@ -391,10 +402,15 @@ func (v *TextureView) ResolveHAL() hal.TextureView {
 // Texture returns the parent Texture that this view was created from.
 // Returns nil if the view has been released.
 func (v *TextureView) Texture() *Texture {
-	if v == nil || v.released {
+	if v == nil || v.IsReleased() {
 		return nil
 	}
 	return v.texture
+}
+
+// IsReleased reports whether Release has run on the texture view.
+func (v *TextureView) IsReleased() bool {
+	return v != nil && v.released != nil && v.released.Load()
 }
 
 // Release drops the application's reference to the texture view. The HAL
@@ -404,10 +420,9 @@ func (v *TextureView) Texture() *Texture {
 // prevents descriptor use-after-free on DX12 with maxFramesInFlight=2
 // (BUG-DX12-007).
 func (v *TextureView) Release() {
-	if v.released {
+	if v.released == nil || !v.released.CompareAndSwap(false, true) {
 		return
 	}
-	v.released = true
 
 	if v.ref != nil {
 		v.ref.Drop()

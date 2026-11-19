@@ -273,7 +273,7 @@ func (d *Device) CreateFence() (*resource.Fence, error) {
 	if d.released {
 		return nil, core.ErrReleased
 	}
-	return &resource.Fence{}, nil
+	return resource.NewFence(), nil
 }
 
 // ResetFence is a no-op on the rust build and always succeeds.

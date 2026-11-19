@@ -3,15 +3,20 @@
 package resource
 
 import (
+	"sync/atomic"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
 )
 
 // Texture represents a GPU texture.
 type Texture struct {
-	browser  *browser.Texture
-	format   gputypes.TextureFormat
-	released bool
+	browser *browser.Texture
+	format  gputypes.TextureFormat
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 
 	// Pub caches the public wrapper (wgpu.Texture) built over this texture; see
 	// the native Texture.Pub for the identity and allocation contract.
@@ -20,13 +25,13 @@ type Texture struct {
 
 // NewTexture builds a texture over a browser texture object.
 func NewTexture(b *browser.Texture, format gputypes.TextureFormat) *Texture {
-	return &Texture{browser: b, format: format}
+	return &Texture{browser: b, format: format, released: new(atomic.Bool)}
 }
 
 // NewDetachedTexture builds a texture that carries only the descriptor's
 // format: no backend object. It backs wgpu's detached-texture factory.
 func NewDetachedTexture(format gputypes.TextureFormat) *Texture {
-	return &Texture{format: format}
+	return &Texture{format: format, released: new(atomic.Bool)}
 }
 
 // Browser returns the browser texture object, or nil.
@@ -42,10 +47,9 @@ func (t *Texture) Format() gputypes.TextureFormat { return t.format }
 
 // Release destroys the texture.
 func (t *Texture) Release() {
-	if t.released {
+	if t.released == nil || !t.released.CompareAndSwap(false, true) {
 		return
 	}
-	t.released = true
 	if t.browser != nil {
 		t.browser.Destroy()
 	}
@@ -53,14 +57,17 @@ func (t *Texture) Release() {
 
 // TextureView represents a view into a texture.
 type TextureView struct {
-	browser  *browser.TextureView
-	texture  *Texture
-	released bool
+	browser *browser.TextureView
+	texture *Texture
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 }
 
 // NewTextureView builds a texture view over a browser texture view object.
 func NewTextureView(v *browser.TextureView, parent *Texture) *TextureView {
-	return &TextureView{browser: v, texture: parent}
+	return &TextureView{browser: v, texture: parent, released: new(atomic.Bool)}
 }
 
 // Browser returns the browser texture view object, or nil.
@@ -86,8 +93,7 @@ func (v *TextureView) Texture() *Texture { return v.texture }
 
 // Release marks the texture view for destruction.
 func (v *TextureView) Release() {
-	if v.released {
+	if v.released == nil || !v.released.CompareAndSwap(false, true) {
 		return
 	}
-	v.released = true
 }
