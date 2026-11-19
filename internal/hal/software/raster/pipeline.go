@@ -60,9 +60,12 @@ type Pipeline struct {
 	// tests instead of the color buffer (SetColorOutput).
 	colorOutput ColorOutput
 
-	// Buffers
+	// Buffers. Both are allocated on first use (see NewPipeline); ownDepth
+	// tells whether depthBuffer was allocated here rather than set by
+	// SetDepthBuffer, so Reset clears its own buffer and drops the caller's.
 	colorBuffer []byte // RGBA8 format (4 bytes per pixel)
 	depthBuffer *DepthBuffer
+	ownDepth    bool
 	width       int
 	height      int
 
@@ -71,38 +74,97 @@ type Pipeline struct {
 }
 
 // NewPipeline creates a new rendering pipeline with the given dimensions.
-// The color buffer is initialized to black, and depth buffer to 1.0 (far).
+//
+// The color and depth buffers are allocated on the first use that needs one,
+// with a new pipeline's contents then: black for the color buffer, 1.0 (far)
+// for the depth buffer. A draw whose colors are routed with SetColorOutput, and
+// whose depth tests run against a buffer given with SetDepthBuffer, needs
+// neither and allocates neither.
 func NewPipeline(width, height int) *Pipeline {
-	size := width * height * 4 // RGBA8
+	p := &Pipeline{}
+	p.reset(width, height)
+	return p
+}
 
-	return &Pipeline{
-		viewport: Viewport{
-			X:        0,
-			Y:        0,
-			Width:    width,
-			Height:   height,
-			MinDepth: 0.0,
-			MaxDepth: 1.0,
-		},
-		depthTest: false,
-		// No depth writes by default, matching WebGPU: depth writes exist only
-		// through a depthWriteEnabled depth-stencil state, and a pipeline with
-		// no attachment (the 2D case) must not pay a throwaway per-fragment
-		// write into a buffer nothing tests against. Rust's DepthStencilState
-		// default is depth_write_enabled = false for the same reason.
-		depthWrite:      false,
-		depthCompare:    CompareLess,
-		cullMode:        CullNone,
-		frontFace:       FrontFaceCCW,
-		blendState:      BlendDisabled,
-		stencilBuffer:   nil,
-		stencilState:    DefaultStencilState(),
-		scissorRect:     nil,
-		clippingEnabled: false,
-		colorBuffer:     make([]byte, size),
-		depthBuffer:     NewDepthBuffer(width, height),
-		width:           width,
-		height:          height,
+// Reset returns p to the state NewPipeline gives a new pipeline of the given
+// dimensions: default render state, and buffers with a new pipeline's contents
+// when they are allocated (color black, depth 1.0). A buffer p allocated for
+// itself of the same size keeps its allocation and is cleared instead of
+// allocated again, so a pass that resets one pipeline per draw allocates its
+// target buffers once. A depth buffer set by SetDepthBuffer belongs to the
+// caller and is dropped, never cleared.
+func (p *Pipeline) Reset(width, height int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.reset(width, height)
+}
+
+// reset is Reset without the lock, so construction and Reset share it.
+func (p *Pipeline) reset(width, height int) {
+	if p.parallelRasterizer != nil {
+		p.parallelRasterizer.Close()
+		p.parallelRasterizer = nil
+	}
+
+	p.viewport = Viewport{
+		X:        0,
+		Y:        0,
+		Width:    width,
+		Height:   height,
+		MinDepth: 0.0,
+		MaxDepth: 1.0,
+	}
+	p.depthTest = false
+	// No depth writes by default, matching WebGPU: depth writes exist only
+	// through a depthWriteEnabled depth-stencil state, and a pipeline with
+	// no attachment (the 2D case) must not pay a throwaway per-fragment
+	// write into a buffer nothing tests against. Rust's DepthStencilState
+	// default is depth_write_enabled = false for the same reason.
+	p.depthWrite = false
+	p.depthCompare = CompareLess
+	p.cullMode = CullNone
+	p.frontFace = FrontFaceCCW
+	p.blendState = BlendDisabled
+	p.stencilBuffer = nil
+	p.stencilState = DefaultStencilState()
+	p.stencilBack = StencilState{}
+	p.scissorRect = nil
+	p.clippingEnabled = false
+	p.useParallel = false
+	p.parallelConfig = ParallelConfig{}
+	p.colorOutput = nil
+
+	p.width = width
+	p.height = height
+	if len(p.colorBuffer) != width*height*4 {
+		p.colorBuffer = nil
+	} else {
+		clear(p.colorBuffer)
+	}
+	if p.depthBuffer != nil {
+		if !p.ownDepth || p.depthBuffer.Width() != width || p.depthBuffer.Height() != height {
+			p.depthBuffer = nil
+			p.ownDepth = false
+		} else {
+			p.depthBuffer.Clear(1.0)
+		}
+	}
+}
+
+// ensureColorBuffer allocates the pipeline's color buffer, transparent black,
+// when it has none.
+func (p *Pipeline) ensureColorBuffer() {
+	if p.colorBuffer == nil {
+		p.colorBuffer = make([]byte, p.width*p.height*4)
+	}
+}
+
+// ensureDepthBuffer allocates the pipeline's own depth buffer, initialized to
+// the far plane, when it has none.
+func (p *Pipeline) ensureDepthBuffer() {
+	if p.depthBuffer == nil {
+		p.depthBuffer = NewDepthBuffer(p.width, p.height)
+		p.ownDepth = true
 	}
 }
 
@@ -122,6 +184,8 @@ func (p *Pipeline) Clear(r, g, b, a float32) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	p.ensureColorBuffer()
+
 	// Convert to bytes
 	rb := FloatToUnorm8(r)
 	gb := FloatToUnorm8(g)
@@ -139,6 +203,10 @@ func (p *Pipeline) Clear(r, g, b, a float32) {
 // ClearDepth fills the depth buffer with the specified value.
 // Typically use 1.0 (far plane) to reset the depth buffer.
 func (p *Pipeline) ClearDepth(value float32) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.ensureDepthBuffer()
 	p.depthBuffer.Clear(value)
 }
 
@@ -157,17 +225,26 @@ func (p *Pipeline) GetViewport() Viewport {
 }
 
 // SetDepthTest enables or disables depth testing and sets the compare function.
+// Enabling it is the first use that needs a depth buffer, so the pipeline
+// allocates its own then (unless SetDepthBuffer gave it one).
 func (p *Pipeline) SetDepthTest(enabled bool, compare CompareFunc) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if enabled {
+		p.ensureDepthBuffer()
+	}
 	p.depthTest = enabled
 	p.depthCompare = compare
 }
 
 // SetDepthWrite enables or disables writing to the depth buffer.
+// Enabling it is the first use that needs a depth buffer, as for SetDepthTest.
 func (p *Pipeline) SetDepthWrite(enabled bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if enabled {
+		p.ensureDepthBuffer()
+	}
 	p.depthWrite = enabled
 }
 
@@ -223,6 +300,7 @@ func (p *Pipeline) writeColor(x, y int, color [4]float32, blendState BlendState,
 	}
 	idx := (y*p.width + x) * 4
 	p.mu.Lock()
+	p.ensureColorBuffer()
 	if blendState.Enabled {
 		r, g, b, a := BlendFloatToByte(color,
 			p.colorBuffer[idx+0], p.colorBuffer[idx+1],
@@ -244,10 +322,16 @@ func (p *Pipeline) writeColor(x, y int, color [4]float32, blendState BlendState,
 // SetDepthBuffer replaces the pipeline's own depth buffer with buf, so draws
 // test against and write into a depth buffer that outlives the pipeline (a
 // render pass's depth attachment). buf must have the pipeline's dimensions.
+// A nil buf returns the pipeline to allocating its own on the next use.
 func (p *Pipeline) SetDepthBuffer(buf *DepthBuffer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.depthBuffer = buf
+	p.ownDepth = false
+	if buf == nil && (p.depthTest || p.depthWrite) {
+		// Depth testing or writing is on, so the next draw needs a buffer.
+		p.ensureDepthBuffer()
+	}
 }
 
 // SetStencilBuffer sets the stencil buffer to use for stencil testing.
@@ -962,6 +1046,7 @@ func (p *Pipeline) GetColorBuffer() []byte {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	p.ensureColorBuffer()
 	result := make([]byte, len(p.colorBuffer))
 	copy(result, p.colorBuffer)
 	return result
@@ -969,6 +1054,10 @@ func (p *Pipeline) GetColorBuffer() []byte {
 
 // GetDepthBuffer returns the depth buffer.
 func (p *Pipeline) GetDepthBuffer() *DepthBuffer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.ensureDepthBuffer()
 	return p.depthBuffer
 }
 
@@ -982,6 +1071,11 @@ func (p *Pipeline) GetPixel(x, y int) (r, g, b, a byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// A color buffer that was never allocated holds a new pipeline's black,
+	// which is what a fragment reading it before any write sees.
+	if p.colorBuffer == nil {
+		return 0, 0, 0, 0
+	}
 	idx := (y*p.width + x) * 4
 	return p.colorBuffer[idx], p.colorBuffer[idx+1], p.colorBuffer[idx+2], p.colorBuffer[idx+3]
 }
@@ -996,6 +1090,7 @@ func (p *Pipeline) SetPixel(x, y int, r, g, b, a byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	p.ensureColorBuffer()
 	idx := (y*p.width + x) * 4
 	p.colorBuffer[idx+0] = r
 	p.colorBuffer[idx+1] = g
@@ -1013,6 +1108,7 @@ func (p *Pipeline) Resize(width, height int) {
 	p.height = height
 	p.colorBuffer = make([]byte, width*height*4)
 	p.depthBuffer = NewDepthBuffer(width, height)
+	p.ownDepth = true
 
 	// Update viewport if it was full-screen
 	if p.viewport.X == 0 && p.viewport.Y == 0 {

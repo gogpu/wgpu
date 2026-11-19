@@ -392,7 +392,7 @@ func (r *RenderPassEncoder) executeVertexDraw(target *Texture, w, h int, vertexC
 		return
 	}
 
-	pipe := raster.NewPipeline(w, h)
+	pipe := r.rasterPipeline(w, h)
 	r.configureRasterPipeline(pipe)
 	targets := r.routeColorOutput(pipe)
 
@@ -1298,7 +1298,7 @@ func (r *RenderPassEncoder) executeSPIRVDraw(w, h int, vertexCount, instanceCoun
 		r.applyClear()
 	}
 
-	pipe := raster.NewPipeline(w, h)
+	pipe := r.rasterPipeline(w, h)
 	r.configureRasterPipeline(pipe)
 	targets := r.routeColorOutput(pipe)
 
@@ -1759,8 +1759,23 @@ func clampBlitBounds(minX, minY, maxX, maxY int, scissor [4]uint32) (int, int, i
 	return minX, minY, maxX, maxY
 }
 
+// rasterPipeline returns the pass's raster pipeline for an extent: created by
+// the pass's first draw and reset for each further draw, so the color and
+// depth buffers a draw needs are allocated once per pass instead of once per
+// draw (#419). The extent is the pass's render area, the same for every draw
+// of the pass, so the reset keeps the allocations; a draw of another size gets
+// a pipeline of its own.
+func (r *RenderPassEncoder) rasterPipeline(w, h int) *raster.Pipeline {
+	if r.drawPipe == nil || r.drawPipe.Width() != w || r.drawPipe.Height() != h {
+		r.drawPipe = raster.NewPipeline(w, h)
+		return r.drawPipe
+	}
+	r.drawPipe.Reset(w, h)
+	return r.drawPipe
+}
+
 // configureRasterPipeline applies scissor, depth, stencil, and blend state
-// from the command encoder to a newly created raster.Pipeline. This is the
+// from the command encoder to the raster pipeline of a draw. This is the
 // single point where WebGPU render pass state is translated to the raster
 // package's config.
 func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
