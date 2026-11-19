@@ -7,7 +7,7 @@ package resource
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 
 	"github.com/gogpu/wgpu/internal/core"
 )
@@ -44,14 +44,24 @@ type MapPending struct {
 	// has exactly one owner between Get and Put, so a plain field is enough
 	// and no atomic is needed. release leaves it set — see the note there.
 	Pub any
+
+	// released is the CAS guard that admits exactly one return to the pool:
+	// concurrent Release calls see CompareAndSwap succeed for one caller only.
+	// It is nil only on an unguarded zero value, whose Release is a no-op. It
+	// is re-armed by acquireMapPending.
+	released *atomic.Bool
 }
 
-var mapPendingPool = sync.Pool{
-	New: func() any { return &MapPending{} },
-}
+var mapPendingPool = newHandlePool[*MapPending](func() any {
+	return &MapPending{released: new(atomic.Bool)}
+})
 
 func acquireMapPending(buf *Buffer, waiter *core.MapWaiter) *MapPending {
-	p := mapPendingPool.Get().(*MapPending)
+	p := mapPendingPool.Get()
+	if p.released == nil {
+		p.released = new(atomic.Bool)
+	}
+	p.released.Store(false)
 	p.buf = buf
 	p.waiter = waiter
 	p.resolved = false
@@ -60,7 +70,7 @@ func acquireMapPending(buf *Buffer, waiter *core.MapWaiter) *MapPending {
 }
 
 func (p *MapPending) release() {
-	if p == nil {
+	if p == nil || p.released == nil || !p.released.CompareAndSwap(false, true) {
 		return
 	}
 	// Only the per-mapping fields are cleared. Pub is deliberately left set:

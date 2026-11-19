@@ -14,9 +14,12 @@ import (
 
 // BindGroupLayout defines the structure of resource bindings for shaders.
 type BindGroupLayout struct {
-	hal      hal.BindGroupLayout
-	device   core.DeviceView
-	released bool
+	hal    hal.BindGroupLayout
+	device core.DeviceView
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 	// entries stores the layout entries for entry-by-entry compatibility checks.
 	// This matches Rust wgpu-core's pattern where binder.check_compatibility()
 	// compares layouts by their entries, not by pointer identity.
@@ -26,7 +29,7 @@ type BindGroupLayout struct {
 // NewBindGroupLayout builds a bind group layout over a HAL object and the
 // shared device view.
 func NewBindGroupLayout(halLayout hal.BindGroupLayout, device core.DeviceView, entries []gputypes.BindGroupLayoutEntry) *BindGroupLayout {
-	return &BindGroupLayout{hal: halLayout, device: device, entries: entries}
+	return &BindGroupLayout{hal: halLayout, device: device, entries: entries, released: new(atomic.Bool)}
 }
 
 // HAL returns the HAL bind group layout, or nil.
@@ -48,7 +51,7 @@ func (l *BindGroupLayout) Entries() []gputypes.BindGroupLayoutEntry {
 
 // IsReleased reports whether Release has run on the layout.
 func (l *BindGroupLayout) IsReleased() bool {
-	return l != nil && l.released
+	return l != nil && l.released != nil && l.released.Load()
 }
 
 // IsCompatibleWith returns true if two layouts have identical entries.
@@ -112,10 +115,9 @@ func optionalEqual[T comparable](a, b *T) bool {
 // Release destroys the bind group layout. Destruction is deferred until the
 // GPU completes any submission that may reference this layout.
 func (l *BindGroupLayout) Release() {
-	if l.released {
+	if l.released == nil || !l.released.CompareAndSwap(false, true) {
 		return
 	}
-	l.released = true
 
 	halDevice := l.device.HALDevice()
 	if halDevice == nil {
@@ -137,9 +139,12 @@ func (l *BindGroupLayout) Release() {
 
 // PipelineLayout defines the bind group layout arrangement for a pipeline.
 type PipelineLayout struct {
-	hal      hal.PipelineLayout
-	device   core.DeviceView
-	released bool
+	hal    hal.PipelineLayout
+	device core.DeviceView
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 	// bindGroupCount is the number of bind group layouts in this layout.
 	// Used for validation in SetBindGroup.
 	bindGroupCount uint32
@@ -157,7 +162,7 @@ type PipelineLayout struct {
 // NewPipelineLayout builds a pipeline layout over a HAL object and the shared
 // device view.
 func NewPipelineLayout(halLayout hal.PipelineLayout, device core.DeviceView, bindGroupCount uint32, bindGroupLayouts []*BindGroupLayout, ref *core.ResourceRef) *PipelineLayout {
-	return &PipelineLayout{hal: halLayout, device: device, bindGroupCount: bindGroupCount, bindGroupLayouts: bindGroupLayouts, ref: ref}
+	return &PipelineLayout{hal: halLayout, device: device, bindGroupCount: bindGroupCount, bindGroupLayouts: bindGroupLayouts, ref: ref, released: new(atomic.Bool)}
 }
 
 // HAL returns the HAL pipeline layout, or nil.
@@ -194,7 +199,7 @@ func (l *PipelineLayout) Ref() *core.ResourceRef {
 
 // IsReleased reports whether Release has run on the layout.
 func (l *PipelineLayout) IsReleased() bool {
-	return l != nil && l.released
+	return l != nil && l.released != nil && l.released.Load()
 }
 
 // Release drops the application's reference to the pipeline layout. The HAL
@@ -202,10 +207,9 @@ func (l *PipelineLayout) IsReleased() bool {
 // GPU has completed every submission that may use it: a layout released after
 // its pipeline was created stays valid for that pipeline's binds (P2-CORE-022).
 func (l *PipelineLayout) Release() {
-	if l.released {
+	if l.released == nil || !l.released.CompareAndSwap(false, true) {
 		return
 	}
-	l.released = true
 	if l.ref != nil {
 		l.ref.Drop()
 		return

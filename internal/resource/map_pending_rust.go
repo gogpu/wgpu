@@ -4,6 +4,7 @@ package resource
 
 import (
 	"context"
+	"sync/atomic"
 
 	rwgpu "github.com/go-webgpu/webgpu/wgpu"
 )
@@ -14,6 +15,10 @@ import (
 type MapPending struct {
 	r   *rwgpu.MapPending
 	buf *Buffer
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 }
 
 // Status returns the current state of the pending map without blocking.
@@ -34,7 +39,7 @@ func (p *MapPending) Wait(ctx context.Context) error {
 
 // Release discards the MapPending handle.
 func (p *MapPending) Release() {
-	if p == nil {
+	if p == nil || p.released == nil || !p.released.CompareAndSwap(false, true) {
 		return
 	}
 	if p.r != nil {

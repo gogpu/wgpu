@@ -11,7 +11,8 @@ import "github.com/gogpu/wgpu/internal/resource"
 //
 // The implementation lives in internal/resource (ADR-070); Release is one
 // delegation. A zero-value Fence has no implementation: Release panics on it,
-// as the pre-move type did (a nil device view).
+// as the pre-move type did (a nil device view); the zero-value tests pin that
+// contract.
 type Fence struct {
 	impl *resource.Fence
 }

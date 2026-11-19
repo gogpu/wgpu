@@ -11,7 +11,8 @@ import "github.com/gogpu/wgpu/internal/resource"
 //
 // The implementation lives in internal/resource (ADR-070); Release is one
 // delegation. A zero-value ShaderModule has no implementation: Release panics
-// on it, as the pre-move type did (a nil device view).
+// on it, as the pre-move type did (a nil device view); the zero-value tests
+// pin that contract.
 type ShaderModule struct {
 	impl *resource.ShaderModule
 }

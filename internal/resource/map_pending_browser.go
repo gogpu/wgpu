@@ -2,7 +2,10 @@
 
 package resource
 
-import "context"
+import (
+	"context"
+	"sync/atomic"
+)
 
 // MapPending is a handle to an in-flight Buffer.MapAsync on the browser.
 //
@@ -18,6 +21,10 @@ type MapPending struct {
 	done     chan error
 	resolved bool
 	err      error
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 }
 
 // Status returns the current state of the pending map without blocking.
@@ -71,7 +78,7 @@ func (p *MapPending) Wait(ctx context.Context) error {
 // still in flight is allowed; the JS Promise continues to resolve but its
 // completion is not observable through this handle anymore.
 func (p *MapPending) Release() {
-	if p == nil {
+	if p == nil || p.released == nil || !p.released.CompareAndSwap(false, true) {
 		return
 	}
 	p.buf = nil

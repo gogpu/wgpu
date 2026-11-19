@@ -2,6 +2,8 @@
 
 package resource
 
+import "sync/atomic"
+
 // MappedRange is a safe view over a region of a mapped GPU buffer.
 //
 // On the browser backend, MappedRange lazily copies data from the JS
@@ -16,6 +18,10 @@ type MappedRange struct {
 	offset uint64
 	size   uint64
 	valid  bool
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 
 	// cached holds the Go-side copy of the mapped data. Lazily populated
 	// on first Bytes() call (matching Rust temporary_mapping: OnceCell).
@@ -99,7 +105,7 @@ func (m *MappedRange) Offset() uint64 {
 // Release invalidates the MappedRange. After Release, Bytes() returns nil.
 // If dirty data has not been flushed, Release auto-flushes it to JS.
 func (m *MappedRange) Release() {
-	if m == nil {
+	if m == nil || m.released == nil || !m.released.CompareAndSwap(false, true) {
 		return
 	}
 	// Auto-flush dirty data (matches Rust Drop behavior).

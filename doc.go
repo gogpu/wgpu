@@ -55,18 +55,31 @@
 //
 // # Thread Safety
 //
-// Instance, Adapter, and Device are safe for concurrent use.
-// Encoders (CommandEncoder, RenderPassEncoder, ComputePassEncoder) are NOT thread-safe.
+// Instance, Adapter and Device support concurrent method calls. Concurrent
+// Release of Instance, Adapter, Device, Surface and Queue is NOT yet guarded by
+// a compare-and-swap and must not be relied on: a double Release from two
+// goroutines can still destroy the native object twice. That remainder is
+// tracked as P1-CORE-044 and includes the internal snatch guards; until it is
+// closed, do not release one of these types from two goroutines at once.
+// Encoders (CommandEncoder, RenderPassEncoder, ComputePassEncoder) are NOT
+// thread-safe.
 //
-// Resources (Buffer, Texture, TextureView, Sampler, ShaderModule, QuerySet,
-// Fence, BindGroup, BindGroupLayout, PipelineLayout and the pipelines) are
+// Resources — Buffer, Texture, TextureView, Sampler, ShaderModule, QuerySet,
+// Fence, BindGroup, BindGroupLayout, PipelineLayout, RenderPipeline,
+// ComputePipeline, and the pooled MappedRange and MapPending handles — are
 // safe to Release concurrently, from any number of goroutines, together with
 // their other methods: the released flag is a compare-and-swap guard, so
-// exactly one caller wins and at most one HAL destroy is scheduled — the HAL
-// object goes when the last reference drops (on GPU completion for work still
-// in flight). Release is idempotent, and Release on a zero-value resource is
-// a no-op. Every other method of a resource is read-only after construction
-// and safe concurrently, except buffer mapping, where the spec's rule stands:
-// one mapping and one mapped range per buffer at a time, invalid after Unmap
-// or Release.
+// exactly one caller wins and at most one destroy is scheduled (for
+// MappedRange and MapPending, exactly one return to the pool). The HAL object
+// goes when the last reference drops, on GPU completion for work still in
+// flight; Release is idempotent. A zero-value wrapper keeps its pinned
+// per-type contract (see the zero-value tests): Buffer, Texture, TextureView,
+// QuerySet, BindGroup, the pipelines, MappedRange and MapPending no-op on
+// Release, while Sampler, BindGroupLayout, PipelineLayout, ShaderModule and
+// Fence panic on it, as they did before the ADR-070 move. Every other method
+// of a resource is read-only after construction and
+// safe concurrently, except buffer mapping, where the spec's rule stands: one
+// mapping and one mapped range per buffer at a time, invalid after Unmap or
+// Release. MappedRange.Bytes/Flush and MapPending.Status/Wait are
+// caller-serialized with Unmap and with Release, as before.
 package wgpu

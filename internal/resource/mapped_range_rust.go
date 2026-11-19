@@ -2,12 +2,20 @@
 
 package resource
 
-import rwgpu "github.com/go-webgpu/webgpu/wgpu"
+import (
+	"sync/atomic"
+
+	rwgpu "github.com/go-webgpu/webgpu/wgpu"
+)
 
 // MappedRange is a safe view over a region of a mapped GPU buffer.
 // On Rust backend, this wraps go-webgpu/webgpu MappedRange.
 type MappedRange struct {
 	r *rwgpu.MappedRange
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 }
 
 // Bytes returns the mapped data as a read-only byte slice.
@@ -49,7 +57,7 @@ func (m *MappedRange) Offset() uint64 {
 
 // Release invalidates the MappedRange.
 func (m *MappedRange) Release() {
-	if m == nil {
+	if m == nil || m.released == nil || !m.released.CompareAndSwap(false, true) {
 		return
 	}
 	m.r = nil

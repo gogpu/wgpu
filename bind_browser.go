@@ -15,7 +15,8 @@ type BindGroupLayout struct {
 	impl *resource.BindGroupLayout
 }
 
-// Release destroys the bind group layout.
+// Release destroys the bind group layout. A zero-value wrapper panics, as the
+// zero-value tests pin.
 func (l *BindGroupLayout) Release() { l.impl.Release() }
 
 // PipelineLayout defines the bind group layout arrangement for a pipeline.
@@ -26,7 +27,8 @@ type PipelineLayout struct {
 	impl *resource.PipelineLayout
 }
 
-// Release destroys the pipeline layout.
+// Release destroys the pipeline layout. A zero-value wrapper panics, as the
+// zero-value tests pin.
 func (l *PipelineLayout) Release() { l.impl.Release() }
 
 // BindGroup represents bound GPU resources for shader access.

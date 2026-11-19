@@ -15,5 +15,6 @@ type ShaderModule struct {
 	impl *resource.ShaderModule
 }
 
-// Release destroys the shader module.
+// Release destroys the shader module. A zero-value wrapper panics, as the
+// zero-value tests pin.
 func (m *ShaderModule) Release() { m.impl.Release() }
