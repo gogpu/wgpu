@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **naga v0.22.6** (from v0.22.5). The subgroup-IR track: ballot-bit ops, clustered collective forms (with the
+  `ClusterSize` field), five ballot-mask builtin values, and the ballot-mask synthesis now written in MSL, HLSL and
+  DXIL, plus the elect `MissingCapabilities` fix. Additive IR only — nothing in wgpu constructs the new forms. The
+  downstream gate proved the writers byte-identical for every existing shader (310-file corpus × four targets:
+  1240 comparisons, zero byte and zero acceptance deltas), so no shader compiles differently.
+
 ## [0.35.1] - 2026-11-17
 
 ### Added
