@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.35.2] - 2026-11-19
 
 ### Fixed
 
@@ -30,6 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DXIL, plus the elect `MissingCapabilities` fix. Additive IR only — nothing in wgpu constructs the new forms. The
   downstream gate proved the writers byte-identical for every existing shader (310-file corpus × four targets:
   1240 comparisons, zero byte and zero acceptance deltas), so no shader compiles differently.
+
+### Performance
+
+- **The software backend allocates its render targets lazily and reuses one raster pipeline per pass.** Every draw
+  built a fresh `raster.NewPipeline` and allocated a full-size color and depth buffer — 7,372,800 B per draw at
+  720p — although both targets are dead when the draw routes a real color attachment and the pipeline has no depth
+  state; a 512-draw frame allocated 3.84 GB for nothing. One raster pipeline now belongs to the render pass and is
+  reset per draw, and each target is allocated only when something reads or writes it: the standalone color path,
+  a depth test or write, or a caller's depth attachment — and a caller's depth attachment is never dropped by the
+  reuse. Measured on the text-rendering shape (512 draws of 16×16 quads into 1280×720): per-draw bytes
+  7,510,088 → 134,180 (−98.21%) and 3.44× faster; the fullscreen textured blit drops 7.31 MB per draw. The
+  per-pixel interpreter allocations are unchanged — they are the next lever, not addressed here.
 
 ## [0.35.1] - 2026-11-17
 
