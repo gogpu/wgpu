@@ -11,14 +11,21 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"golang.org/x/tools/go/packages"
 )
 
 const modulePath = "github.com/gogpu/wgpu"
@@ -162,52 +169,119 @@ func modulePathOf(gomod string) string {
 	return ""
 }
 
+// listedPackage is the subset of `go list -json` this tool reads.
+type listedPackage struct {
+	ImportPath string
+	Dir        string
+	GoFiles    []string
+	CgoFiles   []string
+	Export     string
+	Error      *struct{ Err string }
+}
+
 // load type-checks the module's public packages for one build context.
-func load(root string, c config) ([]*packages.Package, error) {
-	env := contextEnv(c)
-
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedTypes | packages.NeedTypesSizes,
-		Dir:  root,
-		Env:  env,
-	}
-	pkgs, err := packages.Load(cfg, "./...")
+//
+// The loader deliberately uses only the standard library: `go list -export`
+// produces export data with the running toolchain, and go/importer decodes it
+// with that same toolchain, so the tool cannot drift out of step with the Go
+// version that invokes it (golang.org/x/tools bundles its own export-data
+// reader, which lags a new Go release and fails on a cold build cache with
+// "export data version N is greater than maximum supported version N-1"; the
+// x/tools release that fixes it forces the tools module past the module's own
+// Go minimum). The package under analysis is parsed from source and
+// type-checked here, so parameter names survive into the golden; dependencies
+// come from export data.
+func load(root string, c config) ([]*types.Package, error) {
+	list, err := goList(root, c)
 	if err != nil {
-		return nil, fmt.Errorf("load: %w", err)
+		return nil, err
 	}
 
-	var keep []*packages.Package
-	for _, p := range pkgs {
-		if !include(p.PkgPath) {
+	exports := make(map[string]string, len(list))
+	for _, p := range list {
+		if p.Export != "" {
+			exports[p.ImportPath] = p.Export
+		}
+	}
+
+	fset := token.NewFileSet()
+	imp := importer.ForCompiler(fset, "gc", func(path string) (io.ReadCloser, error) {
+		file, ok := exports[path]
+		if !ok {
+			return nil, fmt.Errorf("no export data for %q", path)
+		}
+		return os.Open(file)
+	})
+
+	var keep []*types.Package
+	for _, p := range list {
+		if !include(p.ImportPath) {
 			continue
 		}
-		if len(p.Errors) > 0 {
-			if excludedByConstraints(p.Errors) {
-				// The package has no files for this context (for example
-				// hal/allbackends under GOOS=js). It is absent from this
-				// context's API, not broken.
+		if len(p.GoFiles) == 0 && len(p.CgoFiles) == 0 {
+			// The package has no files for this context (for example the wasm
+			// build of a native-only package). It is absent from this
+			// context's API, not broken.
+			if p.Error != nil && strings.Contains(p.Error.Err, "build constraints exclude all Go files") {
 				continue
 			}
-			return nil, fmt.Errorf("package %s did not load: %v", p.PkgPath, p.Errors[0])
+			return nil, fmt.Errorf("package %s has no files for %s", p.ImportPath, c.describe())
 		}
-		if p.Types == nil {
-			return nil, fmt.Errorf("package %s has no type information", p.PkgPath)
+		if p.Error != nil {
+			return nil, fmt.Errorf("package %s did not list: %s", p.ImportPath, p.Error.Err)
 		}
-		keep = append(keep, p)
+
+		files := make([]*ast.File, 0, len(p.GoFiles))
+		for _, name := range p.GoFiles {
+			file, err := parser.ParseFile(fset, filepath.Join(p.Dir, name), nil, parser.SkipObjectResolution)
+			if err != nil {
+				return nil, fmt.Errorf("parse %s: %w", filepath.Join(p.Dir, name), err)
+			}
+			files = append(files, file)
+		}
+
+		conf := types.Config{
+			Importer:         imp,
+			Sizes:            types.SizesFor("gc", c.goarch),
+			IgnoreFuncBodies: true,
+		}
+		pkg, err := conf.Check(p.ImportPath, fset, files, nil)
+		if err != nil {
+			return nil, fmt.Errorf("type-check %s: %w", p.ImportPath, err)
+		}
+		keep = append(keep, pkg)
 	}
-	sort.Slice(keep, func(i, j int) bool { return keep[i].PkgPath < keep[j].PkgPath })
+	sort.Slice(keep, func(i, j int) bool { return keep[i].Path() < keep[j].Path() })
 	return keep, nil
 }
 
-// excludedByConstraints reports whether every error is Go's "no files for this
-// build context" message. Anything else is a real load failure.
-func excludedByConstraints(errs []packages.Error) bool {
-	for _, e := range errs {
-		if !strings.Contains(e.Msg, "build constraints exclude all Go files") {
-			return false
-		}
+// goList runs `go list -e -json -deps -export ./...` in the module root with
+// the context forced, and decodes the stream of package objects.
+func goList(root string, c config) ([]listedPackage, error) {
+	cmd := exec.Command("go", "list", "-e", "-json", "-deps", "-export", "./...")
+	cmd.Dir = root
+	cmd.Env = contextEnv(c)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
 	}
-	return true
+
+	dec := json.NewDecoder(bytes.NewReader(out))
+	var list []listedPackage
+	for {
+		var p listedPackage
+		err := dec.Decode(&p)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("decode go list output: %w", err)
+		}
+		list = append(list, p)
+	}
+	return list, nil
 }
 
 // contextEnv is os.Environ with the context forced and the workspace disabled.
@@ -274,11 +348,11 @@ func include(path string) bool {
 
 // render assembles the golden text: a deterministic header, then one block per
 // package in path order.
-func render(c config, pkgs []*packages.Package) (string, stats, error) {
+func render(c config, pkgs []*types.Package) (string, stats, error) {
 	var st stats
 	blocks := make([]string, 0, len(pkgs))
 	for _, p := range pkgs {
-		block := FormatPackage(p.Types)
+		block := FormatPackage(p)
 		st.identifiers += countIdentifiers(p)
 		blocks = append(blocks, block)
 	}
@@ -307,10 +381,10 @@ func render(c config, pkgs []*packages.Package) (string, stats, error) {
 	return b.String(), st, nil
 }
 
-func countIdentifiers(p *packages.Package) int {
+func countIdentifiers(p *types.Package) int {
 	n := 0
-	for _, name := range p.Types.Scope().Names() {
-		if obj := p.Types.Scope().Lookup(name); obj != nil && obj.Exported() {
+	for _, name := range p.Scope().Names() {
+		if obj := p.Scope().Lookup(name); obj != nil && obj.Exported() {
 			n++
 		}
 	}
