@@ -11,7 +11,8 @@ import "github.com/gogpu/wgpu/internal/resource"
 //
 // The implementation lives in internal/resource (ADR-070); Release is one
 // delegation. A zero-value Sampler has no implementation: Release panics on
-// it, as the pre-move type did (a nil device view).
+// it, as the pre-move type did (a nil device view); the zero-value tests pin
+// that contract.
 type Sampler struct {
 	impl *resource.Sampler
 }

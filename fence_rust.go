@@ -16,5 +16,6 @@ type Fence struct {
 	impl *resource.Fence
 }
 
-// Release destroys the fence.
+// Release destroys the fence. A zero-value wrapper panics, as the zero-value
+// tests pin.
 func (f *Fence) Release() { f.impl.Release() }

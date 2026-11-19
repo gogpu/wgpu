@@ -15,5 +15,6 @@ type Sampler struct {
 	impl *resource.Sampler
 }
 
-// Release destroys the sampler.
+// Release destroys the sampler. A zero-value wrapper panics, as the zero-value
+// tests pin.
 func (s *Sampler) Release() { s.impl.Release() }

@@ -5,6 +5,7 @@ package resource
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/browser"
@@ -12,10 +13,13 @@ import (
 
 // Buffer represents a GPU buffer.
 type Buffer struct {
-	browser  *browser.Buffer
-	size     uint64
-	usage    gputypes.BufferUsage
-	released bool
+	browser *browser.Buffer
+	size    uint64
+	usage   gputypes.BufferUsage
+	// released is the CAS guard that admits exactly one destroy: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 
 	// mapState tracks the current mapping state. Updated by MapAsync/Unmap.
 	mapState MapState
@@ -25,7 +29,7 @@ type Buffer struct {
 // usage are cached for validation and reporting; mapState seeds the mapping
 // state (MapStateMapped when the buffer was created MappedAtCreation).
 func NewBufferBrowser(browserBuf *browser.Buffer, size uint64, usage gputypes.BufferUsage, mapState MapState) *Buffer {
-	return &Buffer{browser: browserBuf, size: size, usage: usage, mapState: mapState}
+	return &Buffer{browser: browserBuf, size: size, usage: usage, mapState: mapState, released: new(atomic.Bool)}
 }
 
 // Browser returns the underlying browser GPUBuffer handle.
@@ -54,19 +58,23 @@ func (b *Buffer) Label() string {
 
 // Release destroys the buffer.
 func (b *Buffer) Release() {
-	if b.released {
+	if b.released == nil || !b.released.CompareAndSwap(false, true) {
 		return
 	}
-	b.released = true
 	b.mapState = MapStateDestroyed
 	if b.browser != nil {
 		b.browser.Destroy()
 	}
 }
 
+// IsReleased reports whether Release has run on the buffer.
+func (b *Buffer) IsReleased() bool {
+	return b != nil && b.released != nil && b.released.Load()
+}
+
 // MapState returns the current mapping state of the buffer.
 func (b *Buffer) MapState() MapState {
-	if b == nil || b.released {
+	if b == nil || b.IsReleased() {
 		return MapStateUnmapped
 	}
 	return b.mapState
@@ -109,7 +117,7 @@ func (b *Buffer) Map(ctx context.Context, mode MapMode, offset, size uint64) err
 	if b == nil || b.browser == nil {
 		return ErrReleased
 	}
-	if b.released {
+	if b.IsReleased() {
 		return ErrBufferDestroyed
 	}
 	if ctx == nil {
@@ -143,7 +151,7 @@ func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error
 	if b == nil || b.browser == nil {
 		return nil, ErrReleased
 	}
-	if b.released {
+	if b.IsReleased() {
 		return nil, ErrBufferDestroyed
 	}
 	if err := validateMapArgs(b, mode, offset, size); err != nil {
@@ -155,8 +163,9 @@ func (b *Buffer) MapAsync(mode MapMode, offset, size uint64) (*MapPending, error
 
 	// Create a MapPending that will resolve asynchronously.
 	p := &MapPending{
-		buf:  b,
-		done: make(chan error, 1),
+		buf:      b,
+		done:     make(chan error, 1),
+		released: new(atomic.Bool),
 	}
 
 	// Launch a goroutine to await the JS Promise. AwaitPromise blocks the
@@ -184,7 +193,7 @@ func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
 	if b == nil || b.browser == nil {
 		return nil, ErrReleased
 	}
-	if b.released {
+	if b.IsReleased() {
 		return nil, ErrBufferDestroyed
 	}
 	if b.mapState != MapStateMapped {
@@ -198,10 +207,11 @@ func (b *Buffer) MappedRange(offset, size uint64) (*MappedRange, error) {
 	}
 
 	return &MappedRange{
-		buf:    b,
-		offset: offset,
-		size:   size,
-		valid:  true,
+		buf:      b,
+		offset:   offset,
+		size:     size,
+		valid:    true,
+		released: new(atomic.Bool),
 	}, nil
 }
 
@@ -212,7 +222,7 @@ func (b *Buffer) Unmap() error {
 	if b == nil || b.browser == nil {
 		return ErrReleased
 	}
-	if b.released {
+	if b.IsReleased() {
 		return ErrBufferDestroyed
 	}
 	if b.mapState != MapStateMapped && b.mapState != MapStatePending {

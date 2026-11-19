@@ -10,13 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Concurrent `Release()` could double-destroy a resource**: `Sampler`, `Texture`, `TextureView`, `QuerySet`,
-  `ShaderModule` and `Fence` guarded their destroy with a check-then-set plain bool, so two goroutines calling
-  `Release()` at the same time could both run the HAL destroy — and raced on the flag, which `-race` reports.
-  The guard is now the heap-allocated `atomic.Bool` compare-and-swap `Buffer` already used: exactly one caller
-  wins and at most one destroy is scheduled, on every build (native, rust, browser); a zero-value resource has
-  no guard and `Release` on it is a no-op. Proven by a concurrent-release test that counts HAL destroys and by
-  a mutation probe under `-race`. The `Device` error-scope manager is documented as constructor-initialized (the
-  nil-safe lazy path remains only for zero-value devices).
+  `ShaderModule`, `Fence`, `Buffer`, `BindGroup`, `BindGroupLayout`, `PipelineLayout`, `RenderPipeline`,
+  `ComputePipeline`, and the pooled `MappedRange` and `MapPending` handles guarded their destroy (or their return
+  to the pool) with a check-then-set plain bool — or, for the pooled handles, had no guard at all — so two
+  goroutines calling `Release()` at the same time could both run it: a HAL object destroyed twice, a reference
+  dropped twice, or one pooled handle put into the pool twice and handed to two owners. Every one of these types
+  now uses the heap-allocated `atomic.Bool` compare-and-swap `Buffer` already used, on every build where the type
+  exists (native, rust, browser; `QuerySet` is native-only); the pinned zero-value contract is unchanged (a no-op
+  for most wrappers, a panic for Sampler, BindGroupLayout, PipelineLayout, ShaderModule and Fence).
+  Each type is proven by a concurrent-release test that counts HAL destroys, reference drops or pool returns, and
+  each has its own mutation probe that makes its test fail with the double-destroy signature. The `Device`
+  error-scope manager is documented as constructor-initialized (the nil-safe lazy path remains only for
+  zero-value devices).
 
 ### Changed
 

@@ -11,7 +11,8 @@ import "github.com/gogpu/wgpu/internal/resource"
 //
 // The implementation lives in internal/resource (ADR-070); Release is one
 // delegation. A zero-value BindGroupLayout has no implementation: Release
-// panics on it, as the pre-move type did (a nil device view).
+// panics on it, as the pre-move type did (a nil device view); the zero-value
+// tests pin that contract.
 type BindGroupLayout struct {
 	impl *resource.BindGroupLayout
 }
@@ -23,7 +24,8 @@ func (l *BindGroupLayout) Release() { l.impl.Release() }
 //
 // The implementation lives in internal/resource (ADR-070); Release is one
 // delegation. A zero-value PipelineLayout has no implementation: Release
-// panics on it, as the pre-move type did.
+// panics on it, as the pre-move type did; the zero-value tests pin that
+// contract.
 type PipelineLayout struct {
 	impl *resource.PipelineLayout
 }

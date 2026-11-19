@@ -3,6 +3,8 @@
 package pipeline
 
 import (
+	"sync/atomic"
+
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
@@ -27,8 +29,11 @@ type RenderPipeline struct {
 	// checks it against its own device before recording the pipeline, so a
 	// pipeline of another device is rejected (ADR-070 §15.3: view identity is
 	// device identity, one cached view per Device).
-	device   core.DeviceView
-	released bool
+	device core.DeviceView
+	// released is the CAS guard that admits exactly one Drop: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 	// bindGroupCount is the number of bind group layouts in this pipeline's
 	// layout. Used by RenderPassEncoder.SetBindGroup to validate that
 	// the group index is within bounds before issuing the HAL call.
@@ -118,6 +123,7 @@ func NewRenderPipeline(init *RenderPipelineInit) *RenderPipeline {
 		writesDepth:           init.WritesDepth,
 		writesStencil:         init.WritesStencil,
 		ref:                   init.Ref,
+		released:              new(atomic.Bool),
 	}
 }
 
@@ -128,10 +134,9 @@ func NewRenderPipeline(init *RenderPipelineInit) *RenderPipeline {
 // Triage drops all tracked refs. The onZero callback (set at CreateRenderPipeline)
 // fires only when the last reference drops. ADR-056: unified resource lifecycle.
 func (p *RenderPipeline) Release() {
-	if p.released {
+	if p.released == nil || !p.released.CompareAndSwap(false, true) {
 		return
 	}
-	p.released = true
 
 	if p.ref != nil {
 		p.ref.Drop()
@@ -156,7 +161,7 @@ func (p *RenderPipeline) Device() core.DeviceView {
 
 // IsReleased reports whether Release has been called.
 func (p *RenderPipeline) IsReleased() bool {
-	return p != nil && p.released
+	return p != nil && p.released != nil && p.released.Load()
 }
 
 // Ref returns the GPU-aware reference counter, or nil.
@@ -256,8 +261,11 @@ func (p *RenderPipeline) SetStripIndexFormat(format *gputypes.IndexFormat) {
 
 // ComputePipeline represents a configured compute pipeline.
 type ComputePipeline struct {
-	hal      hal.ComputePipeline
-	released bool
+	hal hal.ComputePipeline
+	// released is the CAS guard that admits exactly one Drop: concurrent
+	// Release calls see CompareAndSwap succeed for one caller only. It is nil
+	// only on an unguarded zero value, whose Release is a no-op.
+	released *atomic.Bool
 	// bindGroupCount is the number of bind group layouts in this pipeline's
 	// layout. Used by ComputePassEncoder.SetBindGroup to validate that
 	// the group index is within bounds before issuing the HAL call.
@@ -299,6 +307,7 @@ func NewComputePipeline(init *ComputePipelineInit) *ComputePipeline {
 		bindGroupLayouts:      init.BindGroupLayouts,
 		lateSizedBufferGroups: init.LateSizedBufferGroups,
 		ref:                   init.Ref,
+		released:              new(atomic.Bool),
 	}
 }
 
@@ -309,10 +318,9 @@ func NewComputePipeline(init *ComputePipelineInit) *ComputePipeline {
 // Triage drops all tracked refs. The onZero callback (set at CreateComputePipeline)
 // fires only when the last reference drops. ADR-056: unified resource lifecycle.
 func (p *ComputePipeline) Release() {
-	if p.released {
+	if p.released == nil || !p.released.CompareAndSwap(false, true) {
 		return
 	}
-	p.released = true
 
 	if p.ref != nil {
 		p.ref.Drop()
@@ -329,7 +337,7 @@ func (p *ComputePipeline) HAL() hal.ComputePipeline {
 
 // IsReleased reports whether Release has been called.
 func (p *ComputePipeline) IsReleased() bool {
-	return p != nil && p.released
+	return p != nil && p.released != nil && p.released.Load()
 }
 
 // BindGroupCount returns the number of bind group layouts in the pipeline layout.

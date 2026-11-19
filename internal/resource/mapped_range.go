@@ -7,6 +7,7 @@ package resource
 
 import (
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -46,6 +47,13 @@ type MappedRange struct {
 	gen    uint64         // buffer generation captured at creation
 	data   unsafe.Pointer // pointer to byte 0 of this range
 
+	// released is the CAS guard that admits exactly one return to the pool:
+	// concurrent Release calls see CompareAndSwap succeed for one caller only.
+	// It is allocated by the pool's New function and re-armed by
+	// acquireMappedRange; it is nil only on an unguarded zero value, whose
+	// Release is a no-op.
+	released *atomic.Bool
+
 	// Pub caches the public wrapper built over this pooled object; see
 	// MapPending.Pub for the synchronization argument. It is per pooled
 	// object, never per buffer: two simultaneous live ranges are two pooled
@@ -54,16 +62,43 @@ type MappedRange struct {
 	Pub any
 }
 
-var mappedRangePool = sync.Pool{
-	New: func() any { return &MappedRange{} },
+// handlePool reuses pooled handles and counts every return to the pool, so
+// the concurrent-Release test can assert exactly one return per acquisition
+// without instrumenting the hot path.
+type handlePool[T any] struct {
+	pool sync.Pool
+	puts atomic.Int64
 }
+
+func newHandlePool[T any](mk func() any) *handlePool[T] {
+	return &handlePool[T]{pool: sync.Pool{New: mk}}
+}
+
+func (p *handlePool[T]) Get() T { return p.pool.Get().(T) }
+
+func (p *handlePool[T]) Put(v T) {
+	p.puts.Add(1)
+	p.pool.Put(v)
+}
+
+var mappedRangePool = newHandlePool[*MappedRange](func() any {
+	return &MappedRange{released: new(atomic.Bool)}
+})
 
 // acquireMappedRange fetches a MappedRange from the pool. The caller sets
 // only the mapping fields; Pub (the cached public wrapper) is retained across
 // reuse — zeroing the struct here, as in `*m = MappedRange{}`, would discard
 // the wrapper and bring the per-call allocation back (ADR-070 S1 F1).
+//
+// The released guard is re-armed for the next owner: it is per acquisition,
+// not per pooled object, so each owner gets exactly one Release (and one Put).
 func acquireMappedRange() *MappedRange {
-	return mappedRangePool.Get().(*MappedRange)
+	m := mappedRangePool.Get()
+	if m.released == nil {
+		m.released = new(atomic.Bool)
+	}
+	m.released.Store(false)
+	return m
 }
 
 // Bytes returns the underlying byte slice for the mapped range.
@@ -126,8 +161,14 @@ func (m *MappedRange) Offset() uint64 {
 // caller to Release after the bytes have been consumed.
 //
 // After Release the MappedRange is invalid; calling Bytes() returns nil.
+//
+// Release is safe to call concurrently: the CAS guard admits exactly one
+// return to the pool, and every later call is a no-op. The guard is checked
+// before any field is touched, so it does not reorder against Unmap — the
+// spec's one-mapping/one-range rule and the generation invalidation are
+// unchanged.
 func (m *MappedRange) Release() {
-	if m == nil {
+	if m == nil || m.released == nil || !m.released.CompareAndSwap(false, true) {
 		return
 	}
 	// Pub is deliberately left set: the pooled object and its cached public
