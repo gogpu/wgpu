@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **naga v0.22.7** (from v0.22.6). The parser now resolves dependencies in the right order, so a shader that failed
+  with an unresolved identifier or unknown type can compile — the output of anything that compiled before cannot
+  change (`@size`/`@align` with a non-literal const-expr moves layout only for such arguments; no shader in this
+  module or gg has one). The new type-size bound refuses the shapes that previously overflowed with a clear error;
+  the GLSL writer treats prior byte-delta cases as identity and the GLSL frontend cannot reach the output writers;
+  the DXIL view-id predicate fix (P2-DXIL-116) is internal to the `dxil` package. Downstream gate: full suite green,
+  writer-diff against v0.22.6 with zero byte and zero status deltas across the 310-file corpus (1240 comparisons);
+  the only output change in the candidate's own corpus is its updated `blend.wgsl` testdata, which three compilers
+  now accept and GLSL still refuses.
+
 ## [0.35.2] - 2026-11-19
 
 ### Fixed
