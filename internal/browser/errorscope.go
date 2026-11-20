@@ -118,12 +118,21 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 	return nil
 }
 
-// PopErrorScope pops a scope on the JS device. Contract: (nil, nil) when the
-// scope captured nothing; (info, nil) for a captured error; (nil,
-// ErrErrorScopeEmpty) for the spec's OperationError (the JS promise rejects
-// with an OperationError on an empty stack). Any other rejection is returned
-// wrapped — the documented per-build limit never invents a category.
+// PopErrorScope pops a scope on the JS device. Contract, at most one side set:
+// (info, nil) for a captured error; (nil, nil) when the scope captured nothing;
+// (nil, nil) when the device is lost — the spec's pop resolves null there and
+// the stack is untouched (C2's lost-first rule, applied before the promise is
+// even awaited); (nil, ErrErrorScopeEmpty) for the spec's OperationError, which
+// is the NOT-lost empty-stack case only (the JS promise rejects with an
+// OperationError there). Any other rejection is returned wrapped — the
+// documented per-build limit never invents a category. It never panics.
 func (d *Device) PopErrorScope() (*GPUErrorInfo, error) {
+	if d == nil {
+		return nil, nil //nolint:nilnil // (nil, nil) is the error-scope contract's capture-nothing answer, not a missing error
+	}
+	if _, lost := d.LostInfo(); lost {
+		return nil, nil //nolint:nilnil // the spec's lost-device pop resolves null; ErrErrorScopeEmpty is the not-lost empty-stack case
+	}
 	v, err := AwaitPromise(d.ref_.Call("popErrorScope"))
 	if err != nil {
 		var rej *PromiseRejection
@@ -136,7 +145,7 @@ func (d *Device) PopErrorScope() (*GPUErrorInfo, error) {
 		return nil, err
 	}
 	if v.IsUndefined() || v.IsNull() {
-		return nil, nil
+		return nil, nil //nolint:nilnil // the spec's null result: the scope captured nothing, or the device is lost
 	}
 
 	name := ""
@@ -147,7 +156,7 @@ func (d *Device) PopErrorScope() (*GPUErrorInfo, error) {
 	}
 	filter, ok := ErrorNameToFilter(name)
 	if !ok {
-		return nil, fmt.Errorf("wgpu: PopErrorScope: unrecognised GPU error %q: %s", name, extractErrorMessage(v))
+		return nil, fmt.Errorf("wgpu: PopErrorScope: unrecognized GPU error %q: %s", name, extractErrorMessage(v))
 	}
 	return &GPUErrorInfo{Type: filter, Message: extractErrorMessage(v)}, nil
 }

@@ -73,3 +73,6 @@ target	internal/instance	hal	all	S12
 inverted	internal/pipeline	internal/device	native+rust	S3
 inverted	internal/encoder	internal/device	native+rust	S4
 inverted	internal/queue	internal/device	native	S9
+target	internal/device	internal/loststate	native+rust	POST
+target	internal/queue	internal/loststate	native	POST
+target	internal/surface	internal/loststate	native	POST

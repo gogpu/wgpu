@@ -20,6 +20,7 @@ import (
 
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/encoder"
+	"github.com/gogpu/wgpu/internal/loststate"
 	"github.com/gogpu/wgpu/internal/pipeconst"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -33,12 +34,22 @@ type Device struct {
 	features gputypes.Features
 	limits   gputypes.Limits
 	released bool
+
+	// lost is the device-lost and uncaptured-error registration state machine
+	// (P1-API-042 / #417). NewRust always sets it; a zero-value Device answers
+	// the seam methods without one.
+	lost *loststate.State[*core.GPUError]
 }
 
 // NewRust builds a device over a go-webgpu/webgpu device. The root adapter is
 // its only caller; the instance seam is wired with SetInstance right after.
 func NewRust(r *rwgpu.Device, features gputypes.Features, limits gputypes.Limits) *Device {
-	return &Device{r: r, features: features, limits: limits}
+	return &Device{
+		r:        r,
+		features: features,
+		limits:   limits,
+		lost:     loststate.New[*core.GPUError](),
+	}
 }
 
 // SetInstance wires the device to the instance seam its error scopes read.
@@ -76,6 +87,87 @@ func (d *Device) Limits() gputypes.Limits {
 		return gputypes.Limits{}
 	}
 	return d.limits
+}
+
+// lostState returns the device's lost/uncaptured registration state machine,
+// or nil when the device was not built by NewRust.
+func (d *Device) lostState() *loststate.State[*core.GPUError] {
+	if d == nil {
+		return nil
+	}
+	return d.lost
+}
+
+// SetLostCallback replaces the device-lost registration. A registration made on
+// an already-lost device receives the stored info exactly once, at this call's
+// return; replacing it afterwards never replays. nil clears the registration.
+// Callbacks are invoked after the state machine's lock is released (C4).
+//
+// The only loss observable at the pinned webgpu v0.5.5 is the one Release
+// produces; the driver-initiated source is wired at the webgpu v0.6.0 bump
+// (card 0085), where the comment in SetUncapturedErrorCallback points.
+func (d *Device) SetLostCallback(fn func(loststate.Info)) {
+	s := d.lostState()
+	if s == nil {
+		return
+	}
+	fire, ok := s.SetLostCallback(fn)
+	if ok {
+		fire.Fn(fire.Info)
+	}
+	d.DispatchPending()
+}
+
+// SetUncapturedErrorCallback replaces the uncaptured-error registration; nil
+// clears it and a replaced registration never receives a past event again.
+//
+// WIRING POINT (webgpu v0.6.0, card 0085): wgpu-native's uncaptured-error
+// callback is attached here at the binding bump. At the pinned v0.5.5 neither
+// source is reachable — DeviceDescriptor carries only Label/RequiredFeatures/
+// RequiredLimits, the callback structs are unwired, the trampolines are
+// unexported, and the C enum lost its DeviceLost class in v29 — so no fake
+// event is synthesized for this registration.
+func (d *Device) SetUncapturedErrorCallback(fn func(*core.GPUError)) {
+	if s := d.lostState(); s != nil {
+		s.SetUncapturedErrorCallback(fn)
+	}
+}
+
+// LostInfo reports the current lost state; ok is false on a live device.
+func (d *Device) LostInfo() (loststate.Info, bool) {
+	s := d.lostState()
+	if s == nil {
+		return loststate.Info{}, false
+	}
+	return s.LostInfo()
+}
+
+// DispatchPending drains the deliveries the recording paths queued and invokes
+// them in record order, outside the state machine's lock (C4). It is exported
+// for the root declaration layer's entry points.
+func (d *Device) DispatchPending() {
+	s := d.lostState()
+	if s == nil {
+		return
+	}
+	lostFires, errFires := s.TakePending()
+	for _, fire := range lostFires {
+		fire.Fn(fire.Info)
+	}
+	for _, fire := range errFires {
+		fire.Fn(fire.Err)
+	}
+}
+
+// markLost latches a loss and dispatches it, recording and invoking in two
+// phases so no callback runs under the state machine's lock.
+func (d *Device) markLost(reason loststate.Reason, message string) {
+	s := d.lostState()
+	if s == nil {
+		return
+	}
+	s.MarkLost(reason, message)
+	d.DispatchPending()
 }
 
 // CreateBuffer creates a GPU buffer from an already-converted descriptor.
@@ -325,25 +417,39 @@ func (d *Device) PushErrorScope(filter core.ErrorFilter) error {
 	return nil
 }
 
-// PopErrorScope pops the most recently pushed error scope.
+// PopErrorScope pops the most recently pushed error scope. Contract, at most
+// one side set: (info, nil) captured; (nil, nil) captured nothing; (nil, nil)
+// on a lost device — C2's lost-first rule, the stack untouched; (nil, wrapped)
+// when the binding reports a failure, which is also where the not-lost empty
+// stack arrives as this build's documented limit.
 func (d *Device) PopErrorScope() (*core.GPUError, error) {
+	if d == nil {
+		return nil, nil //nolint:nilnil // (nil, nil) is the error-scope contract's capture-nothing answer, not a missing error
+	}
+	if _, lost := d.LostInfo(); lost {
+		return nil, nil //nolint:nilnil // the spec's lost-device pop answers null; ErrErrorScopeEmpty is the not-lost empty-stack case
+	}
 	var instanceR *rwgpu.Instance
 	if d.instance != nil {
 		instanceR = d.instance.InstanceR()
 	}
 	if d.r == nil || instanceR == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // no binding to pop from: the same capture-nothing answer
 	}
 	errType, message, err := d.r.PopErrorScopeAsync(instanceR)
+	return classifyRustPop(errType, message, err)
+}
+
+// classifyRustPop turns a settled wgpu-native pop into the four-case contract:
+// (nil, nil) captured nothing; (info, nil) captured; (nil, wrapped) the binding
+// reported a failure. The not-lost empty stack is that last case on this build
+// (the binding raises it), so ErrErrorScopeEmpty is never invented here.
+func classifyRustPop(errType rwgpu.ErrorType, message string, err error) (*core.GPUError, error) {
 	if err != nil {
-		// The binding reports infrastructure failures here (an empty scope stack
-		// arrives as the binding's own error). It is returned to the caller
-		// instead of being swallowed; the rust contract test documents the
-		// per-build difference from ErrErrorScopeEmpty.
 		return nil, fmt.Errorf("wgpu: PopErrorScope (rust): %w", err)
 	}
 	if errType == rwgpu.ErrorTypeNoError {
-		return nil, nil
+		return nil, nil //nolint:nilnil // the scope captured nothing: the contract's common answer
 	}
 	return &core.GPUError{
 		Type:    convertRustErrorType(errType),
@@ -372,7 +478,10 @@ func (d *Device) Poll(t core.PollType) bool {
 // FreeCommandBuffer is a no-op on the rust build.
 func (d *Device) FreeCommandBuffer(_ *encoder.CommandBuffer) {}
 
-// Release releases the device.
+// Release releases the device. C10: the release produces
+// loststate.ReasonDestroyed on every build; first-wins keeps a driver loss
+// recorded earlier (none is observable at this pin, card 0085) and makes a
+// second Release a no-op.
 func (d *Device) Release() {
 	if d == nil || d.released {
 		return
@@ -381,6 +490,7 @@ func (d *Device) Release() {
 	if d.r != nil {
 		d.r.Release()
 	}
+	d.markLost(loststate.ReasonDestroyed, "device released")
 }
 
 // errRustConstantsUnmapped is returned for a programmable stage with pipeline

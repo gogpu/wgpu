@@ -13,6 +13,7 @@ import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/core"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/loststate"
 )
 
 // testDeviceHost is the seam double of the swapchain and acquisition tests: a
@@ -31,6 +32,16 @@ func (testDeviceHost) DestroyQueue() *core.DestroyQueue { return nil }
 func (testDeviceHost) LastSubmissionIndex() uint64      { return 0 }
 func (testDeviceHost) Poll(core.PollType) bool          { return false }
 func (h testDeviceHost) HALQueue() hal.Queue            { return h.queue }
+
+// MarkDeviceLost and DispatchDeviceCallbacks route to the shared core device,
+// exactly as the root host does: the surface's observation is a device fact, so
+// the double must record it where the tests read it (LostInfo on the core
+// device). Both are nil-safe through core.Device's own guards.
+func (h testDeviceHost) MarkDeviceLost(message string) {
+	h.core.MarkLost(loststate.ReasonUnknown, message)
+}
+
+func (h testDeviceHost) DispatchDeviceCallbacks() { h.core.DispatchPending() }
 
 // testQueue is the HAL queue double: presentation is a no-op the swapchain test
 // only needs to complete.

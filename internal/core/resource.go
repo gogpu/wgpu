@@ -149,6 +149,16 @@ type Device struct {
 	// ErrorScopeManager's internal mutex.
 	errorScopeManager *ErrorScopeManager
 
+	// lost holds the device-lost latch and the two callback registrations
+	// (P1-API-042 / #417), as a one-word atomic slot of the same form as
+	// pendingMapTrackerSlot above: the outer struct stays copyable for the
+	// legacy Hub's value semantics, every value copy shares the state once it is
+	// installed, and the lazily-created state machine is installed by CAS so two
+	// concurrent first uses cannot drop one registration (the HAL-less mock
+	// construction path builds a zeroed Device outside the core constructors, so
+	// the lazy branch is reachable on a concurrent public device — review P2-1).
+	lost unsafe.Pointer // *loststate.State[*GPUError]
+
 	// indirectValidation holds the GPU resources for validating indirect
 	// dispatch workgroup counts. Created at device init, reused for every
 	// DispatchIndirect call. nil if the device does not support compute

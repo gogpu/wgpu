@@ -3,6 +3,7 @@
 package queue
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/loststate"
 	"github.com/gogpu/wgpu/internal/pendingwrites"
 	"github.com/gogpu/wgpu/internal/resource"
 )
@@ -89,6 +91,27 @@ func (q *Queue) SetTestHooks(hooks core.TestHooks) {
 	}
 }
 
+// markDeviceLost latches a driver-initiated device loss on the device the
+// queue submits through. It only QUEUES the delivery — the observing entry
+// point drains it with dispatchDevicePending after releasing q.mu (C4).
+// Nil-safe: a queue without a device (a fixture) records nothing.
+func (q *Queue) markDeviceLost(message string) {
+	if q == nil || q.device == nil {
+		return
+	}
+	q.device.Core().MarkLost(loststate.ReasonUnknown, message)
+}
+
+// dispatchDevicePending delivers the device callbacks the queue's recording
+// paths queued and invokes them. Call it only with q.mu released: a lost
+// callback may re-enter read-only device accessors.
+func (q *Queue) dispatchDevicePending() {
+	if q == nil || q.device == nil {
+		return
+	}
+	q.device.Core().DispatchPending()
+}
+
 // Submit submits command buffers for execution. Non-blocking.
 // Returns a submission index that can be used with Poll() to track completion.
 // Command buffers are owned by the caller — free them after Poll confirms completion.
@@ -99,16 +122,26 @@ func (q *Queue) Submit(commandBuffers []*encoder.CommandBuffer) (uint64, error) 
 	if q == nil || q.hal == nil {
 		return 0, fmt.Errorf("wgpu: queue not available")
 	}
+	index, err := q.submitUnderLock(commandBuffers)
+	// Deliver the device callbacks this submit recorded (a HAL submit error
+	// that wraps hal.ErrDeviceLost, a submit-class validation report) only
+	// AFTER q.mu is released: a lost callback may re-enter read-only device
+	// accessors, and no callback may run under a queue lock (C4, D6).
+	q.dispatchDevicePending()
+	return index, err
+}
+
+// submitUnderLock is Submit's locked region: the unlock is deferred, so a panic
+// inside the submission cannot leave the queue locked, and the caller dispatches
+// only after this returns with the lock released (review P3-5).
+func (q *Queue) submitUnderLock(commandBuffers []*encoder.CommandBuffer) (uint64, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	index, err := q.submitLocked(commandBuffers)
-	if err != nil {
-		return index, err
-	}
-	if q.test != nil {
+	if err == nil && q.test != nil {
 		q.test.Submitted(index, len(commandBuffers))
 	}
-	return index, nil
+	return index, err
 }
 
 // submitLocked is Submit with q.mu held. Queue.WriteTexture calls it for the
@@ -172,6 +205,12 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 		q.releaseTransits()
 		if q.pending != nil && pendingCmdBuf != nil {
 			q.pending.CancelFlush(pendingCmdBuf, flushedEncoder, flushedDstTextures, flushedDstRefs)
+		}
+		// A submit error that wraps hal.ErrDeviceLost IS the driver loss (DX12
+		// wraps the sentinel in deviceRemovedError): latch it first-wins (D5).
+		// Only queued here — Submit drains it after q.mu is released (C4).
+		if errors.Is(err, hal.ErrDeviceLost) {
+			q.markDeviceLost(err.Error())
 		}
 		return 0, fmt.Errorf("wgpu: submit failed: %w", err)
 	}
@@ -393,13 +432,7 @@ func (q *Queue) WriteBuffer(buffer *resource.Buffer, offset uint64, data []byte)
 // Resource barriers are computed from the texture's tracked CurrentUsage().
 // For GLES/Software backends, the write is performed immediately via HAL.
 func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
-	if q == nil {
-		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	if q.hal == nil || dst == nil {
+	if q == nil || q.hal == nil || dst == nil {
 		return fmt.Errorf("wgpu: WriteTexture: queue or destination is nil")
 	}
 	if dst.Texture != nil && dst.Texture.ResolveHAL() == nil {
@@ -415,6 +448,11 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 		return fmt.Errorf("wgpu: WriteTexture: size is nil")
 	}
 
+	// Validation reads only the texture and the write description, so it runs
+	// BEFORE q.mu is taken: the stencil path below creates and finishes a
+	// command encoder, and both a budget report and the encoder finish dispatch
+	// device callbacks, which must never run under a queue lock (C4; review
+	// P2-2 found this hole on the previously all-locked path).
 	skip, err := validateTextureWrite(dst, data, layout, size)
 	if err != nil {
 		return fmt.Errorf("wgpu: WriteTexture: %w", err)
@@ -422,13 +460,37 @@ func (q *Queue) WriteTexture(dst *ImageCopyTexture, data []byte, layout *ImageDa
 	if skip {
 		return nil
 	}
+
+	var werr error
 	if dst.Texture.NeedsStencilBlit(dst.Aspect) {
-		if err := q.writeStencilLocked(dst, data, layout, size); err != nil {
-			return fmt.Errorf("wgpu: WriteTexture: %w", core.StencilCopyNeedsBlitError(dst.Texture.Format(), err))
+		if serr := q.writeStencil(dst, data, layout, size); serr != nil {
+			werr = fmt.Errorf("wgpu: WriteTexture: %w", core.StencilCopyNeedsBlitError(dst.Texture.Format(), serr))
 		}
-		return nil
+	} else {
+		werr = q.writeTextureUnderLock(dst, data, layout, size)
 	}
+	// A stencil upload submits through this queue, so a driver loss recorded
+	// there is delivered only now, after q.mu is released (C4).
+	q.dispatchDevicePending()
+	return werr
+}
+
+// writeTextureUnderLock runs the validated upload — into the pending writes
+// (DX12/Vulkan/Metal) or at once through the HAL — with q.mu held. The unlock
+// is deferred, so a panic cannot leave the queue locked (review P3-5).
+func (q *Queue) writeTextureUnderLock(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	return q.writeTextureLocked(dst, data, layout, size)
+}
+
+// submitOneUnderLock submits one internal command buffer under q.mu, with the
+// same deferred unlock as writeTextureUnderLock.
+func (q *Queue) submitOneUnderLock(cb *encoder.CommandBuffer) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	_, err := q.submitLocked([]*encoder.CommandBuffer{cb})
+	return err
 }
 
 // writeTextureLocked writes a validated upload with q.mu held: into the
@@ -450,14 +512,19 @@ func (q *Queue) writeTextureLocked(dst *ImageCopyTexture, data []byte, layout *I
 // (internal/stencilblit's), so the debug view of an upload reads as one unit.
 const stencilUploadLabel = "stencil upload"
 
-// writeStencilLocked writes a validated upload into the stencil of a
-// combined depth-stencil format the backend cannot write, with q.mu held: the
-// data goes into a staging R8Uint texture like any upload, and the blit that
-// draws it into the stencil (stencilblit.Upload) is submitted at once, after
-// the writes before it, as Dawn's OpenGL queue does
+// writeStencil writes a validated upload into the stencil of a
+// combined depth-stencil format the backend cannot write: the data goes into a
+// staging R8Uint texture like any upload, and the blit that draws it into the
+// stencil (stencilblit.Upload) is submitted at once, after the writes before
+// it, as Dawn's OpenGL queue does
 // (src/dawn/native/opengl/QueueGL.cpp WriteTextureImpl: WriteTextureImpl into
 // an R8Uint texture, BlitR8ToStencil into a new encoder, APISubmit).
-func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
+//
+// Only the staging write and the blit's submit are ordered under q.mu. The
+// encoder creation, recording and finish run OUTSIDE it: a command-buffer
+// budget report and the finish's pending-callback drain both dispatch device
+// callbacks, and no callback may run under a queue lock (C4; review P2-2).
+func (q *Queue) writeStencil(dst *ImageCopyTexture, data []byte, layout *ImageDataLayout, size *Extent3D) error {
 	d := q.device
 	if d == nil {
 		return core.ErrReleased
@@ -475,7 +542,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 	// discards, releases or submits it.
 	enc.Own(u.Staging())
 	temp := ImageCopyTexture{Texture: u.Staging(), Aspect: gputypes.TextureAspectAll}
-	if err := q.writeTextureLocked(&temp, data, layout, size); err != nil {
+	if err := q.writeTextureUnderLock(&temp, data, layout, size); err != nil {
 		enc.DiscardEncoding()
 		return fmt.Errorf("staging upload: %w", err)
 	}
@@ -487,7 +554,7 @@ func (q *Queue) writeStencilLocked(dst *ImageCopyTexture, data []byte, layout *I
 	if err != nil {
 		return err
 	}
-	if _, err := q.submitLocked([]*encoder.CommandBuffer{cb}); err != nil {
+	if err := q.submitOneUnderLock(cb); err != nil {
 		cb.Release()
 		return err
 	}

@@ -223,7 +223,9 @@ next to the goldens and is part of the pinned tool set: a change to it is a clai
 - **Header:** one `phase: open|final` line. `open` during the window — unclaimed rows are expected. The S13 sweep sets
   `final`; from then every golden row must be claimed.
 - **Data rows:** five tab-separated columns — `golden` (`target|inverted`), `src`, `dst`, `context`
-  (`all|native|native+rust|rust|wasm`), `step` (`S1`…`S13`).
+  (`all|native|native+rust|rust|wasm`), `step` (`S1`…`S13`, or `POST` for a row added after the S13 sweep: a
+  package introduced later is not an extraction step, and claiming it under an S-number would record a history
+  that did not happen).
 - **Who adds rows:** the step's own commit, exactly the rows that step creates; the commit message carries the same
   `Migrates: <src>→<dst> (<context>)` trailer as the human record. Never add another step's rows.
 - **The gate** (`internal/layoutcheck`) fails on a duplicated row, a row that names no golden row, a malformed line,

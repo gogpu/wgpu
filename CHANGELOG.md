@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Device-lost and uncaptured-error callbacks** (#417). `Device.SetLostCallback(func(DeviceLostInfo))`
+  reports a lost device — `DeviceLostReasonUnknown` for a driver loss observed on submit, poll, acquire or present,
+  `DeviceLostReasonDestroyed` for `(*Device).Release()` — and `Device.SetUncapturedErrorCallback(func(*GPUError))`
+  receives every error no error scope captured, with the same `*GPUError` the scopes return, so
+  `errors.Is` against `ErrValidation`, `ErrOutOfMemory` or `ErrInternal` classifies both identically. Both callbacks are
+  safe from any goroutine, run on the goroutine of the call that observes the event (a concurrent call may deliver a
+  pending event first; they never run on a background thread) with no internal device,
+  queue or encoder lock held, and may read `LostInfo()` and other read-only accessors. `Device.LostInfo()` answers
+  for a late subscriber: setting a callback on an already-lost device delivers the stored info exactly once, and a
+  replaced registration never receives a past event again; the first loss observed wins, so a release after a
+  driver loss keeps the driver's reason. A command-buffer budget overflow stays an `Internal` error and is never
+  reported as a device loss. `PopErrorScope` gains the spec's fourth case: on a lost device it resolves with
+  `(nil, nil)` whatever the scope stack holds, and a scope pushed after the loss captures nothing.
+  Per-build limit with `-tags rust`: the pinned binding (webgpu v0.5.5) exposes no lost or uncaptured-error source,
+  so there the only loss reported is `DeviceLostReasonDestroyed` after `Release()`; the driver and uncaptured
+  sources land with webgpu v0.6.0.
+
 ### Changed
 
 - **naga v0.22.7** (from v0.22.6). The parser now resolves dependencies in the right order, so a shader that failed
