@@ -83,6 +83,7 @@ func (m *Module) ExecuteQuad(entryPoint string, ctx *ExecutionContext, q *Quad) 
 	var lanes [QuadLanes]*interpreter
 	for i := range lanes {
 		interp := m.getInterpreter()
+		interp.beginInvocation()
 		interp.ep = ep
 		interp.fn = fn
 		interp.ctx = ctx
@@ -164,7 +165,14 @@ func (interp *interpreter) collectOutputs(outputs map[uint32]Value) {
 		}
 		v := interp.values[varID]
 		if v.Tag == TagPointer {
-			outputs[varID] = v.AsPointer().Val
+			out := v.AsPointer().Val
+			if out.Tag == TagArray {
+				// An array output (e.g. clip distances) must not point into the
+				// invocation arena: the caller keeps it after the invocation,
+				// whose arena is then reused. Copy it to the heap.
+				out = cloneValue(out)
+			}
+			outputs[varID] = out
 		}
 	}
 }

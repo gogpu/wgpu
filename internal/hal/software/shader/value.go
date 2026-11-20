@@ -28,7 +28,7 @@ const (
 	TagVec2                   // [2]float32 in F[0..1]
 	TagVec3                   // [3]float32 in F[0..2]
 	TagVec4                   // [4]float32 in F[0..3]
-	TagArray                  // []Value stored via Ref
+	TagArray                  // []Value: U[0] is the length, Ref the backing data pointer
 	TagPointer                // *Pointer stored via Ref
 	TagSubPointer             // *SubPointer stored via Ref
 	TagBufferPointer          // *BufferPointer stored via Ref
@@ -63,7 +63,7 @@ type Value struct {
 	Tag ValueTag
 	F   [4]float32     // float scalars + vectors
 	U   [4]uint32      // uint/int scalars, bool, binding key
-	Ref unsafe.Pointer // Array, Pointer, SubPointer, BufferPointer, SampledImageValue
+	Ref unsafe.Pointer // Array data, or the Pointer, SubPointer, BufferPointer, SampledImageValue
 }
 
 // Type aliases kept for backward compatibility with external code and tests.
@@ -196,6 +196,11 @@ type BufferPointer struct {
 	MatrixStride uint32
 }
 
+// subPointerInline is how many indexes a SubPointer keeps inside itself, so
+// a short OpAccessChain path allocates nothing. A longer path keeps a heap
+// slice. It must match the size of SubPointer.inline.
+const subPointerInline = 4
+
 // SubPointer provides write-through access to a member of a composite value
 // stored in a parent Pointer. When SPIR-V uses OpAccessChain on a function-local
 // variable (e.g. var p: Particle; p.pos), OpStore to the resulting pointer must
@@ -212,6 +217,7 @@ type BufferPointer struct {
 type SubPointer struct {
 	Parent  *Pointer // root variable pointer
 	Indexes []uint32 // index path from parent to sub-element (literal values, not SSA IDs)
+	inline  [subPointerInline]uint32
 }
 
 // SampledImageValue combines a texture reference and a sampler reference.
@@ -307,9 +313,18 @@ func ValVec3From(v Vec3) Value { return Value{Tag: TagVec3, F: [4]float32{v[0], 
 // ValVec4From returns a Value from a Vec4 array.
 func ValVec4From(v Vec4) Value { return Value{Tag: TagVec4, F: [4]float32{v[0], v[1], v[2], v[3]}} }
 
-// ValArray returns an Array Value. The slice is stored on the heap via Ref.
+// ValArray returns an Array Value from a. The value keeps a pointer to a's
+// backing array in Ref and the length in U[0], so it needs no slice-header
+// box of its own: a composite whose backing comes from the interpreter's
+// per-invocation arena allocates nothing, and the heap path costs only the
+// backing. The backing must not change after the Value is built; composites
+// are immutable (OpCompositeInsert and sub-pointer stores rebuild a new
+// array instead of mutating one in place).
 func ValArray(a []Value) Value {
-	return Value{Tag: TagArray, Ref: unsafe.Pointer(&a)}
+	if len(a) == 0 {
+		return Value{Tag: TagArray}
+	}
+	return Value{Tag: TagArray, U: [4]uint32{uint32(len(a))}, Ref: unsafe.Pointer(unsafe.SliceData(a))}
 }
 
 // ValPointer returns a Pointer Value.
@@ -500,12 +515,13 @@ func (v Value) AsVec3() Vec3 { return Vec3{v.F[0], v.F[1], v.F[2]} }
 // AsVec4 extracts a [4]float32.
 func (v Value) AsVec4() Vec4 { return v.F }
 
-// AsArray extracts a []Value from the Ref field.
+// AsArray extracts a []Value from the Ref backing pointer and the inline
+// length in U[0] (see ValArray).
 func (v Value) AsArray() []Value {
 	if v.Ref == nil {
 		return nil
 	}
-	return *(*[]Value)(v.Ref)
+	return unsafe.Slice((*Value)(v.Ref), int(v.U[0]))
 }
 
 // AsPointer extracts a *Pointer from the Ref field.

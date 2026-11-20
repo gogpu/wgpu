@@ -80,6 +80,7 @@ func (m *Module) ExecuteWithDebug(entryPoint string, ctx *ExecutionContext, debu
 
 	// Acquire a pooled interpreter to avoid allocating per call.
 	interp := m.getInterpreter()
+	interp.beginInvocation()
 
 	interp.ep = ep
 	interp.fn = fn
@@ -193,6 +194,116 @@ type interpreter struct {
 	// ptrPoolIdx tracks the next available slot.
 	ptrPool    []Pointer
 	ptrPoolIdx int
+
+	// inv is the per-invocation scratch arena every frame of one invocation
+	// shares: callFunction gives a callee interp.inv. Composite backings,
+	// SubPointer objects and SampledImageValue boxes built while the
+	// invocation runs are bump-allocated from it and are never recycled
+	// within the invocation, so a Value built in a callee stays valid in the
+	// caller and after a return. A top-level interpreter owns ownInv and
+	// resets it in beginInvocation; the arena is reused only once the
+	// invocation that filled it has ended, and a Value never outlives its
+	// invocation (outputs are scalars, vectors, or an array copied out in
+	// collectOutputs). A bump past a buffer falls back to the heap, so a loop
+	// that builds composites without bound stays bounded.
+	inv    *invState
+	ownInv invState
+}
+
+// Per-invocation scratch arena sizes: room for a typical fragment, vertex or
+// compute invocation. A shader that builds more than this in one invocation
+// falls back to the heap for the excess (still correct, just allocating).
+const (
+	invArrayCap        = 64 // Value slots holding composite backings
+	invSubCap          = 32 // SubPointer objects, each with its inline index path
+	invSampledImageCap = 16 // SampledImageValue boxes
+)
+
+// invState is the scratch arena of one entry-point invocation (see
+// interpreter.inv). Its buffers are sized once and reused across invocations
+// of the interpreter object that owns it.
+type invState struct {
+	arrays     []Value
+	arrayIdx   int
+	subs       []SubPointer
+	subIdx     int
+	sampled    []SampledImageValue
+	sampledIdx int
+}
+
+// beginInvocation gives a top-level interpreter a fresh scratch arena for one
+// entry-point invocation. It is called only for the entry frame (Execute*,
+// startCompute, ExecuteQuad), never for a callee, which inherits interp.inv in
+// callFunction: the arena of an invocation is shared by every frame in its
+// call tree.
+func (interp *interpreter) beginInvocation() {
+	inv := &interp.ownInv
+	if inv.arrays == nil {
+		inv.arrays = make([]Value, invArrayCap)
+		inv.subs = make([]SubPointer, invSubCap)
+		inv.sampled = make([]SampledImageValue, invSampledImageCap)
+	}
+	inv.arrayIdx = 0
+	inv.subIdx = 0
+	inv.sampledIdx = 0
+	interp.inv = inv
+}
+
+// allocArray returns n Value slots for a composite backing, from the
+// invocation arena when it has room and from the heap otherwise.
+func (interp *interpreter) allocArray(n int) []Value {
+	if inv := interp.inv; inv != nil && inv.arrayIdx+n <= len(inv.arrays) {
+		s := inv.arrays[inv.arrayIdx : inv.arrayIdx+n]
+		inv.arrayIdx += n
+		return s
+	}
+	return make([]Value, n)
+}
+
+// allocSubPointer returns a SubPointer to a parent with an index path of n
+// elements: its indexes go inline for a short path and on the heap for a
+// longer one. The object comes from the invocation arena when it has room and
+// from the heap otherwise. It is never the same object as a SubPointer
+// allocated earlier in the invocation, so extending a path into a new
+// SubPointer never aliases the one it extends.
+func (interp *interpreter) allocSubPointer(parent *Pointer, n int) *SubPointer {
+	if inv := interp.inv; inv != nil && inv.subIdx < len(inv.subs) {
+		sp := &inv.subs[inv.subIdx]
+		inv.subIdx++
+		sp.Parent = parent
+		sp.setIndexes(n)
+		return sp
+	}
+	sp := &SubPointer{Parent: parent}
+	sp.setIndexes(n)
+	return sp
+}
+
+// setIndexes points sp.Indexes at sp.inline for a short path, or at a fresh
+// heap slice for a longer one.
+func (sp *SubPointer) setIndexes(n int) {
+	if n <= subPointerInline {
+		sp.Indexes = sp.inline[:n]
+	} else {
+		sp.Indexes = make([]uint32, n)
+	}
+}
+
+// allocSampledImage returns a Value for an image/sampler pair, the
+// SampledImageValue taken from the invocation arena when it has room. A
+// sampled image is not a memory object and in SPIR-V cannot be stored to a
+// variable or carried by OpPhi; it exists only as a transient result, a
+// function argument, or a return value, all within the invocation, so the
+// invocation lifetime is the right one and a frame boundary needs no copy.
+func (interp *interpreter) allocSampledImage(image, sampler Value) Value {
+	if inv := interp.inv; inv != nil && inv.sampledIdx < len(inv.sampled) {
+		si := &inv.sampled[inv.sampledIdx]
+		inv.sampledIdx++
+		si.Image = image
+		si.Sampler = sampler
+		return ValSampledImage(si)
+	}
+	return ValSampledImage(&SampledImageValue{Image: image, Sampler: sampler})
 }
 
 // ptrPoolSize is the initial capacity of the Pointer pool per interpreter.
@@ -248,6 +359,7 @@ func (m *Module) putInterpreter(interp *interpreter) {
 	interp.quadPC = 0
 	interp.demoted = false
 	interp.parent = nil
+	interp.inv = nil
 	m.interpPool.Put(interp)
 }
 
@@ -1260,7 +1372,7 @@ func (interp *interpreter) run() error {
 			if len(inst.Operands) >= 2 {
 				imgVal := interp.values[inst.Operands[0]]
 				sampVal := interp.values[inst.Operands[1]]
-				interp.values[inst.ResultID] = ValSampledImage(&SampledImageValue{Image: imgVal, Sampler: sampVal})
+				interp.values[inst.ResultID] = interp.allocSampledImage(imgVal, sampVal)
 			}
 
 		case OpImageSampleImplicitLod:
@@ -1491,6 +1603,7 @@ func (interp *interpreter) callFunction(funcID uint32, argIDs []uint32) (result 
 
 	// Acquire a pooled child interpreter to avoid allocating per call.
 	child := m.getInterpreter()
+	child.inv = interp.inv
 	child.ep = interp.ep
 	child.fn = fn
 	child.ctx = interp.ctx
@@ -1601,21 +1714,22 @@ func (interp *interpreter) accessChain(baseID uint32, indexes []uint32) Value {
 	// If base is a SubPointer, extend the index path.
 	if baseVal.Tag == TagSubPointer {
 		sp := baseVal.AsSubPointer()
-		resolvedIndexes := make([]uint32, len(sp.Indexes), len(sp.Indexes)+len(indexes))
-		copy(resolvedIndexes, sp.Indexes)
-		for _, idxID := range indexes {
-			resolvedIndexes = append(resolvedIndexes, toUint32(interp.values[idxID]))
+		base := len(sp.Indexes)
+		resolved := interp.allocSubPointer(sp.Parent, base+len(indexes))
+		copy(resolved.Indexes, sp.Indexes)
+		for i, idxID := range indexes {
+			resolved.Indexes[base+i] = toUint32(interp.values[idxID])
 		}
-		return ValSubPointer(&SubPointer{Parent: sp.Parent, Indexes: resolvedIndexes})
+		return ValSubPointer(resolved)
 	}
 
 	// If base is a Pointer to a composite, return a SubPointer for write-through.
 	if baseVal.Tag == TagPointer {
-		resolvedIndexes := make([]uint32, 0, len(indexes))
-		for _, idxID := range indexes {
-			resolvedIndexes = append(resolvedIndexes, toUint32(interp.values[idxID]))
+		sp := interp.allocSubPointer(baseVal.AsPointer(), len(indexes))
+		for i, idxID := range indexes {
+			sp.Indexes[i] = toUint32(interp.values[idxID])
 		}
-		return ValSubPointer(&SubPointer{Parent: baseVal.AsPointer(), Indexes: resolvedIndexes})
+		return ValSubPointer(sp)
 	}
 
 	// Fallback: navigate through each index on a raw value.
@@ -1767,21 +1881,21 @@ func (interp *interpreter) compositeConstruct(s shape, typeID uint32, constituen
 
 	case TypeMatrix:
 		// Matrix is constructed from column vectors.
-		cols := make([]Value, len(constituentIDs))
+		cols := interp.allocArray(len(constituentIDs))
 		for i, id := range constituentIDs {
 			cols[i] = interp.values[id]
 		}
 		return ValArray(cols)
 
 	case TypeArray:
-		arr := make([]Value, len(constituentIDs))
+		arr := interp.allocArray(len(constituentIDs))
 		for i, id := range constituentIDs {
 			arr[i] = interp.values[id]
 		}
 		return ValArray(arr)
 
 	case TypeStruct:
-		arr := make([]Value, len(constituentIDs))
+		arr := interp.allocArray(len(constituentIDs))
 		for i, id := range constituentIDs {
 			arr[i] = interp.values[id]
 		}
