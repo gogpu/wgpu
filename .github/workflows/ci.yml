@@ -313,6 +313,89 @@ jobs:
         ldconfig -p | grep -E 'libEGL|libGL' | head -5
         echo "EGL libraries available for runtime loading"
 
+    # The naga readback corpus through the GLES backend on llvmpipe: it reads
+    # actual values back, which no build or lint can check. WGPU_REQUIRE=gles
+    # turns a missing EGL/GLES adapter into a failure instead of a skip, so the
+    # job cannot pass with every case skipped (P1-INFRA-001, LEAD-013).
+    - name: Run the readback corpus on GLES (llvmpipe)
+      env:
+        DISPLAY: ""
+        WAYLAND_DISPLAY: ""
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        MESA_LOADER_DRIVER_OVERRIDE: "llvmpipe"
+        WGPU_REQUIRE: "gles"
+      run: go test -v -count=1 ./internal/hal/allbackends/ -run 'TestReadbackCorpus'
+
+  # The naga readback corpus on a software Vulkan device (lavapipe) with the
+  # Khronos validation layer installed: values are read back and compared, and
+  # a validation error fails its case. WGPU_REQUIRE makes both mandatory —
+  # without lavapipe or without the layer the job fails instead of skipping,
+  # so "skipped" can never pass for "tested" (P1-INFRA-001, LEAD-013). The
+  # layer also proves itself: TestReadbackCorpusVVLNegative fails a
+  # deliberately invalid case and asserts the layer's VUID in the detail.
+  corpus-vulkan:
+    name: Corpus - Vulkan lavapipe + validation layer (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Install lavapipe and the Khronos validation layer
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libvulkan1 \
+          mesa-vulkan-drivers \
+          vulkan-validationlayers
+
+    - name: Verify the Vulkan ICD and validation layer are installed
+      # The job promises both; list them so a failure is diagnosable from the
+      # log. A missing directory fails the step, which is the point.
+      run: |
+        ls -la /usr/share/vulkan/icd.d/
+        ls -la /usr/share/vulkan/explicit_layer.d/
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run the readback corpus with Vulkan validation required
+      env:
+        WGPU_REQUIRE: "vulkan,vvl"
+      run: go test -v -count=1 ./internal/hal/allbackends/ -run 'TestReadbackCorpus'
+
+  # The same corpus through the DX12 backend on WARP, which every Windows
+  # runner enumerates as a DX12 adapter. WGPU_REQUIRE=dx12 fails the job when
+  # no DX12 adapter (either shader-compiler variant) is usable instead of
+  # skipping every case (P1-INFRA-001, LEAD-013).
+  corpus-dx12:
+    name: Corpus - DX12 WARP (Windows)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: '1.25'
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Run the readback corpus on WARP
+      env:
+        WGPU_REQUIRE: "dx12"
+      run: go test -v -count=1 ./internal/hal/allbackends/ -run TestReadbackCorpus
+
   # Linting
   lint:
     name: Lint
@@ -538,7 +621,7 @@ jobs:
   gate:
     name: Test
     if: always()
-    needs: [android-arm64-preview, build, cross-compile, test, integration-gles, wasm-test, lint, lint-targets, formatting, deps]
+    needs: [android-arm64-preview, build, cross-compile, test, integration-gles, corpus-vulkan, corpus-dx12, wasm-test, lint, lint-targets, formatting, deps]
     runs-on: ubuntu-latest
     steps:
     - name: Every required job succeeded

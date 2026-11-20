@@ -25,14 +25,42 @@ import (
 type vvlCapture struct {
 	mu   sync.Mutex
 	msgs []string
+	// active records whether the Vulkan instance the HAL created really had
+	// the validation layer: "vulkan: instance created" reports it. A run with
+	// no messages is otherwise no proof of a clean run — a layer that never
+	// loaded reports nothing (P1-INFRA-001, 2026-10-31).
+	active bool
 }
 
+// Enabled keeps Info records so the handler sees the instance-created record
+// that reports whether the layer was enabled; the messenger itself only sends
+// Warn and Error severities.
 func (c *vvlCapture) Enabled(_ context.Context, level slog.Level) bool {
-	return level >= slog.LevelWarn
+	return level >= slog.LevelInfo
 }
 
 func (c *vvlCapture) Handle(_ context.Context, r slog.Record) error { //nolint:gocritic // hugeParam: slog.Handler takes the Record by value
 	if !strings.HasPrefix(r.Message, "vulkan: ") {
+		return nil
+	}
+	if r.Message == "vulkan: instance created" {
+		active := false
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "validation" {
+				active = a.Value.Bool()
+			}
+			return true
+		})
+		c.mu.Lock()
+		c.active = active
+		c.mu.Unlock()
+		return nil
+	}
+	// Only the messenger's records are validation. Its severities start at
+	// Warn; the HAL's own Info records share the "vulkan: " prefix and some
+	// carry a "type" attribute of their own ("adapter found" logs the device
+	// type), so the level filter separates them.
+	if r.Level < slog.LevelWarn {
 		return nil
 	}
 	// Only the debug messenger's records carry "type": the HAL's own warnings
@@ -74,6 +102,21 @@ func (c *vvlCapture) drain() []string {
 	return msgs
 }
 
+// layerActive reports whether the HAL created the Vulkan instance with the
+// Khronos validation layer enabled (it requests the layer when the loader
+// lists it and the instance was created, so the layer is loaded and active).
+// False says the capture proves nothing about this instance: WGPU_REQUIRE=vvl
+// turns that into a failure. A nil capture (a backend without the layer) is
+// never active.
+func (c *vvlCapture) layerActive() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.active
+}
+
 // enableVulkanValidation returns the instance flags that turn on the Khronos
 // validation layer for a Vulkan test device, with synchronization validation,
 // and fails the test for every validation error reported until the test's
@@ -92,7 +135,10 @@ func enableVulkanValidation(t *testing.T) gputypes.InstanceFlags {
 
 // startVulkanValidation is enableVulkanValidation that also returns the
 // capture, for a caller that drains it per step; whatever is left when the
-// test's cleanups run still fails the test.
+// test's cleanups run still fails the test. The capture also records whether
+// the layer was active on the instance (vvlCapture.layerActive), so a caller
+// on a runner whose WGPU_REQUIRE lists vvl can fail instead of passing on a
+// layer that never loaded.
 func startVulkanValidation(t *testing.T) (gputypes.InstanceFlags, *vvlCapture) {
 	t.Helper()
 	// Read by the layer at instance creation (VkLayer_khronos_validation.json
