@@ -77,6 +77,30 @@ func TestCubeDerivative(t *testing.T) {
 	}
 }
 
+// TestSampleViewLinearFilterWrapsEachTexelOnItsOwn checks that a linear
+// filter at the image's edge reads the texel its address mode wraps to:
+// repeating, the opposite edge's, blended half and half at the edge;
+// clamped or mirrored, the edge's own.
+func TestSampleViewLinearFilterWrapsEachTexelOnItsOwn(t *testing.T) {
+	red, green := []byte{255, 0, 0, 255}, []byte{0, 255, 0, 255}
+	row := &Texture2D{Width: 2, Height: 1, Data: append(append([]byte{}, red...), green...)}
+	for _, tc := range []struct {
+		name       string
+		wrap       uint32
+		red, green float32
+	}{
+		{"repeat", WrapRepeat, 0.5, 0.5},
+		{"clamp to edge", WrapClampToEdge, 1, 0},
+		{"mirrored repeat", WrapMirroredRepeat, 1, 0},
+	} {
+		linear := &Sampler{MagFilter: FilterLinear, WrapU: tc.wrap, WrapV: WrapClampToEdge, LodMaxClamp: LodClampNone}
+		got := sampleView(row, linear, Vec4{0, 0.5}, -1, [3]int{})
+		if math.Abs(float64(got[0]-tc.red)) > 1e-6 || math.Abs(float64(got[1]-tc.green)) > 1e-6 {
+			t.Errorf("%s: the left edge = %v, want red %v and green %v", tc.name, got, tc.red, tc.green)
+		}
+	}
+}
+
 // TestSampleViewOffsetAndFilters checks a texel offset, the min/mag filter
 // choice by the clamped level of detail, and linear filtering between two
 // depth slices of a 3D view.
