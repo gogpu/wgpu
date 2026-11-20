@@ -157,8 +157,9 @@ func (s *State[E]) RecordUncaptured(err E) {
 }
 
 // TakePending drains the queued deliveries in record order. The caller invokes
-// them after releasing every lock it holds, on the goroutine that observed the
-// events.
+// them after releasing every lock it holds, on the goroutine of the observing
+// call that drains them — a concurrent observing call may drain first, and they
+// never run on a background thread.
 func (s *State[E]) TakePending() (lost []LostFire, errors []ErrorFire[E]) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

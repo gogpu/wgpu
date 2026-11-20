@@ -318,7 +318,10 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 //
 // Contract (at most one side is non-nil): a captured error, or (nil, nil) when
 // the scope captured nothing — the common path — or (nil, ErrErrorScopeEmpty)
-// when the stack was empty (the JS OperationError case). It never panics.
+// when the stack was empty and the device is NOT lost (the JS OperationError
+// case). On a lost device the JS promise resolves null and this answers
+// (nil, nil) with the scope stack untouched (the spec's fourth case, C1/C2).
+// It never panics.
 func (d *Device) PopErrorScope() (*GPUError, error) {
 	if d == nil || d.impl == nil {
 		return nil, nil

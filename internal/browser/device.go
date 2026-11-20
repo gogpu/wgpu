@@ -2,7 +2,11 @@
 
 package browser
 
-import "syscall/js"
+import (
+	"syscall/js"
+
+	"github.com/gogpu/wgpu/internal/loststate"
+)
 
 // Device wraps a browser GPUDevice with pre-bound creation methods.
 //
@@ -39,6 +43,19 @@ type Device struct {
 	fnCreateCommandEncoder  js.Value
 	fnCreateSampler         js.Value
 	fnCreateQuerySet        js.Value
+
+	// lost is the device-lost and uncaptured-error registration state machine
+	// (P1-API-042 / #417). NewDevice creates it and attaches the JS handlers
+	// that record into it; the root declaration layer registers callbacks over
+	// the seam methods below.
+	lost *loststate.State[*GPUErrorInfo]
+
+	// fnLostResolve and fnUncaptured hold the JS callbacks the handlers are
+	// built from. The promise and the event target keep their own JS
+	// references, but the Go side must keep the js.Func alive for as long as
+	// the device can receive the event.
+	fnLostResolve js.Func
+	fnUncaptured  js.Func
 }
 
 // NewDevice constructs a Device from a GPUDevice js.Value.
@@ -48,6 +65,7 @@ func NewDevice(ref js.Value) *Device {
 		ref_:     ref,
 		features: ref.Get("features"),
 		limits:   ref.Get("limits"),
+		lost:     loststate.New[*GPUErrorInfo](),
 	}
 
 	// Extract the device's queue (GPUDevice.queue is a readonly attribute).
@@ -67,7 +85,165 @@ func NewDevice(ref js.Value) *Device {
 	d.fnCreateSampler = bindMethod(ref, "createSampler")
 	d.fnCreateQuerySet = bindMethod(ref, "createQuerySet")
 
+	d.attachLostHandlers()
+
 	return d
+}
+
+// attachLostHandlers wires GPUDevice.lost and the uncapturederror event to the
+// device's loststate. It runs once at construction, on the single JS thread, so
+// every recording and dispatch path below also runs there.
+func (d *Device) attachLostHandlers() {
+	if d.ref_.IsUndefined() || d.ref_.IsNull() {
+		return
+	}
+
+	// GPUDevice.lost is a promise that resolves with a GPUDeviceLostInfo when
+	// the device is lost and never rejects (WebGPU spec, GPUDevice.lost).
+	if lost := d.ref_.Get("lost"); !lost.IsUndefined() && !lost.IsNull() {
+		d.fnLostResolve = js.FuncOf(d.onDeviceLost)
+		lost.Call("then", d.fnLostResolve)
+	}
+
+	// The uncapturederror event carries every error that reached no error
+	// scope. Assigning the onuncapturederror handler property is the spec's
+	// event-handler attribute, the wiring this package uses for JS callbacks.
+	d.fnUncaptured = js.FuncOf(d.onUncapturedError)
+	d.ref_.Set("onuncapturederror", d.fnUncaptured)
+}
+
+// onDeviceLost is the GPUDevice.lost promise reaction. It latches the loss once:
+// loststate's first-wins rule keeps a driver loss recorded earlier and makes a
+// later Release/destroy reaction a no-op.
+func (d *Device) onDeviceLost(_ js.Value, args []js.Value) any {
+	var reason, message string
+	if len(args) > 0 && !args[0].IsUndefined() && !args[0].IsNull() {
+		info := args[0]
+		reason = jsStringProperty(info, "reason")
+		message = jsStringProperty(info, "message")
+	}
+	d.markLost(lostReasonFromJS(reason), message)
+	return nil
+}
+
+// onUncapturedError is the uncapturederror event handler. The event's error is
+// one of the three GPUError classes; an unmapped class is dropped rather than
+// invented into a category, as the pop path reports an error for an
+// unrecognized class instead of guessing one.
+func (d *Device) onUncapturedError(_ js.Value, args []js.Value) any {
+	if len(args) == 0 || args[0].IsUndefined() || args[0].IsNull() {
+		return nil
+	}
+	jsErr := args[0].Get("error")
+	if jsErr.IsUndefined() || jsErr.IsNull() {
+		return nil
+	}
+	filter, ok := ErrorNameToFilter(jsConstructorName(jsErr))
+	if !ok {
+		return nil
+	}
+	d.recordUncaptured(&GPUErrorInfo{Type: filter, Message: extractErrorMessage(jsErr)})
+	return nil
+}
+
+// lostReasonFromJS maps the GPUDeviceLostInfo reason string to the internal
+// reason. Only the spec's two values exist; anything else is Unknown, as the
+// rust build maps a reason outside its C enum (C7 precedent).
+func lostReasonFromJS(reason string) loststate.Reason {
+	if reason == "destroyed" {
+		return loststate.ReasonDestroyed
+	}
+	return loststate.ReasonUnknown
+}
+
+// jsStringProperty reads a string property, answering "" for an absent one.
+func jsStringProperty(obj js.Value, name string) string {
+	v := obj.Get(name)
+	if v.IsUndefined() || v.IsNull() {
+		return ""
+	}
+	return v.String()
+}
+
+// jsConstructorName returns a JS error's class name, such as
+// "GPUValidationError"; "" when it has none.
+func jsConstructorName(v js.Value) string {
+	ctor := v.Get("constructor")
+	if ctor.IsUndefined() || ctor.IsNull() {
+		return ""
+	}
+	return jsStringProperty(ctor, "name")
+}
+
+// SetLostCallback replaces the device-lost registration. It never replays an
+// event to a replaced registration, and a registration made on an already-lost
+// device receives the stored info exactly once, at this call's return. nil
+// clears the registration without delivering anything. Every callback is
+// invoked after the state machine's lock is released, on the JS thread.
+func (d *Device) SetLostCallback(fn func(loststate.Info)) {
+	if d == nil || d.lost == nil {
+		return
+	}
+	fire, ok := d.lost.SetLostCallback(fn)
+	if ok {
+		fire.Fn(fire.Info)
+	}
+	d.DispatchPending()
+}
+
+// SetUncapturedErrorCallback replaces the uncaptured-error registration. It
+// never replays an already delivered error; nil clears the registration.
+func (d *Device) SetUncapturedErrorCallback(fn func(*GPUErrorInfo)) {
+	if d == nil || d.lost == nil {
+		return
+	}
+	d.lost.SetUncapturedErrorCallback(fn)
+}
+
+// LostInfo reports the current lost state; ok is false on a live device.
+func (d *Device) LostInfo() (loststate.Info, bool) {
+	if d == nil || d.lost == nil {
+		return loststate.Info{}, false
+	}
+	return d.lost.LostInfo()
+}
+
+// DispatchPending drains the deliveries the recording paths queued and invokes
+// them in record order. It is called at the end of every handler, outside the
+// state machine's lock, and is exported for the root declaration layer's entry
+// points (C4: no callback is invoked while any lock is held).
+func (d *Device) DispatchPending() {
+	if d == nil || d.lost == nil {
+		return
+	}
+	lostFires, errFires := d.lost.TakePending()
+	for _, fire := range lostFires {
+		fire.Fn(fire.Info)
+	}
+	for _, fire := range errFires {
+		fire.Fn(fire.Err)
+	}
+}
+
+// markLost latches a loss and dispatches it. loststate releases its lock before
+// MarkLost returns, so the dispatch below — and the callback it invokes — runs
+// with no lock held (C4).
+func (d *Device) markLost(reason loststate.Reason, message string) {
+	if d == nil || d.lost == nil {
+		return
+	}
+	d.lost.MarkLost(reason, message)
+	d.DispatchPending()
+}
+
+// recordUncaptured queues an uncaptured error and dispatches it, with the same
+// record-then-dispatch separation as markLost.
+func (d *Device) recordUncaptured(info *GPUErrorInfo) {
+	if d == nil || d.lost == nil {
+		return
+	}
+	d.lost.RecordUncaptured(info)
+	d.DispatchPending()
 }
 
 // bindMethod returns methodName.bind(obj) so that Invoke() calls the method
@@ -197,4 +373,20 @@ func (d *Device) Destroy() {
 	if !destroy.IsUndefined() && !destroy.IsNull() {
 		d.ref_.Call("destroy")
 	}
+	// GPUDevice.destroy() resolves the lost promise with reason "destroyed".
+	// Recording it here as well makes the loss observable when Release returns,
+	// before the promise's microtask runs (C10); first-wins keeps a driver loss
+	// recorded earlier, and the later promise reaction becomes a no-op.
+	d.markLost(loststate.ReasonDestroyed, "device destroyed")
+	// Release the JS callback closures: the handlers stay bound on the JS
+	// object otherwise, keeping the Go function values (and their userdata)
+	// alive for every destroyed device (review P3-1). Release is safe on a zero
+	// Func (the runtime's bubble release is nil-safe), so no guard is needed;
+	// the event-handler property is unbound before its closure is released, and
+	// the lost promise reaction and the event handler are inert after destroy.
+	d.ref_.Set("onuncapturederror", js.Null())
+	d.fnUncaptured.Release()
+	d.fnUncaptured = js.Func{}
+	d.fnLostResolve.Release()
+	d.fnLostResolve = js.Func{}
 }

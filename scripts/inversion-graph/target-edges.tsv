@@ -68,3 +68,7 @@ internal/device	internal/pipeconst	rust	N	device_rust.go:23
 internal/device	internal/pipeconst	wasm	N	device_browser.go:22
 # --- the shader IR the resource shader module lowers through.
 internal/resource	internal/shaderir	native	N	shader_native.go:13
+# --- the registration state machine #417 introduced after the S13 sweep (post-extraction, not a step) ---
+internal/device	internal/loststate	native+rust	N	device_lost_native.go seam (SetLostCallback/LostInfo/MarkDeviceLost); device_native.go Release step 6 + Poll; device_rust.go lost field
+internal/queue	internal/loststate	native	N	queue_native.go Submit submitLocked classifier, markDeviceLost, dispatchDevicePending
+internal/surface	internal/loststate	native	INT	surface_swapchain_native_test.go testDeviceHost.MarkDeviceLost (the internal test double; production uses the DeviceHost seam)

@@ -143,8 +143,10 @@ type claimsFile struct {
 	rows  []claimRow
 }
 
-// stepName matches S1..S13.
-var stepName = regexp.MustCompile(`^S(?:[1-9]|1[0-3])$`)
+// stepName matches S1..S13 and the post-extraction token POST, for rows added
+// after the S13 sweep: a package introduced later is not an extraction step,
+// and claiming it under an S-number would record a history that did not happen.
+var stepName = regexp.MustCompile(`^(?:S(?:[1-9]|1[0-3])|POST)$`)
 
 // loadClaims parses scripts/inversion-graph/claims.tsv (format: README.md § claims.tsv).
 func loadClaims(root string) (*claimsFile, error) {
@@ -184,7 +186,7 @@ func loadClaims(root string) (*claimsFile, error) {
 		}
 		step := strings.TrimSpace(fields[4])
 		if !stepName.MatchString(step) {
-			return nil, fmt.Errorf("%s:%d: step %q is not S1..S13", path, lineNo, step)
+			return nil, fmt.Errorf("%s:%d: step %q is not S1..S13 or POST", path, lineNo, step)
 		}
 		cf.rows = append(cf.rows, claimRow{
 			key:  goldenKey{kind: kind, src: strings.TrimSpace(fields[1]), dst: strings.TrimSpace(fields[2]), context: context},

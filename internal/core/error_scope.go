@@ -270,7 +270,12 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 // PopErrorScope pops the most recently pushed error scope and returns the
 // captured error, if any.
 //
-// Contract (at most one side is non-nil):
+// Contract (at most one side is non-nil) — FOUR cases, lost-first:
+//   - (nil, nil): the device is lost. The WebGPU spec resolves popErrorScope
+//     with null on a lost device and returns before touching the stack
+//     (spec/index.bs:15952-15963; the OperationError case at 15967-15980 is the
+//     NOT-lost empty stack only). The scope stack is left UNTOUCHED: no drain,
+//     no ErrErrorScopeEmpty, exactly one outcome per state (C1/C2);
 //   - (*GPUError, nil): a captured error;
 //   - (nil, nil): the scope was on the stack and captured nothing — the common path;
 //   - (nil, ErrErrorScopeEmpty): pop with no matching push (the spec's
@@ -280,6 +285,11 @@ func (d *Device) PushErrorScope(filter ErrorFilter) error {
 func (d *Device) PopErrorScope() (*GPUError, error) {
 	if d == nil {
 		return nil, nil //nolint:nilnil // (nil, nil) is the error-scope contract's capture-nothing answer, not a missing error
+	}
+	// Lost-first (C2): a lost device answers (nil, nil) whatever the stack
+	// holds, and the stack is not inspected at all.
+	if _, lost := d.LostInfo(); lost {
+		return nil, nil //nolint:nilnil // the spec's null for a lost device, not a missing error
 	}
 	return d.errorScopes().PopErrorScope()
 }
@@ -291,8 +301,26 @@ func (d *Device) PopErrorScope() (*GPUError, error) {
 // error scope. If no scope matches, the error is considered uncaptured.
 //
 // Returns true if the error was captured by a scope, false otherwise.
+//
+// An uncaptured error is queued for the device's uncaptured-error callback
+// (D6): captured and delivered are two outcomes of one report, never both.
+// Queueing is all this path may do — it may run under the encoder's or the
+// queue's lock, so the observing entry point drains the event outside its
+// locks (C4).
+//
+// A lost device generates nothing, as the spec says ("No errors are generated
+// from a device which is lost", spec/index.bs:15952-15963): the report is
+// neither captured into a scope nor delivered to the callback, so a scope
+// pushed after the loss is the spec's dead scope and the report returns false.
 func (d *Device) reportError(filter ErrorFilter, message string) bool {
-	return d.errorScopes().ReportError(filter, message)
+	if _, lost := d.LostInfo(); lost {
+		return false
+	}
+	captured := d.errorScopes().ReportError(filter, message)
+	if !captured {
+		d.lostState().RecordUncaptured(&GPUError{Type: filter, Message: message})
+	}
+	return captured
 }
 
 // ReportError is the exported sink for internal callers OUTSIDE this package —

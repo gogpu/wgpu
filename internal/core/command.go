@@ -380,7 +380,7 @@ func (e *CoreCommandEncoder) TakeHALEncoder() hal.CommandEncoder {
 // new recording cannot be begun (the encoder is then in the Error state).
 func (e *CoreCommandEncoder) RawEncoder() hal.CommandEncoder {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 	guard := e.device.snatchLock.Read()
 	defer guard.Release()
 	halEncoder, err := e.recordingLocked(guard)
@@ -400,7 +400,7 @@ func (e *CoreCommandEncoder) RawEncoder() hal.CommandEncoder {
 // WebGPU spec: "validate the encoder state".
 func (e *CoreCommandEncoder) RequireUnlocked(operation string) bool {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 	if e.Status() != CommandEncoderStatusLocked {
 		return true
 	}
@@ -526,7 +526,7 @@ func (e *CoreCommandEncoder) Error() error {
 // Returns nil and an error if the encoder is not in Recording state.
 func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreRenderPassEncoder, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if e.Status() != CommandEncoderStatusRecording {
 		return nil, e.statusError("begin render pass")
@@ -628,7 +628,7 @@ func (e *CoreCommandEncoder) BeginRenderPass(desc *RenderPassDescriptor) (*CoreR
 // This is called internally by CoreRenderPassEncoder.End().
 func (e *CoreCommandEncoder) EndRenderPass(pass *CoreRenderPassEncoder) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if e.Status() != CommandEncoderStatusLocked {
 		return e.statusError("end render pass")
@@ -663,7 +663,7 @@ func (e *CoreCommandEncoder) EndRenderPass(pass *CoreRenderPassEncoder) error {
 // Returns nil and an error if the encoder is not in Recording state.
 func (e *CoreCommandEncoder) BeginComputePass(desc *CoreComputePassDescriptor) (*CoreComputePassEncoder, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if e.Status() != CommandEncoderStatusRecording {
 		return nil, e.statusError("begin compute pass")
@@ -770,7 +770,7 @@ func (e *CoreCommandEncoder) EndComputePass(pass *CoreComputePassEncoder) error 
 // Returns nil and an error if the encoder is not in Recording state.
 func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if e.Status() != CommandEncoderStatusRecording {
 		return nil, e.statusError("finish")
@@ -848,7 +848,7 @@ func (e *CoreCommandEncoder) Finish() (*CoreCommandBuffer, error) {
 // Reference: Rust wgpu-core InnerCommandEncoder::open_pass (command/mod.rs:711-723)
 func (e *CoreCommandEncoder) OpenPass(label string) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if e.Status() != CommandEncoderStatusRecording {
 		return e.statusError("open pass")
@@ -889,7 +889,7 @@ func (e *CoreCommandEncoder) OpenPass(label string) error {
 // Reference: Rust wgpu-core InnerCommandEncoder::close (command/mod.rs:641-650)
 func (e *CoreCommandEncoder) CloseCB() error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if !e.cbListOpen {
 		return fmt.Errorf("core: CloseCB: no command buffer is currently open")
@@ -925,7 +925,7 @@ func (e *CoreCommandEncoder) CloseCB() error {
 // Reference: Rust wgpu-core InnerCommandEncoder::close_and_swap (command/mod.rs:599-607)
 func (e *CoreCommandEncoder) CloseAndSwap() error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if !e.cbListOpen {
 		return fmt.Errorf("core: CloseAndSwap: no command buffer is currently open")
@@ -969,7 +969,7 @@ func (e *CoreCommandEncoder) CloseAndSwap() error {
 // Reference: Rust wgpu-core InnerCommandEncoder::close_and_push_front (command/mod.rs:620-628)
 func (e *CoreCommandEncoder) CloseAndPushFront() error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 
 	if !e.cbListOpen {
 		return fmt.Errorf("core: CloseAndPushFront: no command buffer is currently open")
@@ -1071,8 +1071,30 @@ func (e *CoreCommandEncoder) MarkConsumed() {
 // encoding-phase errors are collected and surfaced at Finish() time.
 func (e *CoreCommandEncoder) SetError(err error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	defer e.unlockAndDispatch()
 	e.setError(err)
+}
+
+// unlockAndDispatch releases the encoder lock and then delivers the device
+// callbacks the recording reported, with no encoder lock held (C4). It is the
+// deferred counterpart of `defer e.mu.Unlock()` on every entry point that can
+// reach setError: registered FIRST, so it runs AFTER any later-registered
+// snatch-guard release — the callback never runs under e.mu or a core lock. A
+// lost callback may re-enter read-only device accessors (LostInfo, Features),
+// which is exactly what invoking it under this lock would forbid.
+func (e *CoreCommandEncoder) unlockAndDispatch() {
+	e.mu.Unlock()
+	e.dispatchPending()
+}
+
+// dispatchPending delivers the device callbacks queued while the encoder
+// recorded. Nil-safe: an encoder built without a device (tests) has nothing to
+// deliver.
+func (e *CoreCommandEncoder) dispatchPending() {
+	if e == nil || e.device == nil {
+		return
+	}
+	e.device.DispatchPending()
 }
 
 // setError transitions to error state. Caller must hold e.mu.

@@ -277,6 +277,7 @@ func (s *Surface) GetCurrentTexture() (SurfaceTexture, bool, error) {
 
 	acquired, lease, err := s.core.AcquireTextureWithLease(nil)
 	if err != nil {
+		s.reportOperationError(err)
 		return SurfaceTexture{}, false, err
 	}
 
@@ -353,7 +354,31 @@ func (s *Surface) PresentWithDamage(texture *SurfaceTexture, damageRects []image
 		return core.ErrReleased
 	}
 
-	return s.core.PresentWithDamage(s.device.HALQueue(), damageRects)
+	err := s.core.PresentWithDamage(s.device.HALQueue(), damageRects)
+	if err != nil {
+		s.reportOperationError(err)
+	}
+	return err
+}
+
+// reportOperationError records a driver device loss observed on the acquire or
+// present path and delivers the callbacks the observation queued
+// (P1-API-042 / #417, C3 and C4): the core surface's own lock is already
+// released when this runs, so no callback executes under it.
+//
+// Only hal.ErrDeviceLost is classified as device loss. ErrSurfaceLost and
+// ErrSurfaceOutdated keep their own identity and reach the caller unchanged —
+// a lost surface says nothing about the device, and escalating it would report
+// a loss that never happened (the shape's explicit "any escalation is
+// documented, never implied").
+func (s *Surface) reportOperationError(err error) {
+	if s == nil || err == nil || s.device == nil {
+		return
+	}
+	if errors.Is(err, hal.ErrDeviceLost) {
+		s.device.MarkDeviceLost(err.Error())
+	}
+	s.device.DispatchDeviceCallbacks()
 }
 
 // SetPresentsWithTransaction toggles Core Animation transaction-based present

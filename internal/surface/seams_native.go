@@ -44,9 +44,10 @@ import (
 
 // DeviceHost is the surface domain's seam view of the device: the shared
 // core.DeviceView (the core state a surface configures and acquires against,
-// the released flag, and the HAL device a texture view is created on) plus the
-// HAL queue presentation goes through. Every device facility the surface calls
-// is here; the root host is the only implementation until S11.
+// the released flag, and the HAL device a texture view is created on), the
+// HAL queue presentation goes through, and the device-lost observation the
+// acquire and present paths report into. Every device facility the surface
+// calls is here; the root host is the only implementation until S11.
 type DeviceHost interface {
 	core.DeviceView
 
@@ -56,4 +57,16 @@ type DeviceHost interface {
 	// contract, not a convenience: a nil *queue.Queue boxed in this interface
 	// would defeat the surface's nil check.
 	HALQueue() hal.Queue
+
+	// MarkDeviceLost records a driver-initiated device loss the surface
+	// observed on the acquire or present path (P1-API-042 / #417, C3/D5): a
+	// HAL error that wraps hal.ErrDeviceLost is the device's, while
+	// ErrSurfaceLost / ErrSurfaceOutdated keep their own identity and are never
+	// reported here. The method only QUEUES the delivery; the surface calls
+	// DispatchDeviceCallbacks once its core call has released the surface lock.
+	MarkDeviceLost(message string)
+
+	// DispatchDeviceCallbacks delivers the device callbacks queued by the
+	// surface's observation, invoked outside the core surface's lock (C4).
+	DispatchDeviceCallbacks()
 }

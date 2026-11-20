@@ -37,6 +37,7 @@ import (
 	"github.com/gogpu/wgpu/internal/core/track"
 	"github.com/gogpu/wgpu/internal/encoder"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/loststate"
 	"github.com/gogpu/wgpu/internal/pipeline"
 	"github.com/gogpu/wgpu/internal/queue"
 	"github.com/gogpu/wgpu/internal/resource"
@@ -1805,6 +1806,14 @@ func (d *Device) Release() {
 	for _, s := range configuredSurfaces {
 		s.RetireDevice(d.core)
 	}
+
+	// Step 6: the device is gone. Record the destroyed reason last, with every
+	// lock released and every surface retired (D4, C9/C10): the first
+	// observation wins, so a driver loss recorded earlier stays Unknown and is
+	// not re-fired, while a healthy device reports Destroyed exactly once. The
+	// delivery is queued by MarkLost and invoked here, on this goroutine.
+	d.core.MarkLost(loststate.ReasonDestroyed, "device released")
+	d.core.DispatchPending()
 }
 
 // reportEncoderBudgetError reports a command-buffer-budget failure from the
@@ -1817,6 +1826,11 @@ func (d *Device) reportEncoderBudgetError(err error) {
 		return
 	}
 	d.core.ReportError(core.ErrorFilterInternal, "Device.CreateCommandEncoder: "+err.Error())
+	// A budget overflow is NOT a device loss (the #428 ruling, C5 of the
+	// shape): the device is healthy and the report above stays an Internal
+	// error. Only the uncaptured delivery is drained here, at this reporting
+	// path's return, with no lock held (C4).
+	d.core.DispatchPending()
 }
 
 // destroyQueue returns the device's DestroyQueue for deferred resource destruction.
@@ -1842,12 +1856,18 @@ func (d *Device) Poll(t core.PollType) bool {
 				// The wait itself failed: report it to the error-scope sink and
 				// claim no completion. Draining with the all-indices-completed
 				// sentinel after a failed wait would resolve every pending map
-				// as done on a device that may be lost. The lost-device class
-				// becomes first-class with the uncaptured-error idiom
-				// (P1-API-039); until then the internal class is the honest
-				// one — the failure is the implementation's, not the caller's
-				// validation.
+				// as done on a device that may be lost. The Internal class is
+				// the honest one for the failure itself — the implementation's,
+				// not the caller's validation — and the device-lost class is a
+				// separate, deliberate entry (D5): a wait that wraps
+				// hal.ErrDeviceLost also latches the loss, first-wins.
 				d.core.ReportError(core.ErrorFilterInternal, "Device.Poll: wait idle: "+err.Error())
+				if errors.Is(err, hal.ErrDeviceLost) {
+					d.core.MarkLost(loststate.ReasonUnknown, err.Error())
+				}
+				// Deliver both events after returning from the wait, with no
+				// lock held (C4).
+				d.core.DispatchPending()
 				return false
 			}
 		}
