@@ -35,28 +35,34 @@ func TestOverridesAllAdapters(t *testing.T) {
 
 // halBackendConfig is one HAL backend variant that the all-adapter tests run.
 type halBackendConfig struct {
-	name    backendName
-	variant gputypes.Backend
-	mask    gputypes.Backends
-	dxil    bool // DX12 with naga's DXIL backend instead of HLSL+FXC
+	name backendName
+	// required is the WGPU_REQUIRE item that requires this backend: its name
+	// here is a corpus variant (dx12-fxc, dx12-dxil), while the switch uses
+	// the HAL backend name (dx12 covers both variants).
+	required string
+	variant  gputypes.Backend
+	mask     gputypes.Backends
+	dxil     bool // DX12 with naga's DXIL backend instead of HLSL+FXC
 }
 
 var halBackendConfigs = []halBackendConfig{
-	{name: backendVulkan, variant: gputypes.BackendVulkan, mask: gputypes.BackendsVulkan},
-	{name: backendDX12FXC, variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12},
-	{name: backendDX12DXIL, variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12, dxil: true},
-	{name: backendGLES, variant: gputypes.BackendGL, mask: gputypes.BackendsGL},
-	{name: backendMetal, variant: gputypes.BackendMetal, mask: gputypes.BackendsMetal},
-	{name: backendSoftware, variant: gputypes.BackendSoftware, mask: gputypes.BackendsSoftware},
+	{name: backendVulkan, required: "vulkan", variant: gputypes.BackendVulkan, mask: gputypes.BackendsVulkan},
+	{name: backendDX12FXC, required: "dx12", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12},
+	{name: backendDX12DXIL, required: "dx12", variant: gputypes.BackendDX12, mask: gputypes.BackendsDX12, dxil: true},
+	{name: backendGLES, required: "gles", variant: gputypes.BackendGL, mask: gputypes.BackendsGL},
+	{name: backendMetal, required: "metal", variant: gputypes.BackendMetal, mask: gputypes.BackendsMetal},
+	{name: backendSoftware, required: "software", variant: gputypes.BackendSoftware, mask: gputypes.BackendsSoftware},
 }
 
 // forEachHALAdapter runs fn in a subtest backend/adapter for every adapter of
 // every registered HAL backend variant. The instance lives for the backend's
 // subtest; a backend that is not registered, has no instance or no adapter
-// here is skipped. Vulkan instances run with the validation layer
+// here is skipped — unless WGPU_REQUIRE names it, which fails the subtest
+// instead (see requireOrSkip). Vulkan instances run with the validation layer
 // (startVulkanValidation): fn gets the capture to drain per step, and any
 // message left at the end fails the backend's subtest. vvl is nil for the
-// other backends.
+// other backends. A Vulkan instance whose layer did not actually load fails
+// when WGPU_REQUIRE lists vvl.
 func forEachHALAdapter(t *testing.T, fn func(t *testing.T, backend backendName, a *hal.ExposedAdapter, vvl *vvlCapture)) {
 	t.Helper()
 	for _, cfg := range halBackendConfigs {
@@ -69,7 +75,7 @@ func forEachHALAdapter(t *testing.T, fn func(t *testing.T, backend backendName, 
 			}
 			backend, ok := hal.GetBackend(cfg.variant)
 			if !ok {
-				t.Skipf("%s backend not registered on this platform", cfg.name)
+				requireOrSkip(t, cfg, string(cfg.name)+" backend not registered on this platform")
 			}
 			var flags gputypes.InstanceFlags
 			var vvl *vvlCapture
@@ -78,12 +84,17 @@ func forEachHALAdapter(t *testing.T, fn func(t *testing.T, backend backendName, 
 			}
 			instance, err := backend.CreateInstance(&hal.InstanceDescriptor{Backends: cfg.mask, Flags: flags})
 			if err != nil {
-				t.Skipf("CreateInstance: %v", err)
+				requireOrSkip(t, cfg, "CreateInstance: "+err.Error())
 			}
 			defer instance.Destroy()
+			// A layer that never loaded reports nothing, so "no messages" would
+			// pass for a clean run; vvl asks for the proof.
+			if cfg.variant == gputypes.BackendVulkan {
+				requireLayerActive(t, vvl)
+			}
 			adapters := instance.EnumerateAdapters(nil)
 			if len(adapters) == 0 {
-				t.Skip("no adapters")
+				requireOrSkip(t, cfg, "no adapters")
 			}
 			for i := range adapters {
 				a := &adapters[i]

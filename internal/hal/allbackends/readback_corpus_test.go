@@ -108,8 +108,19 @@ func runCorpusCase(t *testing.T, r *halRunner, backend backendName, a *hal.Expos
 		t.Skipf("known failure %s, not dispatched: %s", known.Card, known.Reason)
 	}
 
+	tag, detail, failed := executeCorpusCase(r, vvl, c, known)
+	result(tag, detail)
+	if failed {
+		t.Errorf("%s: %s %s", c.name, tag, detail)
+	}
+}
+
+// executeCorpusCase dispatches one case, drains the validation capture it
+// produced and classifies the outcome. It is the part of a case run that is
+// identical for TestReadbackCorpus and a test that asserts a deliberately
+// invalid case fails (TestReadbackCorpusVVLNegative).
+func executeCorpusCase(r *halRunner, vvl *vvlCapture, c *corpusCase, known *corpusKnownFailure) (tag, detail string, failed bool) {
 	out, err := r.dispatch(c.dispatch())
-	detail := ""
 	if err != nil {
 		detail = err.Error()
 	} else {
@@ -118,11 +129,8 @@ func runCorpusCase(t *testing.T, r *halRunner, backend backendName, a *hal.Expos
 	if msgs := vvl.drain(); len(msgs) > 0 {
 		detail = strings.TrimPrefix(detail+"; Vulkan validation: "+strings.Join(msgs, " | "), "; ")
 	}
-	tag, failed := corpusVerdict(detail == "", known)
-	result(tag, detail)
-	if failed {
-		t.Errorf("%s: %s %s", c.name, tag, detail)
-	}
+	tag, failed = corpusVerdict(detail == "", known)
+	return tag, detail, failed
 }
 
 // nagaReadbackDir returns <naga module dir>/testdata/readback for the naga
