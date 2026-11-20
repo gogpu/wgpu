@@ -250,10 +250,13 @@ func (interp *interpreter) beginInvocation() {
 }
 
 // allocArray returns n Value slots for a composite backing, from the
-// invocation arena when it has room and from the heap otherwise.
+// invocation arena when it has room and from the heap otherwise. The result
+// carries its own capacity (a full slice expression), so a future append on a
+// backing cannot silently reach into the next arena slot — the invariant is
+// structural, not by convention (gpuexpert hardening note, #419 lever 2).
 func (interp *interpreter) allocArray(n int) []Value {
 	if inv := interp.inv; inv != nil && inv.arrayIdx+n <= len(inv.arrays) {
-		s := inv.arrays[inv.arrayIdx : inv.arrayIdx+n]
+		s := inv.arrays[inv.arrayIdx : inv.arrayIdx+n : inv.arrayIdx+n]
 		inv.arrayIdx += n
 		return s
 	}
