@@ -65,6 +65,7 @@ func (m *Module) computeEntryPoint(entryPoint string) (*EntryPoint, *Function, e
 // the compute entry point ep (function fn) in ctx, not yet started.
 func (m *Module) startCompute(ep *EntryPoint, fn *Function, ctx *ExecutionContext) *interpreter {
 	interp := m.getInterpreter()
+	interp.beginInvocation()
 	interp.ep = ep
 	interp.fn = fn
 	interp.ctx = ctx
