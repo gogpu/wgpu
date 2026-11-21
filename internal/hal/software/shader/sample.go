@@ -222,7 +222,11 @@ func selectLevel(tex *Texture2D, samp *Sampler, lambda float32) (filter uint32, 
 	return filter, int(lo), d - lo
 }
 
-// sampleLevel samples mip level l of the view with filter.
+// sampleLevel samples mip level l of the view with filter. Each texel the
+// filter reads is wrapped on its own, as compareLevel's are, so a linear
+// filter repeating across the image's edge blends the texels of its
+// opposite edge, rather than wrapping the coordinate and clamping the
+// footprint.
 func sampleLevel(tex *Texture2D, samp *Sampler, filter uint32, l int, c Vec4, offset [3]int) Vec4 {
 	lv := tex.level(l)
 	if lv.Width == 0 || lv.Height == 0 {
@@ -232,9 +236,20 @@ func sampleLevel(tex *Texture2D, samp *Sampler, filter uint32, l int, c Vec4, of
 		return sample3D(tex, lv, samp, filter, c, offset)
 	}
 	lc := levelImage(tex, samp, lv, c, offset)
-	ou := float32(lc.offset[0]) / float32(lv.Width)
-	ov := float32(lc.offset[1]) / float32(lv.Height)
-	return filter2D(&lc.img, filter, applyWrapMode(lc.u+ou, lc.wrapU), applyWrapMode(lc.v+ov, lc.wrapV))
+	if filter != FilterLinear {
+		x, y := nearestTexel(&lc)
+		return readTexel(&lc.img, x, y)
+	}
+	f := linearFootprint(&lc)
+	t00 := readTexel(&lc.img, f.x0, f.y0)
+	t10 := readTexel(&lc.img, f.x1, f.y0)
+	t01 := readTexel(&lc.img, f.x0, f.y1)
+	t11 := readTexel(&lc.img, f.x1, f.y1)
+	var r Vec4
+	for i := range r {
+		r[i] = f.blend(t00[i], t10[i], t01[i], t11[i])
+	}
+	return r
 }
 
 // levelCoord is the image of a mip level a coordinate addresses and the
@@ -277,6 +292,14 @@ func levelImage(tex *Texture2D, samp *Sampler, lv TextureLevel, c Vec4, offset [
 type footprint struct {
 	x0, x1, y0, y1 int
 	fx, fy         float32
+}
+
+// blend returns the linear filter of the footprint's four values, those of
+// texels (x0, y0), (x1, y0), (x0, y1) and (x1, y1), by its weights.
+func (f footprint) blend(v00, v10, v01, v11 float32) float32 {
+	top := v00 + (v10-v00)*f.fx
+	bot := v01 + (v11-v01)*f.fx
+	return top + (bot-top)*f.fy
 }
 
 // linearFootprint returns the footprint of lc's coordinate. The texel offset
@@ -428,9 +451,7 @@ func compareLevel(tex *Texture2D, samp *Sampler, filter uint32, l int, c Vec4, o
 	t10 := cmp.test(tex.Format, readTexel(&lc.img, f.x1, f.y0)[0])
 	t01 := cmp.test(tex.Format, readTexel(&lc.img, f.x0, f.y1)[0])
 	t11 := cmp.test(tex.Format, readTexel(&lc.img, f.x1, f.y1)[0])
-	top := t00 + (t10-t00)*f.fx
-	bot := t01 + (t11-t01)*f.fx
-	return top + (bot-top)*f.fy
+	return f.blend(t00, t10, t01, t11)
 }
 
 // filter2D samples one image at the wrapped coordinate (u, v).
