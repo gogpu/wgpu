@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.35.3] - 2026-11-21
 
 ### Added
 
@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so there the only loss reported is `DeviceLostReasonDestroyed` after `Release()`; the driver and uncaptured
   sources land with webgpu v0.6.0.
 
+### Performance
+
+- **Software interpreter: per-invocation arena (part of #419).** Every fragment built its SubPointer index paths,
+  composite backings and sampled-image boxes on the heap — 11.02 allocations per pixel on the fullscreen-texture
+  path. One scratch arena now lives for an entry-point invocation and is shared by its whole call tree (fixed
+  capacities with a heap fallback past them, never recycled within the invocation; the one value that outlives an
+  invocation, an array output such as clip distances, is deep-copied). Fullscreen textured draw at 1280×720 on the
+  software backend: **10,159,467 → ~180 allocs/op, 347.5 MB → ~40 KB bytes/op**; many-small-quads bytes per draw
+  7,510,088 → 19,746. The first lever — lazy per-draw targets and one raster pipeline per pass — shipped in v0.35.2.
+
 ### Changed
 
 - **naga v0.22.7** (from v0.22.6). The parser now resolves dependencies in the right order, so a shader that failed
@@ -37,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writer-diff against v0.22.6 with zero byte and zero status deltas across the 310-file corpus (1240 comparisons);
   the only output change in the candidate's own corpus is its updated `blend.wgsl` testdata, which three compilers
   now accept and GLSL still refuses.
+- **CI: the naga readback corpus now runs on real devices in CI** — lavapipe with the Khronos validation layer
+  (which also proves itself: a deliberately invalid case must fail), WARP and llvmpipe GLES. `WGPU_REQUIRE` now
+  covers the corpus: a listed backend that is missing, or a validation layer that never loaded, fails the job
+  instead of skipping it, so a GPU-less runner cannot pass for "tested".
 
 ## [0.35.2] - 2026-11-19
 
