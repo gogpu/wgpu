@@ -32,10 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   composite backings and sampled-image boxes on the heap — 11.02 allocations per pixel on the fullscreen-texture
   path. One scratch arena now lives for an entry-point invocation and is shared by its whole call tree (fixed
   capacities with a heap fallback past them, never recycled within the invocation; the one value that outlives an
-  invocation, an array output such as clip distances, is deep-copied). A/B on the gate's own harness, 1280×720 on
-  the software backend: fullscreen textured draw **10,159,491 → 186 allocations/op, 347.5 MB → 61.9 KB bytes/op**;
-  the 512-small-quads harness **bytes per draw −86%** (7,510,088 → 19,746); `ExecuteQuad` **40 → 0 allocs/op**. The
-  first lever — lazy per-draw targets and one raster pipeline per pass — shipped in v0.35.2.
+  invocation, an array output such as clip distances, is deep-copied). A/B on the harness the change was gated
+  with, 1280×720, software backend on the Intel Iris Xe host (i7-1255U), naga v0.22.7: fullscreen textured draw
+  **10,159,491 → 186 allocations/op, 347.5 MB → 61.9 KB bytes/op**; the 512-small-quads harness **bytes per draw
+  −86%** (7,510,088 → 19,746); `ExecuteQuad` **40 → 0 allocs/op**. The first lever — lazy per-draw targets and one
+  raster pipeline per pass — shipped in v0.35.2.
 
 ### Changed
 
