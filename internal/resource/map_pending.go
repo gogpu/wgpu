@@ -28,6 +28,11 @@ import (
 // The public wrapper (wgpu.MapPending) is cached on the object itself (Pub),
 // so a steady-state MapAsync cycle allocates neither the handle nor its
 // wrapper.
+//
+// Every return of the handle to the pool goes through release, the sole
+// mapPendingPool.Put site: its CAS guard there admits exactly one return, the
+// per-mapping fields are cleared on that path, and Pub is deliberately kept so
+// the wrapper is reused together with the object (ADR-070 S1 F1).
 type MapPending struct {
 	buf      *Buffer
 	waiter   *core.MapWaiter

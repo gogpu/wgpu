@@ -1100,6 +1100,13 @@ func (p *Pipeline) SetPixel(x, y int, r, g, b, a byte) {
 
 // Resize changes the dimensions of both buffers.
 // This clears all existing data.
+//
+// Unlike NewPipeline and Reset, whose target buffers are allocated on first
+// use (see NewPipeline), Resize allocates both immediately: it has no draw
+// state to reason about and always replaces them. It also takes depth
+// ownership back — a buffer set with SetDepthBuffer belongs to the caller and
+// is dropped here, and the pipeline's own new depth buffer is what depth
+// tests use from then on.
 func (p *Pipeline) Resize(width, height int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
