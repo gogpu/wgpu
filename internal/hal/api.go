@@ -77,6 +77,16 @@ type ExposedAdapter struct {
 	// Info contains adapter metadata (name, vendor, device type).
 	Info gputypes.AdapterInfo
 
+	// Identity is the hardware identity the backend can report for this
+	// adapter; it is the zero value where the API provides none (GLES, the
+	// software and noop backends, the browser and the wgpu-native binding).
+	// The identifiers have different lifetimes (ADR-084 §2.2): DeviceUUID and
+	// PCIBusID are persistent for the device and the slot, AdapterLUID is
+	// session-local (a reboot, driver update, or adapter disconnect changes
+	// it) and MetalRegistryID is instance-local. See
+	// gputypes.AdapterIdentity for the per-field promise.
+	Identity gputypes.AdapterIdentity
+
 	// Features are the supported optional features.
 	Features gputypes.Features
 

@@ -137,6 +137,7 @@ func (i *Instance) wrapAdapter(adapterID core.AdapterID) (*Adapter, error) {
 		features:    features,
 		limits:      limits,
 		downlevel:   coreAdapter.DownlevelCapabilities,
+		identity:    coreAdapter.Identity,
 		placeholder: coreAdapter.Placeholder,
 		instance:    i,
 	}, nil

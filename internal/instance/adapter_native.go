@@ -34,6 +34,9 @@ type Adapter struct {
 	features  gputypes.Features
 	limits    gputypes.Limits
 	downlevel gputypes.DownlevelCapabilities
+	// identity is the hardware identity copied from the core adapter at
+	// registration (ADR-084); zero means the backend reported none.
+	identity gputypes.AdapterIdentity
 	// placeholder marks a selection-only entry that cannot be opened
 	// (core.Adapter.Placeholder). RequestAdapter still returns such an adapter
 	// so Open fails with its descriptive error; EnumerateAdapters drops it
@@ -73,6 +76,15 @@ func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
 		return gputypes.DownlevelCapabilities{}
 	}
 	return a.downlevel
+}
+
+// Identity returns the adapter's hardware identity (ADR-084). The zero value
+// means the backend reported none; a nil or released adapter reports it too.
+func (a *Adapter) Identity() gputypes.AdapterIdentity {
+	if a == nil || a.released {
+		return gputypes.AdapterIdentity{}
+	}
+	return a.identity
 }
 
 // DeviceDescriptor is the implementation's mirror of the public descriptor: the

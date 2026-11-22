@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Adapter hardware identity** (`Adapter.Identity()`, ADR-084). Every adapter reports what its backend can say about
+  the physical device, as a value separate from `AdapterInfo` (which is unchanged): `DeviceUUID` — the Vulkan 16-byte
+  device UUID, persistent per device and immutable across instances, processes and driver versions;
+  `PCIBusID` — the PCI slot locator from `VK_EXT_pci_bus_info`, persistent while the card stays in its slot and per
+  slot, so it distinguishes otherwise-identical cards; `AdapterLUID` — the session-local Windows LUID, the same
+  value Vulkan reports as `deviceLUID` and equal to the DXGI LUID, changing on reboot, driver update, or adapter
+  disable; `MetalRegistryID` — the instance-local Metal registry ID. The zero value means "not reported" and is
+  never an error. A caller matching adapters treats an all-zero UUID as unknown, falls back to the PCI locator on
+  collisions, and uses the enumeration index only as a tie-breaker. `DeviceUUID.NVMLString()` renders exactly the
+  string `nvidia-smi` prints on NVIDIA hardware — verified on a CMP 30HX host, where the Vulkan UUID equals the NVML
+  UUID byte for byte and `PCIBusID.NVMLString()` equals `pci.bus_id`. With `-tags rust` every field is zero
+  indefinitely: the wgpu-native binding exposes no identity data and upstream has no plan to add it (wgpu-types
+  carries only a PCI-bus string, and wgpu-native does not forward even that). The browser, GLES and the software
+  backend report zeroes as well.
+
 ## [0.35.4] - 2026-11-22
 
 ### Added

@@ -63,6 +63,13 @@ func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
 	return gputypes.DefaultDownlevelCapabilities()
 }
 
+// Identity returns the adapter's hardware identity. The browser reports none:
+// WebGPU defines no per-device identifier (ADR-084 §2.3), so every field is zero
+// for a nil or live adapter alike; it is never an error.
+func (a *Adapter) Identity() gputypes.AdapterIdentity {
+	return gputypes.AdapterIdentity{}
+}
+
 // DeviceDescriptor is the implementation's mirror of the public descriptor: the
 // declaration layer converts, and a nil pointer is the public nil.
 type DeviceDescriptor struct {
