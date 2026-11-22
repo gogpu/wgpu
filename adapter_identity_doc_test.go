@@ -18,7 +18,7 @@ import (
 // gate P3-2, the maintenance risk of the triplication).
 func TestIdentityDocTableConsistent(t *testing.T) {
 	files := []string{"adapter_native.go", "adapter_rust.go", "adapter_browser.go"}
-	var tables [][]string
+	tables := make([][]string, 0, len(files))
 	for _, name := range files {
 		src, err := os.ReadFile(name)
 		if err != nil {
