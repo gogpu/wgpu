@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Software linear filtering at the texture edge** (#438, thanks @dvoyni). The linear filter wrapped the
+  sample coordinate once and then clamped its 2×2 footprint to the image, so under `repeat` a tiled texture
+  showed a seam where it should blend across the edge; each texel of the footprint is now wrapped on its own,
+  as `compareLevel` already did, matching the address-mode model the spec describes and the hardware backends
+  already follow. Clamped and mirrored modes read the edge texel as before; 3D sampling is unchanged.
+
 ## [0.35.3] - 2026-11-21
 
 ### Added
