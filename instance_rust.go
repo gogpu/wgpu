@@ -90,6 +90,26 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	return &Adapter{impl: impl, instance: i}, nil
 }
 
+// EnumerateAdapters is unavailable in the -tags rust build: wgpu-native can
+// enumerate adapters (wgpuInstanceEnumerateAdapters), but go-webgpu/webgpu
+// does not bind it yet. The method returns no adapters, never an error, and
+// logs the gap once per process; the public name exists so the API does not
+// change when the binding lands. RequestAdapter is unaffected, and the native
+// and browser builds enumerate normally.
+func (i *Instance) EnumerateAdapters() []*Adapter {
+	if i.isReleased() {
+		return nil
+	}
+	return instance.ProjectAdapters(i.impl.EnumerateAdapters(), i.wrapAdapter)
+}
+
+// wrapAdapter is the projection EnumerateAdapters builds its list with: a
+// method value, not a closure, so the public method stays a declaration-layer
+// delegation (ADR-070 §15.1).
+func (i *Instance) wrapAdapter(impl *instance.Adapter) *Adapter {
+	return &Adapter{impl: impl, instance: i}
+}
+
 // isReleased reports whether the instance is released. A nil wrapper is
 // released; a wrapper without an implementation (the zero value) is not, which
 // is the zero-value answer the build always had.

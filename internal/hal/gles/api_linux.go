@@ -364,9 +364,12 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 }
 
 // placeholderExposedAdapter returns a non-openable adapter when no EGL context exists.
+// Placeholder is set so the public adapter enumeration hides it (P1-API-040 R1);
+// adapter selection keeps seeing it, preserving the descriptive Open error.
 func placeholderExposedAdapter(driverInfo string) hal.ExposedAdapter {
 	return hal.ExposedAdapter{
-		Adapter: &Adapter{},
+		Adapter:     &Adapter{},
+		Placeholder: true,
 		Info: gputypes.AdapterInfo{
 			Name:       "OpenGL Adapter",
 			Vendor:     vendorUnknown,

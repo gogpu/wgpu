@@ -87,13 +87,30 @@ func (i *Instance) RequestAdapter(opts *gputypes.RequestAdapterOptions, compatib
 	if err != nil {
 		return nil, err
 	}
-	keepAdapter := false
-	defer func() {
-		if !keepAdapter {
-			i.core.ReleaseSurfaceAdapter(adapterID)
-		}
-	}()
 
+	adapter, err := i.wrapAdapter(adapterID)
+	if err != nil {
+		// A request-local surface adapter is not kept by a failed wrap; the
+		// cached adapters this releases nothing for (ReleaseSurfaceAdapter
+		// only scans its own list).
+		i.core.ReleaseSurfaceAdapter(adapterID)
+		return nil, err
+	}
+
+	hal.Logger().Info("wgpu: adapter selected",
+		"name", adapter.info.Name,
+		"backend", adapter.info.Backend,
+		"type", adapter.info.DeviceType,
+	)
+
+	return adapter, nil
+}
+
+// wrapAdapter builds the implementation adapter for a core adapter the
+// instance has already registered: one metadata read per snapshot field and a
+// copy of the core adapter, which owns the HAL handle the device open path
+// needs.
+func (i *Instance) wrapAdapter(adapterID core.AdapterID) (*Adapter, error) {
 	info, err := core.GetAdapterInfo(adapterID)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to get adapter info: %w", err)
@@ -107,29 +124,49 @@ func (i *Instance) RequestAdapter(opts *gputypes.RequestAdapterOptions, compatib
 		return nil, fmt.Errorf("wgpu: failed to get adapter limits: %w", err)
 	}
 
-	hal.Logger().Info("wgpu: adapter selected",
-		"name", info.Name,
-		"backend", info.Backend,
-		"type", info.DeviceType,
-	)
-
 	hub := core.GetGlobal().Hub()
 	coreAdapter, err := hub.GetAdapter(adapterID)
 	if err != nil {
 		return nil, fmt.Errorf("wgpu: failed to get adapter: %w", err)
 	}
 
-	adapter := &Adapter{
-		id:        adapterID,
-		core:      &coreAdapter,
-		info:      info,
-		features:  features,
-		limits:    limits,
-		downlevel: coreAdapter.DownlevelCapabilities,
-		instance:  i,
+	return &Adapter{
+		id:          adapterID,
+		core:        &coreAdapter,
+		info:        info,
+		features:    features,
+		limits:      limits,
+		downlevel:   coreAdapter.DownlevelCapabilities,
+		placeholder: coreAdapter.Placeholder,
+		instance:    i,
+	}, nil
+}
+
+// EnumerateAdapters returns the adapters the instance knows, in registration
+// order. Placeholders exist for selection compatibility only and cannot be
+// opened (a GLES backend without an EGL context), so they are not enumerated:
+// a caller never sees an adapter that cannot open (P1-API-040 R1).
+//
+// The method is read-only by contract (R4): it takes the core snapshot and
+// wraps it, registering nothing, admitting no fallback adapters (that list is
+// separate and never leaks here) and triggering no deferred GLES enumeration —
+// the application's own surface-qualified RequestAdapter does that. An adapter
+// whose registration vanished between the snapshot and the read drops out.
+func (i *Instance) EnumerateAdapters() []*Adapter {
+	if i == nil || i.core == nil || i.IsReleased() {
+		return nil
 	}
-	keepAdapter = true
-	return adapter, nil
+
+	ids := i.core.EnumerateAdapters()
+	adapters := make([]*Adapter, 0, len(ids))
+	for _, id := range ids {
+		adapter, err := i.wrapAdapter(id)
+		if err != nil || adapter.placeholder {
+			continue
+		}
+		adapters = append(adapters, adapter)
+	}
+	return adapters
 }
 
 // AdoptDevice registers a device this instance owns. The adapter calls it once

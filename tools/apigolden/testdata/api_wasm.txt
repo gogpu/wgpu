@@ -396,6 +396,7 @@ method (*Instance) CreateSurface(displayHandle uintptr, windowHandle uintptr) (*
 method (*Instance) CreateSurfaceFromCanvas(canvas syscall/js.Value) (*Surface, error)
 method (*Instance) CreateSurfaceFromTarget(target SurfaceTarget) (*Surface, error)
 method (*Instance) CreateSurfaceUnsafe(target SurfaceTargetUnsafe) (*Surface, error)
+method (*Instance) EnumerateAdapters() []*Adapter
 method (*Instance) HAL() github.com/gogpu/wgpu/hal.Handles
 method (*Instance) Release()
 method (*Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)

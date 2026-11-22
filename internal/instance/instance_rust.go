@@ -12,6 +12,7 @@ package instance
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/gogpu/gputypes"
 
@@ -19,8 +20,12 @@ import (
 
 	publichal "github.com/gogpu/wgpu/hal"
 	"github.com/gogpu/wgpu/internal/core"
+	"github.com/gogpu/wgpu/internal/hal"
 	"github.com/gogpu/wgpu/internal/surface"
 )
+
+// enumerateUnavailableOnce keeps the enumeration warning to one per process.
+var enumerateUnavailableOnce sync.Once
 
 // Instance is the rust-build implementation of the GPU instance.
 type Instance struct {
@@ -117,6 +122,21 @@ func (i *Instance) RequestAdapter(opts *gputypes.RequestAdapterOptions, compatib
 		limits:   limits,
 		instance: i,
 	}, nil
+}
+
+// EnumerateAdapters returns no adapters on this build. wgpu-native can
+// enumerate adapters (wgpuInstanceEnumerateAdapters), but go-webgpu/webgpu
+// v0.5.5 does not bind it yet; the public name exists so the API does not
+// change when the binding lands (P1-API-040 R3). The gap is logged once per
+// process, and RequestAdapter is unaffected.
+func (i *Instance) EnumerateAdapters() []*Adapter {
+	if i == nil || i.released {
+		return nil
+	}
+	enumerateUnavailableOnce.Do(func() {
+		hal.Logger().Warn("wgpu: adapter enumeration is unavailable in the -tags rust build until go-webgpu/webgpu binds wgpuInstanceEnumerateAdapters; returning no adapters")
+	})
+	return nil
 }
 
 // Release releases the instance. Surfaces must be released explicitly.

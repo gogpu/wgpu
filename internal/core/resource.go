@@ -35,6 +35,12 @@ type Adapter struct {
 	// format from a buffer, and the frontend blits instead
 	// (Device.StencilUploadNeedsBlit).
 	StencilCopyNeedsBlit bool
+	// Placeholder marks an adapter that exists for selection compatibility
+	// only and cannot be opened (hal.ExposedAdapter.Placeholder). The public
+	// enumeration hides placeholders; RequestAdapter still selects them, so a
+	// GLES request without a surface keeps failing at Open with its
+	// descriptive error (P1-API-040 R1).
+	Placeholder bool
 
 	// === HAL integration fields ===
 
