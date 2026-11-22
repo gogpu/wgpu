@@ -234,9 +234,17 @@ func (a *Adapter) toExposedAdapter() hal.ExposedAdapter {
 	return hal.ExposedAdapter{
 		Adapter:      a,
 		Info:         a.Info(),
+		Identity:     gputypes.AdapterIdentity{AdapterLUID: luidPack(a.desc.AdapterLuid)},
 		Features:     a.Features(),
 		Capabilities: a.Capabilities(),
 	}
+}
+
+// luidPack packs a DXGI LUID into the AdapterLUID numeric form (ADR-084
+// §2.1): the high part is the upper 32 bits, the low part the lower 32. The
+// HighPart is signed in DXGI, and the uint32 conversion keeps its bit pattern.
+func luidPack(luid dxgi.LUID) uint64 {
+	return uint64(uint32(luid.HighPart))<<32 | uint64(luid.LowPart)
 }
 
 // Info returns adapter information.
@@ -628,6 +636,7 @@ func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
 	return hal.ExposedAdapter{
 		Adapter:      a,
 		Info:         info,
+		Identity:     gputypes.AdapterIdentity{AdapterLUID: luidPack(a.desc.AdapterLuid)},
 		Features:     a.Features(),
 		Capabilities: a.Capabilities(),
 	}

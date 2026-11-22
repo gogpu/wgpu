@@ -115,6 +115,9 @@ func main() {
     defer adapter.Release()
 
     // Get adapter info
+    // (adapter.Identity() adds hardware identity where the backend reports
+    // it: DeviceUUID/PCIBusID on Vulkan — NVMLString() matches nvidia-smi —
+    // AdapterLUID on Windows, MetalRegistryID on Metal, zero elsewhere)
     info := adapter.Info()
     fmt.Printf("GPU: %s (%s)\n", info.Name, info.Backend)
 

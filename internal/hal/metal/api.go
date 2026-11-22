@@ -111,6 +111,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 				DriverInfo: "Metal API",
 				Backend:    gputypes.BackendMetal,
 			},
+			Identity: gputypes.AdapterIdentity{MetalRegistryID: DeviceRegistryID(device)},
 			Features: features,
 			Capabilities: hal.Capabilities{
 				// Metal has no explicit transitions: MTLCommandEncoder orders

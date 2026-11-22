@@ -6,6 +6,7 @@
 package vulkan
 
 import (
+	"encoding/binary"
 	"fmt"
 	"runtime"
 	"strings"
@@ -280,6 +281,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 					vkVersionPatch(props.ApiVersion)),
 				Backend: gputypes.BackendVulkan,
 			},
+			Identity: i.adapterIdentity(device, adapter.ext),
 			Features: featuresFromPhysicalDevice(&features, props.ApiVersion) | adapter.extendedWebGPUFeatures(queueFamily),
 			Capabilities: hal.Capabilities{
 				// Vulkan records pipeline barriers in the command buffer.
@@ -295,6 +297,85 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 	}
 
 	return adapters
+}
+
+// Extension gates for the adapter identity query (ADR-084 §2.3).
+const (
+	// extPCIBusInfo provides vk.PhysicalDevicePCIBusInfoPropertiesEXT. It is a
+	// device extension, never core, so the PCI locator is zero without it.
+	extPCIBusInfo = "VK_EXT_pci_bus_info"
+)
+
+// adapterIdentity returns the hardware identity the physical device can report
+// (ADR-084 §2.3): the device UUID and LUID from VkPhysicalDeviceIDProperties
+// and the PCI slot locator from VK_EXT_pci_bus_info, chained into one
+// vkGetPhysicalDeviceProperties2 call. Every field the device cannot report
+// stays zero; an absent extension or a zero UUID is a normal answer, never an
+// error.
+func (i *Instance) adapterIdentity(device vk.PhysicalDevice, s *extendedFeatureSupport) gputypes.AdapterIdentity {
+	// s.apiVersion is min(device, instance). The instance is always created at
+	// Vulkan 1.2 (instanceAPIVersion, naga_options.go), so
+	// vkGetPhysicalDeviceProperties2 is always available and the check reduces
+	// to the device supporting Vulkan 1.1, which is where
+	// VkPhysicalDeviceIDProperties is core (VK_KHR_external_memory_capabilities
+	// is an INSTANCE extension and cannot be looked up in the device list).
+	// A Vulkan 1.0 device reports zeros, as documented.
+	hasID := s.apiVersion >= vkMakeVersion(1, 1, 0)
+	hasPCI := s.extensions[extPCIBusInfo]
+	if !hasID && !hasPCI {
+		return gputypes.AdapterIdentity{}
+	}
+
+	var idProps vk.PhysicalDeviceIDProperties
+	var pciProps vk.PhysicalDevicePCIBusInfoPropertiesEXT
+	props2 := vk.PhysicalDeviceProperties2{SType: vk.StructureTypePhysicalDeviceProperties2}
+	if hasID {
+		idProps.SType = vk.StructureTypePhysicalDeviceIdProperties
+		props2.PNext = (*uintptr)(unsafe.Pointer(&idProps))
+	}
+	if hasPCI {
+		pciProps.SType = vk.StructureTypePhysicalDevicePciBusInfoPropertiesExt
+		if hasID {
+			idProps.PNext = (*uintptr)(unsafe.Pointer(&pciProps))
+		} else {
+			props2.PNext = (*uintptr)(unsafe.Pointer(&pciProps))
+		}
+	}
+	i.cmds.GetPhysicalDeviceProperties2(device, &props2)
+
+	var id *vk.PhysicalDeviceIDProperties
+	if hasID {
+		id = &idProps
+	}
+	var pci *vk.PhysicalDevicePCIBusInfoPropertiesEXT
+	if hasPCI {
+		pci = &pciProps
+	}
+	return identityFromProperties(id, pci)
+}
+
+// identityFromProperties assembles the identity from the queried Vulkan
+// property structs; a nil struct means the device cannot report it.
+func identityFromProperties(id *vk.PhysicalDeviceIDProperties, pci *vk.PhysicalDevicePCIBusInfoPropertiesEXT) gputypes.AdapterIdentity {
+	var identity gputypes.AdapterIdentity
+	if id != nil {
+		identity.DeviceUUID = gputypes.DeviceUUID(id.DeviceUUID)
+		// The Vulkan spec says deviceLUID's bytes "can be cast to an LUID
+		// object", and a Windows LUID is little-endian. The bytes are
+		// unspecified unless deviceLUIDValid is set.
+		if id.DeviceLUIDValid != 0 {
+			identity.AdapterLUID = binary.LittleEndian.Uint64(id.DeviceLUID[:])
+		}
+	}
+	if pci != nil {
+		identity.PCIBusID = gputypes.PCIBusID{
+			Domain:   pci.PciDomain,
+			Bus:      pci.PciBus,
+			Device:   pci.PciDevice,
+			Function: pci.PciFunction,
+		}
+	}
+	return identity
 }
 
 // Destroy releases the Vulkan instance.

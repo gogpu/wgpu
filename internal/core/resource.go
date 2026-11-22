@@ -27,6 +27,11 @@ type Adapter struct {
 	Limits gputypes.Limits
 	// Backend identifies which graphics backend this adapter uses.
 	Backend gputypes.Backend
+	// Identity is the hardware identity copied from hal.ExposedAdapter.Identity
+	// at registration (ADR-084). The zero value means the backend reported none;
+	// it is never an error. It is read-only after registration, so both the
+	// enumeration and the RequestAdapter path answer the same record.
+	Identity gputypes.AdapterIdentity
 	// DownlevelCapabilities contains backend capability flags for downlevel adapters.
 	// Matches Rust wgpu-types DownlevelCapabilities.
 	DownlevelCapabilities gputypes.DownlevelCapabilities

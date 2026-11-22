@@ -170,3 +170,83 @@ func TestEnumerateAdaptersRegistrationOrder(t *testing.T) {
 		t.Fatalf("RequestAdapter picked %q, want the ranked discrete adapter (the docs say the orders can differ)", got)
 	}
 }
+
+// enumIdentity is a representative non-zero identity: a 16-byte UUID, a PCI
+// slot, a LUID and a Metal registry ID, so a dropped or zeroed field is visible.
+func enumIdentity() gputypes.AdapterIdentity {
+	return gputypes.AdapterIdentity{
+		DeviceUUID:      gputypes.DeviceUUID{0x28, 0x8b, 0xbc, 0x7b, 0x41, 0xe0, 0x9c, 0xf2, 0x8f, 0xf0, 0x59, 0x18, 0x50, 0x9a, 0x02, 0x40},
+		PCIBusID:        gputypes.PCIBusID{Domain: 0, Bus: 4, Device: 0, Function: 0},
+		AdapterLUID:     0xd5e26d2b,
+		MetalRegistryID: 0x1234,
+	}
+}
+
+// TestAdapterIdentityZeroAfterRelease pins the released and nil answers even
+// when the adapter carries a non-zero identity: the guard, not the data, is
+// what a caller sees after Release.
+func TestAdapterIdentityZeroAfterRelease(t *testing.T) {
+	want := enumIdentity()
+	a := &Adapter{identity: want}
+	if got := a.Identity(); got != want {
+		t.Fatalf("live adapter identity = %+v, want %+v", got, want)
+	}
+	a.released = true
+	if got := a.Identity(); !got.IsZero() {
+		t.Fatalf("released adapter identity = %+v, want the zero value", got)
+	}
+	var nilAdapter *Adapter
+	if got := nilAdapter.Identity(); !got.IsZero() {
+		t.Fatalf("nil adapter identity = %+v, want the zero value", got)
+	}
+}
+
+// TestAdapterIdentityPathParity pins ADR-084's RequestAdapter path parity: the
+// adapter a RequestAdapter call returns and its enumerated counterpart read the
+// same core record, so a set identity surfaces unchanged through both.
+func TestAdapterIdentityPathParity(t *testing.T) {
+	want := enumIdentity()
+	exposed := enumExposed("Discrete With Identity", gputypes.DeviceTypeDiscreteGPU)
+	exposed.Identity = want
+	inst := newEnumInstance(t, exposed)
+
+	// The first request runs the backend's one-shot enumeration.
+	picked, err := inst.RequestAdapter(nil, nil)
+	if err != nil {
+		t.Fatalf("RequestAdapter: %v", err)
+	}
+	if got := picked.Identity(); got != want {
+		t.Fatalf("RequestAdapter identity = %+v, want %+v", got, want)
+	}
+
+	adapters := inst.EnumerateAdapters()
+	if len(adapters) != 1 {
+		t.Fatalf("EnumerateAdapters = %d adapters, want 1", len(adapters))
+	}
+	if got := adapters[0].Identity(); got != want {
+		t.Fatalf("EnumerateAdapters identity = %+v, want the same record as RequestAdapter (%+v)", got, want)
+	}
+}
+
+// TestAdapterIdentityZeroPath pins the zero path: an adapter whose backend
+// reports no identity answers IsZero through both paths, with no error
+// (ADR-084 §2.2: all-zero = unknown, never an error).
+func TestAdapterIdentityZeroPath(t *testing.T) {
+	inst := newEnumInstance(t, enumExposed("GL Hardware", gputypes.DeviceTypeDiscreteGPU))
+
+	picked, err := inst.RequestAdapter(nil, nil)
+	if err != nil {
+		t.Fatalf("RequestAdapter: %v", err)
+	}
+	if !picked.Identity().IsZero() {
+		t.Fatalf("RequestAdapter identity = %+v, want zero", picked.Identity())
+	}
+
+	adapters := inst.EnumerateAdapters()
+	if len(adapters) != 1 {
+		t.Fatalf("EnumerateAdapters = %d adapters, want 1", len(adapters))
+	}
+	if !adapters[0].Identity().IsZero() {
+		t.Fatalf("EnumerateAdapters identity = %+v, want zero", adapters[0].Identity())
+	}
+}

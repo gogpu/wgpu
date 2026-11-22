@@ -13,6 +13,7 @@ method (*Adapter) DownlevelCapabilities() github.com/gogpu/gputypes.DownlevelCap
 method (*Adapter) Features() github.com/gogpu/gputypes.Features
 method (*Adapter) GetSurfaceCapabilities(surface *Surface) *SurfaceCapabilities
 method (*Adapter) HAL() github.com/gogpu/wgpu/hal.Handles
+method (*Adapter) Identity() github.com/gogpu/gputypes.AdapterIdentity
 method (*Adapter) Info() github.com/gogpu/gputypes.AdapterInfo
 method (*Adapter) Limits() github.com/gogpu/gputypes.Limits
 method (*Adapter) Release()
