@@ -56,7 +56,7 @@ func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
 // Identity returns the hardware identity a backend can report for this adapter
 // (ADR-084). This is a native extension beyond the WebGPU specification, which
 // defines no per-device identifier: the zero value means the backend reported
-// none, and that is never an error. The browser, GLES, the software backend and
+// none, and that is never an error; a released adapter reports the zero value too. The browser, GLES, the software backend and
 // the -tags rust (wgpu-native) binding report zeros on every field.
 //
 // The fields have different lifetimes, so the promise is per identifier:
@@ -67,7 +67,7 @@ func (a *Adapter) DownlevelCapabilities() gputypes.DownlevelCapabilities {
 // | `PCIBusID` (Vulkan) | **Persistent while the card stays in its slot**; per-slot, so it distinguishes identical cards. Optional: "not all physical devices have PCI bus information" — zero when the extension is absent | `VK_EXT_pci_bus_info` refpage (device extension, ratified, not core) |
 // | `AdapterLUID` (DX12; Vulkan on Windows; MoltenVK) | **Session-local only**: "changes whenever the system is rebooted / the adapter's driver is updated / the adapter is disabled / the adapter is disconnected"; stable across processes within one boot; on Windows Vulkan `deviceLUID` "must be equal to" the corresponding `IDXGIAdapter1` LUID; on MoltenVK it is the registry ID | WDK `D3DKMT_ADAPTERINFO`; DXCore docs; Vulkan `deviceLUID` wording; MoltenVK PR #1908 |
 // | `MetalRegistryID` (native Metal) | **Instance-local**: an IORegistry handle, "global to all tasks" (Apple) but MoltenVK's maintainers found it **not constant across OS reboots** — a same-process identifier, never a rental matcher | Apple `MTLDevice.registryID`; MoltenVK #1880 / PR #1908 |
-// | NVML correspondence (NVIDIA) | `NVMLString()` renders **the form NVML uses** (`nvidia-smi`, `NVIDIA_VISIBLE_DEVICES`); it is not a claim that the adapter is an NVML device — every Vulkan adapter's bytes render this way. **Byte order is an empirical contract**: NVIDIA documents Vulkan `deviceUUID` == CUDA `uuid` byte-for-byte (CUDA C Programming Guide, "Matching device UUIDs"); NVML renders that as `GPU-` + 8-4-4-4-12. Verified on our hardware (O1 closed, §3) | NVIDIA CUDA guide; `nvml.h` `NVML_DEVICE_UUID_ASCII_LEN 41` / `_BINARY_LEN 16`; NVML `nvmlDeviceGetUUID` |
+// | NVML correspondence (NVIDIA) | `NVMLString()` renders **the form NVML uses** (`nvidia-smi`, `NVIDIA_VISIBLE_DEVICES`); it is not a claim that the adapter is an NVML device — every Vulkan adapter's bytes render this way. **Byte order is an empirical contract**: NVIDIA documents Vulkan `deviceUUID` == CUDA `uuid` byte-for-byte (CUDA C Programming Guide, "Matching device UUIDs"); NVML renders that as `GPU-` + 8-4-4-4-12. Verified on real hardware: the Vulkan UUID renders exactly `nvidia-smi`'s string | NVIDIA CUDA guide; `nvml.h` `NVML_DEVICE_UUID_ASCII_LEN 41` / `_BINARY_LEN 16`; NVML `nvmlDeviceGetUUID` |
 //
 // Callers match on DeviceUUID first and fall back to PCIBusID when two adapters
 // collide (conformance cannot guarantee uniqueness); keep adapters distinct by

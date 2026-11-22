@@ -301,11 +301,7 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 
 // Extension gates for the adapter identity query (ADR-084 §2.3).
 const (
-	// extExternalMemoryCapabilities promotes VkPhysicalDeviceIDProperties to
-	// Vulkan 1.1; below that version the struct is chained only when the
-	// extension is present.
-	extExternalMemoryCapabilities = "VK_KHR_external_memory_capabilities"
-	// extPCIBusInfo provides VkPhysicalDevicePCIBusInfoPropertiesEXT. It is a
+	// extPCIBusInfo provides vk.PhysicalDevicePCIBusInfoPropertiesEXT. It is a
 	// device extension, never core, so the PCI locator is zero without it.
 	extPCIBusInfo = "VK_EXT_pci_bus_info"
 )
@@ -317,9 +313,14 @@ const (
 // stays zero; an absent extension or a zero UUID is a normal answer, never an
 // error.
 func (i *Instance) adapterIdentity(device vk.PhysicalDevice, s *extendedFeatureSupport) gputypes.AdapterIdentity {
-	// VkPhysicalDeviceIDProperties is Vulkan 1.1 core and otherwise comes with
-	// VK_KHR_external_memory_capabilities.
-	hasID := s.apiVersion >= vkMakeVersion(1, 1, 0) || s.extensions[extExternalMemoryCapabilities]
+	// s.apiVersion is min(device, instance). The instance is always created at
+	// Vulkan 1.2 (instanceAPIVersion, naga_options.go), so
+	// vkGetPhysicalDeviceProperties2 is always available and the check reduces
+	// to the device supporting Vulkan 1.1, which is where
+	// VkPhysicalDeviceIDProperties is core (VK_KHR_external_memory_capabilities
+	// is an INSTANCE extension and cannot be looked up in the device list).
+	// A Vulkan 1.0 device reports zeros, as documented.
+	hasID := s.apiVersion >= vkMakeVersion(1, 1, 0)
 	hasPCI := s.extensions[extPCIBusInfo]
 	if !hasID && !hasPCI {
 		return gputypes.AdapterIdentity{}

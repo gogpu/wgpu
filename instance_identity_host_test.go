@@ -31,12 +31,12 @@ func TestIdentityMatchesNVMLOnHost(t *testing.T) {
 	}
 
 	vulkanAdapters := enumerateAdapters(t, gputypes.BackendsVulkan)
-	nvidia := mustFindAdapter(t, vulkanAdapters, "NVIDIA", "Vulkan")
+	// The same physical card can be enumerated twice on Windows (the mining
+	// card appears under a second name with an all-zero UUID), so the pick is
+	// "an NVIDIA-named adapter that actually reports a UUID", never "the first".
+	nvidia := findVulkanAdapterWithUUID(t, vulkanAdapters, "NVIDIA")
 	identity := nvidia.Identity()
 
-	if identity.DeviceUUID.IsZero() {
-		t.Errorf("Vulkan %q DeviceUUID is zero, want the nvidia-smi UUID", nvidia.Info().Name)
-	}
 	if identity.PCIBusID.IsZero() {
 		t.Errorf("Vulkan %q PCIBusID is zero, want its PCI slot", nvidia.Info().Name)
 	}
@@ -59,29 +59,68 @@ func TestIdentityMatchesNVMLOnHost(t *testing.T) {
 		t.Errorf("PCIBusID.NVMLString() = %q, nvidia-smi pci.bus_id = %q", gotPCI, line.pci)
 	}
 
+	// The Vulkan spec ties deviceLUID to the corresponding DXGI adapter LUID, so
+	// the proof is "a DX12 adapter carries exactly this LUID" — matching by LUID,
+	// not by name or order.
 	dx12Adapters := enumerateAdapters(t, gputypes.BackendsDX12)
-	dx12NVIDIA := mustFindAdapter(t, dx12Adapters, "NVIDIA", "DX12")
-	dx12LUID := dx12NVIDIA.Identity().AdapterLUID
-	if dx12LUID == 0 {
-		t.Errorf("DX12 %q AdapterLUID is zero, want the DXGI adapter LUID", dx12NVIDIA.Info().Name)
-	}
-	if dx12LUID != identity.AdapterLUID {
-		t.Errorf("LUID mismatch across APIs: Vulkan deviceLUID 0x%X, DXGI AdapterLuid 0x%X; the Vulkan spec requires them equal",
-			identity.AdapterLUID, dx12LUID)
+	dx12NVIDIA := findAdapterByLUID(t, dx12Adapters, identity.AdapterLUID)
+	if got := dx12NVIDIA.Identity().AdapterLUID; got != identity.AdapterLUID {
+		t.Errorf("DX12 %q AdapterLUID = 0x%X, want the Vulkan deviceLUID 0x%X",
+			dx12NVIDIA.Info().Name, got, identity.AdapterLUID)
 	}
 
 	// An Intel adapter reports a UUID too; NVMLString renders any Vulkan UUID,
-	// so it must not panic and says nothing about NVML management (§3).
-	intel := mustFindAdapter(t, vulkanAdapters, "Iris", "Vulkan")
-	intelID := intel.Identity()
-	if intelID.DeviceUUID.IsZero() {
-		t.Errorf("Intel %q DeviceUUID is zero, want a reported 16-byte UUID", intel.Info().Name)
+	// so it must not panic and says nothing about NVML management. The check is
+	// conditional: not every host that promises identity has an Intel GPU.
+	var intelUUID, intelPCI string
+	for _, a := range vulkanAdapters {
+		if strings.Contains(a.Info().Name, "Iris") {
+			intelID := a.Identity()
+			if intelID.DeviceUUID.IsZero() {
+				t.Errorf("Intel %q DeviceUUID is zero, want a reported 16-byte UUID", a.Info().Name)
+			}
+			intelUUID = intelID.DeviceUUID.NVMLString()
+			intelPCI = intelID.PCIBusID.NVMLString()
+		}
 	}
-	_ = intelID.DeviceUUID.NVMLString()
 
-	t.Logf("NVIDIA: uuid=%q pci=%q luid=0x%X; nvidia-smi: uuid=%q pci=%q; DXGI LUID=0x%X; Intel: uuid=%q pci=%q",
-		gotUUID, gotPCI, identity.AdapterLUID, line.uuid, line.pci, dx12LUID,
-		intelID.DeviceUUID.NVMLString(), intelID.PCIBusID.NVMLString())
+	t.Logf("NVIDIA: uuid=%q pci=%q luid=0x%X; nvidia-smi: uuid=%q pci=%q; DX12 LUID=0x%X (matched); Intel: uuid=%q pci=%q",
+		gotUUID, gotPCI, identity.AdapterLUID, line.uuid, line.pci, identity.AdapterLUID, intelUUID, intelPCI)
+}
+
+// findVulkanAdapterWithUUID returns the adapter whose name contains substr and
+// whose DeviceUUID is non-zero, or fails listing every adapter with its UUID
+// state — the host enumerates some cards twice, once without a UUID.
+func findVulkanAdapterWithUUID(t *testing.T, adapters []*wgpu.Adapter, substr string) *wgpu.Adapter {
+	t.Helper()
+	for _, a := range adapters {
+		if strings.Contains(a.Info().Name, substr) && !a.Identity().DeviceUUID.IsZero() {
+			return a
+		}
+	}
+	var seen []string
+	for _, a := range adapters {
+		seen = append(seen, fmt.Sprintf("%q(uuid-zero=%v)", a.Info().Name, a.Identity().DeviceUUID.IsZero()))
+	}
+	t.Fatalf("no %s adapter with a non-zero DeviceUUID in the Vulkan enumeration (%v), but WGPU_REQUIRE lists identity", substr, seen)
+	return nil
+}
+
+// findAdapterByLUID returns the adapter carrying exactly luid, or fails listing
+// the names and LUIDs that were present.
+func findAdapterByLUID(t *testing.T, adapters []*wgpu.Adapter, luid uint64) *wgpu.Adapter {
+	t.Helper()
+	for _, a := range adapters {
+		if a.Identity().AdapterLUID == luid {
+			return a
+		}
+	}
+	var seen []string
+	for _, a := range adapters {
+		seen = append(seen, fmt.Sprintf("%q(luid=0x%X)", a.Info().Name, a.Identity().AdapterLUID))
+	}
+	t.Fatalf("no DX12 adapter carries the Vulkan deviceLUID 0x%X (%v); the Vulkan spec requires the corresponding IDXGIAdapter1 LUID to be equal", luid, seen)
+	return nil
 }
 
 // requireEnvironmentItem reports whether the comma-separated WGPU_REQUIRE list
@@ -105,23 +144,6 @@ func enumerateAdapters(t *testing.T, backends gputypes.Backends) []*wgpu.Adapter
 	}
 	t.Cleanup(inst.Release)
 	return inst.EnumerateAdapters()
-}
-
-// mustFindAdapter returns the first adapter whose Info().Name contains substr,
-// or fails the test naming the adapters that were present.
-func mustFindAdapter(t *testing.T, adapters []*wgpu.Adapter, substr, backend string) *wgpu.Adapter {
-	t.Helper()
-	for _, a := range adapters {
-		if strings.Contains(a.Info().Name, substr) {
-			return a
-		}
-	}
-	names := make([]string, len(adapters))
-	for i, a := range adapters {
-		names[i] = a.Info().Name
-	}
-	t.Fatalf("no %s adapter in the %s enumeration (%v), but WGPU_REQUIRE lists identity", substr, backend, names)
-	return nil
 }
 
 // nvmlGPU is one nvidia-smi line: the UUID and PCI bus id of a GPU.

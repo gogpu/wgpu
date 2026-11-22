@@ -636,6 +636,7 @@ func (a *AdapterLegacy) toExposedAdapter() hal.ExposedAdapter {
 	return hal.ExposedAdapter{
 		Adapter:      a,
 		Info:         info,
+		Identity:     gputypes.AdapterIdentity{AdapterLUID: luidPack(a.desc.AdapterLuid)},
 		Features:     a.Features(),
 		Capabilities: a.Capabilities(),
 	}

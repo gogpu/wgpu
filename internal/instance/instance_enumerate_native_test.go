@@ -182,6 +182,25 @@ func enumIdentity() gputypes.AdapterIdentity {
 	}
 }
 
+// TestAdapterIdentityZeroAfterRelease pins the released and nil answers even
+// when the adapter carries a non-zero identity: the guard, not the data, is
+// what a caller sees after Release.
+func TestAdapterIdentityZeroAfterRelease(t *testing.T) {
+	want := enumIdentity()
+	a := &Adapter{identity: want}
+	if got := a.Identity(); got != want {
+		t.Fatalf("live adapter identity = %+v, want %+v", got, want)
+	}
+	a.released = true
+	if got := a.Identity(); !got.IsZero() {
+		t.Fatalf("released adapter identity = %+v, want the zero value", got)
+	}
+	var nilAdapter *Adapter
+	if got := nilAdapter.Identity(); !got.IsZero() {
+		t.Fatalf("nil adapter identity = %+v, want the zero value", got)
+	}
+}
+
 // TestAdapterIdentityPathParity pins ADR-084's RequestAdapter path parity: the
 // adapter a RequestAdapter call returns and its enumerated counterpart read the
 // same core record, so a set identity surfaces unchanged through both.
