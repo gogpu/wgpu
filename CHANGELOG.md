@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the GLES backend's non-openable placeholder — which exists so a surface-less request keeps failing at `Open`
   with its descriptive error — is never enumerated. `RequestAdapter`'s behaviour and selection are unchanged.
   Per-build limit with `-tags rust`: the pinned binding (webgpu v0.5.5) exposes no adapter enumeration, so there
-  the method returns no adapters and logs the gap once; the browser build returns the browser's single adapter,
-  matching Rust wgpu's web backend.
+  the method returns no adapters and logs the gap once; the browser build returns at most one adapter — the
+  browser's default pick — matching Rust wgpu's web backend.
 
 ### Fixed
 
