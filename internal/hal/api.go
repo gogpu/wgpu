@@ -82,6 +82,15 @@ type ExposedAdapter struct {
 
 	// Capabilities contains detailed capability information.
 	Capabilities Capabilities
+
+	// Placeholder marks an entry that exists for adapter selection only and
+	// cannot be opened. The GLES backend returns one when no EGL context
+	// exists: a surface-less request still selects "the GLES adapter" and
+	// fails at Open with a descriptive error, as it always has. Core keeps
+	// placeholders in its candidate list; the public adapter enumeration
+	// hides them, so diagnostics never show an adapter that cannot open
+	// (P1-API-040 R1).
+	Placeholder bool
 }
 
 // Adapter represents a physical GPU.

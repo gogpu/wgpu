@@ -77,6 +77,28 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	return &Adapter{impl: impl}, nil
 }
 
+// EnumerateAdapters returns the browser's adapter, or none. navigator.gpu has
+// no enumeration API, so a default adapter request is the only way to see one:
+// the result holds zero or one adapter, the same shape Rust wgpu's web backend
+// returns. An environment without an adapter yields an empty slice, never an
+// error.
+//
+// The adapter is owned by the instance: Release on the handle marks that
+// wrapper only.
+func (i *Instance) EnumerateAdapters() []*Adapter {
+	if i.isReleased() {
+		return nil
+	}
+	return instance.ProjectAdapters(i.impl.EnumerateAdapters(), i.wrapAdapter)
+}
+
+// wrapAdapter is the projection EnumerateAdapters builds its list with: a
+// method value, not a closure, so the public method stays a declaration-layer
+// delegation (ADR-070 §15.1).
+func (i *Instance) wrapAdapter(impl *instance.Adapter) *Adapter {
+	return &Adapter{impl: impl}
+}
+
 // isReleased reports whether the instance is released. A nil wrapper is
 // released; a wrapper without an implementation (the zero value) is not, which
 // is the zero-value answer the build always had.

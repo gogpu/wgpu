@@ -101,6 +101,49 @@ func (i *Instance) RequestAdapter(opts *RequestAdapterOptions) (*Adapter, error)
 	return &Adapter{impl: impl, instance: i}, nil
 }
 
+// EnumerateAdapters returns every adapter the instance knows, in registration
+// order: the backends' order, then each backend's enumeration order.
+// RequestAdapter ranks these candidates by power preference and may pick a
+// different one, so take a specific element when a specific adapter is wanted.
+// Each element is a live *Adapter: read Info, Features, Limits and
+// DownlevelCapabilities, or call RequestDevice on the chosen one (gogpu #360).
+//
+// The instance's backend mask decides what exists: software adapters appear
+// only when BackendsSoftware was requested explicitly (ADR-083 §2.3), exactly
+// as for RequestAdapter, and a ForceFallbackAdapter request does not add them.
+//
+// The result is a snapshot: the set is fixed at instance creation, plus the
+// first backend enumeration that runs lazily inside the first RequestAdapter
+// call. GPUs added to the system later do not appear. An adapter that
+// disappears afterwards keeps its wrapper; RequestDevice on it fails with an
+// error, never panics.
+//
+// The adapters are owned by the instance: Release on a returned handle marks
+// that wrapper only, and the adapter itself lives until Instance.Release.
+//
+// The result is empty, never an error: a system without an adapter is a
+// normal state.
+//
+// GLES enumerates lazily and once per instance: its adapter enters the list
+// when the first RequestAdapter call runs, and only that call can hand the
+// backend a surface — pass the compatible surface on it when the GLES path
+// must open. Without one, a machine whose EGL needs a window yields the
+// non-openable placeholder, which is never enumerated here and consumes the
+// backend's one-shot enumeration for later surface requests.
+func (i *Instance) EnumerateAdapters() []*Adapter {
+	if i.isReleased() {
+		return nil
+	}
+	return instance.ProjectAdapters(i.impl.EnumerateAdapters(), i.wrapAdapter)
+}
+
+// wrapAdapter is the projection EnumerateAdapters builds its list with: a
+// method value, not a closure, so the public method stays a declaration-layer
+// delegation (ADR-070 §15.1).
+func (i *Instance) wrapAdapter(impl *instance.Adapter) *Adapter {
+	return &Adapter{impl: impl, instance: i}
+}
+
 // isReleased reports whether the instance is released. A nil wrapper, or one
 // without an implementation (the zero value), answers released.
 func (i *Instance) isReleased() bool {

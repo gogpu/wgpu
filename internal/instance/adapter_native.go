@@ -34,8 +34,13 @@ type Adapter struct {
 	features  gputypes.Features
 	limits    gputypes.Limits
 	downlevel gputypes.DownlevelCapabilities
-	instance  *Instance
-	released  bool
+	// placeholder marks a selection-only entry that cannot be opened
+	// (core.Adapter.Placeholder). RequestAdapter still returns such an adapter
+	// so Open fails with its descriptive error; EnumerateAdapters drops it
+	// (P1-API-040 R1).
+	placeholder bool
+	instance    *Instance
+	released    bool
 }
 
 // Info returns adapter metadata.

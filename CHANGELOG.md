@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Public adapter enumeration** (#360). `Instance.EnumerateAdapters() []*Adapter` lists every adapter the
+  instance knows, in backend registration order — `RequestAdapter` ranks the same candidates by power preference
+  and may pick a different one — and each element is a live adapter: read `Info`, `Features`, `Limits` and
+  `DownlevelCapabilities`, or call `RequestDevice` on the chosen one, so a program can select a specific GPU
+  instead of accepting the power-preference pick — the multi-GPU case behind the request. The list is a snapshot
+  of what the instance registered (the set is fixed at creation and grows only through the first `RequestAdapter`
+  call's lazy backend enumeration; GPUs added later do not appear); an empty result is a normal answer, never an
+  error; the adapters are owned by the instance, so `Release` on a returned handle marks only that wrapper; and
+  the GLES backend's non-openable placeholder — which exists so a surface-less request keeps failing at `Open`
+  with its descriptive error — is never enumerated. `RequestAdapter`'s behaviour and selection are unchanged.
+  Per-build limit with `-tags rust`: the pinned binding (webgpu v0.5.5) exposes no adapter enumeration, so there
+  the method returns no adapters and logs the gap once; the browser build returns the browser's single adapter,
+  matching Rust wgpu's web backend.
+
 ### Fixed
 
 - **Software linear filtering at the texture edge** (#438, thanks @dvoyni). The linear filter wrapped the

@@ -70,6 +70,11 @@ func (i *Instance) RequestAdapter(opts *gputypes.RequestAdapterOptions) (*Adapte
 		return nil, err
 	}
 
+	return wrapBrowserAdapter(ba), nil
+}
+
+// wrapBrowserAdapter builds the implementation adapter for a browser adapter.
+func wrapBrowserAdapter(ba *browser.Adapter) *Adapter {
 	// Extract features and limits from the JS adapter.
 	features := browser.ExtractFeatures(ba.Features())
 	limits := browser.ExtractLimits(ba.Limits())
@@ -85,7 +90,24 @@ func (i *Instance) RequestAdapter(opts *gputypes.RequestAdapterOptions) (*Adapte
 		info:     info,
 		features: features,
 		limits:   limits,
-	}, nil
+	}
+}
+
+// EnumerateAdapters returns at most one adapter. navigator.gpu has no
+// enumeration API, so a default adapter request is the only way to see one —
+// the same shape Rust wgpu's web backend uses (its enumerate_adapters issues
+// one default request and returns zero or one adapter). An environment with no
+// adapter yields none; a browser or driver refusal is "none" too, because the
+// enumeration has no error channel (P1-API-040 R3).
+func (i *Instance) EnumerateAdapters() []*Adapter {
+	if i == nil || i.released {
+		return nil
+	}
+	ba, err := i.browser.RequestAdapter(js.Undefined())
+	if err != nil {
+		return nil
+	}
+	return []*Adapter{wrapBrowserAdapter(ba)}
 }
 
 // Release releases the instance. Surfaces must be released explicitly.

@@ -105,6 +105,10 @@ func main() {
     defer instance.Release()
 
     // Request high-performance GPU
+    // (or pick one explicitly: instance.EnumerateAdapters() lists every
+    // adapter the instance knows on the native and browser builds, each
+    // usable with RequestDevice; the -tags rust build has no enumeration
+    // until the wgpu-native binding exposes it)
     adapter, _ := instance.RequestAdapter(&wgpu.RequestAdapterOptions{
         PowerPreference: wgpu.PowerPreferenceHighPerformance,
     })

@@ -258,6 +258,7 @@ func (i *Instance) registerExposedAdapters(halInstance hal.Instance) []AdapterID
 			Limits:                exposed.Capabilities.Limits,
 			DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
 			StencilCopyNeedsBlit:  exposed.Capabilities.StencilCopyNeedsBlit,
+			Placeholder:           exposed.Placeholder,
 			Backend:               exposed.Info.Backend,
 			halAdapter:            exposed.Adapter,
 			halCapabilities:       &exposed.Capabilities,
@@ -354,8 +355,18 @@ func (i *Instance) createMockAdapter() {
 // EnumerateAdapters returns a list of all available GPU adapters.
 // The adapters are filtered based on the backends enabled in the instance.
 //
-// This method returns a snapshot of available adapters at the time of the call.
-// The adapter list may change if GPUs are added or removed from the system.
+// The result is a snapshot of the adapters registered with the instance: the
+// set is fixed at instance creation and grows only through the first deferred
+// GLES enumeration, which the first adapter request runs (with the request's
+// surface when one is given). The lazily admitted fallback adapters are a
+// separate candidate list and never appear here. GPUs added to the system
+// afterwards do not appear — there is no hotplug re-enumeration (P1-API-040
+// R2; the earlier wording promised re-enumeration the implementation never
+// did).
+//
+// Entries may include non-openable placeholders (Adapter.Placeholder); adapter
+// selection sees them by design, and callers that present the list must filter
+// them.
 func (i *Instance) EnumerateAdapters() []AdapterID {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -735,6 +746,7 @@ func (i *Instance) enumerateDeferredGLES(surfaceHint hal.Surface) {
 				Limits:                exposed.Capabilities.Limits,
 				DownlevelCapabilities: exposed.Capabilities.DownlevelCapabilities,
 				StencilCopyNeedsBlit:  exposed.Capabilities.StencilCopyNeedsBlit,
+				Placeholder:           exposed.Placeholder,
 				Backend:               exposed.Info.Backend,
 				halAdapter:            exposed.Adapter,
 				halCapabilities:       &exposed.Capabilities,
