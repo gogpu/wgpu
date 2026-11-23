@@ -25,11 +25,18 @@ const (
 	BufferUsesMapRead      BufferUses = 1 << 8  // Mapped for CPU read
 	BufferUsesMapWrite     BufferUses = 1 << 9  // Mapped for CPU write
 	BufferUsesQueryResolve BufferUses = 1 << 10 // Query result destination
+
+	// Ray tracing states. Reference: Rust wgpu-types BufferUses.
+	BufferUsesBlasInput                    BufferUses = 1 << 11 // BLAS build input (vertex/index/transform/AABB)
+	BufferUsesTlasInput                    BufferUses = 1 << 12 // TLAS build input (instance data)
+	BufferUsesAccelerationStructureScratch BufferUses = 1 << 13 // AS build scratch space
+	BufferUsesAccelerationStructureQuery   BufferUses = 1 << 14 // AS compacted-size query destination
 )
 
 // IsReadOnly returns true if the usage contains only read-only operations.
 func (u BufferUses) IsReadOnly() bool {
-	writeUsages := BufferUsesCopyDst | BufferUsesStorageWrite | BufferUsesMapWrite | BufferUsesQueryResolve
+	writeUsages := BufferUsesCopyDst | BufferUsesStorageWrite | BufferUsesMapWrite | BufferUsesQueryResolve |
+		BufferUsesAccelerationStructureScratch | BufferUsesAccelerationStructureQuery
 	return u&writeUsages == 0
 }
 
@@ -92,6 +99,18 @@ func (u BufferUses) ToBufferUsage() gputypes.BufferUsage {
 	}
 	if u&BufferUsesQueryResolve != 0 {
 		result |= gputypes.BufferUsageQueryResolve
+	}
+	if u&BufferUsesBlasInput != 0 {
+		result |= gputypes.BufferUsageBlasInput
+	}
+	if u&BufferUsesTlasInput != 0 {
+		result |= gputypes.BufferUsageTlasInput
+	}
+	if u&BufferUsesAccelerationStructureScratch != 0 {
+		result |= gputypes.BufferUsageAccelerationStructureScratch
+	}
+	if u&BufferUsesAccelerationStructureQuery != 0 {
+		result |= gputypes.BufferUsageAccelerationStructureQuery
 	}
 
 	return result

@@ -1438,15 +1438,16 @@ func TestPublicLayerPackageScopeMapForms(t *testing.T) {
 }
 
 // TestPublicLayerWaiverFile pins the committed waiver file's shape: the recorded limit, the entry count, and
-// the card groups the review approved (6 wgputest P2-API-032, 31 conversion P2-API-034/P2-API-035, 4 factory
-// ADR-070 §15.13). A changed count is a reviewed decision, not a drive-by edit.
+// the card groups the review approved (6 wgputest P2-API-032, 37 conversion P2-API-034/P2-API-035, 4 factory
+// ADR-070 §15.13; the six ray tracing conversions are the 2026-11-23 amendment, pending lead approval). A
+// changed count is a reviewed decision, not a drive-by edit.
 func TestPublicLayerWaiverFile(t *testing.T) {
 	listed, err := loadAllowlist(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("loadAllowlist: %v", err)
 	}
-	if !listed.hasLimit || listed.limit != 41 {
-		t.Fatalf("the waiver file records limit %d (present=%v), want 41", listed.limit, listed.hasLimit)
+	if !listed.hasLimit || listed.limit != 47 {
+		t.Fatalf("the waiver file records limit %d (present=%v), want 47", listed.limit, listed.hasLimit)
 	}
 	if len(listed.entries) != listed.limit {
 		t.Fatalf("the waiver file holds %d entries, want the recorded limit %d", len(listed.entries), listed.limit)
@@ -1458,7 +1459,7 @@ func TestPublicLayerWaiverFile(t *testing.T) {
 			t.Errorf("entry %q has owner %q, want wgpu", allowKey(e.path, e.symbol, e.construct), e.owner)
 		}
 	}
-	want := map[string]int{"P2-API-032": 6, "P2-API-034/P2-API-035": 31, "ADR-070 §15.13": 4}
+	want := map[string]int{"P2-API-032": 6, "P2-API-034/P2-API-035": 37, "ADR-070 §15.13": 4}
 	for card, n := range want {
 		if groups[card] != n {
 			t.Errorf("card %q carries %d entries, want %d (groups: %v)", card, groups[card], n, groups)

@@ -118,3 +118,49 @@ var (
 	DefaultLimits             = gputypes.DefaultLimits
 	DefaultInstanceDescriptor = gputypes.DefaultInstanceDescriptor
 )
+
+// Ray tracing buffer usage constants (experimental, require FeatureRayQuery).
+const (
+	// BufferUsageBlasInput allows a buffer to be a BLAS build input
+	// (vertex, index, transform, or AABB data).
+	BufferUsageBlasInput = gputypes.BufferUsageBlasInput
+	// BufferUsageTlasInput allows a buffer to be a TLAS build input.
+	BufferUsageTlasInput = gputypes.BufferUsageTlasInput
+)
+
+// FeatureRayQuery enables inline ray queries and acceleration structures
+// (experimental). Matches Rust wgpu's Features::EXPERIMENTAL_RAY_QUERY.
+const FeatureRayQuery = gputypes.FeatureRayQuery
+
+// Acceleration structure flag constants.
+const (
+	ASFlagAllowUpdate             = gputypes.ASFlagAllowUpdate
+	ASFlagAllowCompaction         = gputypes.ASFlagAllowCompaction
+	ASFlagPreferFastTrace         = gputypes.ASFlagPreferFastTrace
+	ASFlagPreferFastBuild         = gputypes.ASFlagPreferFastBuild
+	ASFlagLowMemory               = gputypes.ASFlagLowMemory
+	ASFlagUseTransform            = gputypes.ASFlagUseTransform
+	ASFlagAllowRayHitVertexReturn = gputypes.ASFlagAllowRayHitVertexReturn
+)
+
+// Acceleration structure geometry flag constants.
+const (
+	ASGeometryFlagOpaque                      = gputypes.ASGeometryFlagOpaque
+	ASGeometryFlagNoDuplicateAnyHitInvocation = gputypes.ASGeometryFlagNoDuplicateAnyHitInvocation
+)
+
+// Acceleration structure update mode constants.
+const (
+	AccelerationStructureUpdateModeBuild        = gputypes.AccelerationStructureUpdateModeBuild
+	AccelerationStructureUpdateModePreferUpdate = gputypes.AccelerationStructureUpdateModePreferUpdate
+)
+
+// LimitsWithMinimumAccelerationStructureValues returns a copy of limits with
+// the acceleration structure limits set to the minimum values every adapter
+// supporting FeatureRayQuery guarantees. Use it for RequiredLimits when
+// requesting a ray tracing device.
+//
+// Matches Rust wgpu-types Limits::using_minimum_supported_acceleration_structure_values.
+func LimitsWithMinimumAccelerationStructureValues(limits gputypes.Limits) gputypes.Limits {
+	return limits.UsingMinimumSupportedAccelerationStructureValues()
+}

@@ -230,6 +230,8 @@ func bindGroupEntry(e BindGroupEntry) (device.BindGroupEntry, error) {
 		Size:        e.Size,
 		Sampler:     samplerImpl(e.Sampler),
 		TextureView: textureViewImpl(e.TextureView),
+
+		AccelerationStructure: tlasImpl(e.AccelerationStructure),
 	}, nil
 }
 

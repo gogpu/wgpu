@@ -23,13 +23,20 @@
 # the wgputest facade rows by P2-API-032 before v1.0, and the factory rows are design (ADR-070 §15.13) with
 # no removal planned.
 #
-# Groups: six wgputest facade rows (P2-API-032); 31 boundary conversions, carded for the generated-projection
+# Groups: six wgputest facade rows (P2-API-032); 37 boundary conversions (31 + the 2026-11-23 amendment below), carded for the generated-projection
 # route (P2-API-034) or the internal-mirror route (P2-API-035). Twenty-five of those rows cannot move into
 # internal because internal cannot import root (R5). The other six rows belong to four D7 thin-sweep boundary
 # declarations that do not take root types, so R5 is not their reason (two of them carry two loops each):
 # surface_native.go createHALSurfaces, device_browser.go stencilOpToJS and the two convertVertexBufferLayouts.
 # Four factory closures are design, not debt (ADR-070 §15.13).
-limit: 41
+#
+# Amendment 2026-11-23 (pending lead approval): six ray tracing boundary conversions join the 31, for the same
+# reason as CreateBindGroup's row (R5): CommandEncoder.BuildAccelerationStructures walks the public BLAS build
+# entries and TLASes, encoderBlasBuildEntry walks each entry's triangle and AABB geometries, and
+# (*Tlas).buildPackage walks the public instance slots, each unwrapping public Blas/Tlas/Buffer wrappers into
+# the internal/encoder form; raytracing_stub.go's rejectAccelerationStructureEntries walks the public entries on
+# the rust and browser builds, which have no acceleration structures.
+limit: 47
 wgputest/wgputest.go	WithRecorder	closure	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; permanent: removed by P2-API-032 before v1.0	wgpu	P2-API-032	permanent
 wgputest/wgputest.go	WithFaults	closure	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; permanent: removed by P2-API-032 before v1.0	wgpu	P2-API-032	permanent
 wgputest/wgputest.go	(*Recorder).Trace	defer	Option is func(*config); the facade's With* must build closures over config, and Trace/Counts must guard their mutex; predates the window; permanent: removed by P2-API-032 before v1.0	wgpu	P2-API-032	permanent
@@ -71,3 +78,9 @@ wgputest_factory.go	init	closure	The bridge contract (internal/wgputestbridge/br
 wgputest_factory.go	init	closure#2	Same bridge contract (bridge.go:4-9): this second init closure registers the device-from-HAL factory, type-asserts the HAL device/queue and calls the root newDeviceFromHAL, which internal cannot reach (ADR-070 §15.13); permanent: design (ADR-070 §15.13), no removal planned	wgpu	ADR-070 §15.13	permanent
 wgputest_factory.go	newTestDeviceFactory	closure	The factory closure asserts the bridge's opaque device/queue to hal.Device/hal.Queue, builds the hooks, wraps through the root newDeviceFromHAL and returns root *wgpu.Device/*wgpu.Queue: the bridge returns root types (bridge.go:4-9), so the factory is root-side (ADR-070 §15.13); permanent: design (ADR-070 §15.13), no removal planned	wgpu	ADR-070 §15.13	permanent
 wgputest_factory.go	newTestDeviceFactory	closure#2	The returned cleanup closure is the second literal; it calls device.Release() on the root wrapper, which internal cannot name (ADR-070 §15.13); permanent: design (ADR-070 §15.13), no removal planned	wgpu	ADR-070 §15.13	permanent
+raytracing_native.go	(*CommandEncoder).BuildAccelerationStructures	range	(*CommandEncoder).BuildAccelerationStructures converts each public BlasBuildEntry through encoderBlasBuildEntry into the internal encoder entry; the public Blas and Buffer wrappers' impls are root-only; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
+raytracing_native.go	(*CommandEncoder).BuildAccelerationStructures	range#2	(*CommandEncoder).BuildAccelerationStructures packages each public Tlas through (*Tlas).buildPackage into the internal encoder TlasPackage; the public Tlas wrapper's impl and instance slots are root-only; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
+raytracing_native.go	encoderBlasBuildEntry	range	maps each public BlasTriangleGeometry to encoder.BlasTriangleGeometry, unwrapping its vertex, index and transform Buffer wrappers to their resource impls; the wrapper's unexported impl is root-only; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
+raytracing_native.go	encoderBlasBuildEntry	range#2	maps each public BlasAabbGeometry to encoder.BlasAabbGeometry, unwrapping its AABB Buffer wrapper to its resource impl; the wrapper's unexported impl is root-only; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
+raytracing_native.go	(*Tlas).buildPackage	range	walks the public TlasInstance slots, reconciles each slot's BLAS reference (resource.Tlas.RetainSlot) and unwraps each instance's public Blas to its resource impl; the slots hold root types, which internal cannot name; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
+raytracing_stub.go	rejectAccelerationStructureEntries	range	rejects public BindGroupEntry values that set AccelerationStructure on the rust and browser builds, which have no acceleration structures; the entries are root types; permanent: removed by P2-API-034/P2-API-035 before v1.0, re-reviewed at each release	wgpu	P2-API-034/P2-API-035	permanent
