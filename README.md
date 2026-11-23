@@ -22,6 +22,13 @@
 
 ---
 
+> **Not affiliated with gfx-rs.** This is a Go project, independent of and not affiliated with or endorsed by
+> [gfx-rs](https://github.com/gfx-rs). The Rust WebGPU implementation of the same name is
+> [gfx-rs/wgpu](https://github.com/gfx-rs/wgpu), whose shader compiler naga lives at
+> [gfx-rs/wgpu/tree/trunk/naga](https://github.com/gfx-rs/wgpu/tree/trunk/naga); this project learns from their
+> architecture and owes them credit for it. Bug reports about this project belong in
+> [gogpu/wgpu/issues](https://github.com/gogpu/wgpu/issues), not in the gfx-rs trackers.
+
 ## Overview
 
 **wgpu** is the unified Go WebGPU package with three independent implementations selected by build tags — like Chrome (Dawn) and Firefox (wgpu) implementing the same W3C spec.
