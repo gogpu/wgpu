@@ -1771,6 +1771,17 @@ func bufferUsageToAccessAndStage(usage gputypes.BufferUsage) (vk.AccessFlags, vk
 		access |= vk.AccessFlags(vk.AccessIndirectCommandReadBit)
 		stage |= vk.PipelineStageFlags(vk.PipelineStageDrawIndirectBit)
 	}
+	// Ray tracing. Reference: Rust wgpu-hal conv.rs map_buffer_usage_to_barrier.
+	if usage&(gputypes.BufferUsageBlasInput|gputypes.BufferUsageTlasInput|gputypes.BufferUsageAccelerationStructureScratch) != 0 {
+		access |= vk.AccessFlags(vk.AccessAccelerationStructureReadBitKhr |
+			vk.AccessAccelerationStructureWriteBitKhr |
+			vk.AccessShaderReadBit)
+		stage |= vk.PipelineStageFlags(vk.PipelineStageAccelerationStructureBuildBitKhr)
+	}
+	if usage&gputypes.BufferUsageAccelerationStructureQuery != 0 {
+		access |= vk.AccessFlags(vk.AccessTransferWriteBit)
+		stage |= vk.PipelineStageFlags(vk.PipelineStageTransferBit)
+	}
 
 	if stage == 0 {
 		stage = vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit)

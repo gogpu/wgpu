@@ -45,6 +45,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 	if missing := a.ext.unsupportedRequest(requested); missing != 0 {
 		return hal.OpenDevice{}, fmt.Errorf("vulkan: adapter does not support requested features %v", missing)
 	}
+	enableRayQuery := requested.Contains(gputypes.FeatureRayQuery)
 
 	// Find queue families
 	var queueFamilyCount uint32
@@ -162,6 +163,7 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 		supports2DViewsOf3D:        a.ext.has2DViewsOf3D(),
 		spirvOptions:               spirvOptions(a.properties.ApiVersion, a.ext),
 		depthStencil:               a.depthStencil,
+		bufferDeviceAddress:        enableRayQuery,
 	}
 	// Keep f16 stage inputs and outputs f16 only where the device enabled
 	// StorageInputOutput16; naga converts them through f32 otherwise
@@ -172,6 +174,15 @@ func (a *Adapter) open(requestedQueueFamily *uint32, requested gputypes.Features
 		dev.shaderStageFlags = vk.PipelineShaderStageCreateFlags(vk.PipelineShaderStageCreateAllowVaryingSubgroupSizeBit)
 	}
 	loadDrawIndirectCountProcs(dev)
+
+	if enableRayQuery {
+		if !deviceCmds.HasAccelerationStructure() {
+			vkDestroyDevice(device, nil)
+			return hal.OpenDevice{}, fmt.Errorf("vulkan: failed to load VK_KHR_acceleration_structure functions")
+		}
+		dev.rayQuery = true
+		dev.scratchBufferAlignment = a.ext.scratchBufferAlignment()
+	}
 
 	// Initialize synchronization fence (VK-IMPL-001 / VK-IMPL-003).
 	// Prefer timeline semaphore (Vulkan 1.2+); fall back to fencePool of binary

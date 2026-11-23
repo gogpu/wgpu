@@ -99,6 +99,20 @@ type Device struct {
 	// (extendedFeatureSupport.allowVaryingSubgroupSize).
 	shaderStageFlags vk.PipelineShaderStageCreateFlags
 
+	// bufferDeviceAddress is true when the bufferDeviceAddress feature is
+	// enabled. Memory is then allocated with VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT
+	// and RT buffer usages map to SHADER_DEVICE_ADDRESS.
+	bufferDeviceAddress bool
+
+	// rayQuery is true when gputypes.FeatureRayQuery was enabled at device
+	// creation (VK_KHR_acceleration_structure + VK_KHR_ray_query).
+	rayQuery bool
+
+	// scratchBufferAlignment is minAccelerationStructureScratchOffsetAlignment.
+	// Vulkan has no usage bit for scratch buffers, so CreateBuffer raises the
+	// memory alignment of AccelerationStructureScratch buffers to it.
+	scratchBufferAlignment uint32
+
 	// Timeline semaphore fence (VK-IMPL-001).
 	// When available (Vulkan 1.2+), replaces both frame fences and transfer fence
 	// with a single timeline semaphore. Falls back to binary fences on older drivers.
@@ -222,8 +236,11 @@ func (d *Device) initAllocator() error {
 	// Rust wgpu-hal stores this as non_coherent_map_mask = atomSize - 1 (adapter.rs:1921).
 	d.queryNonCoherentAtomSize()
 
-	// Create allocator with default config
-	allocator, err := memory.NewGpuAllocator(d.handle, d.cmds, props, maxAllocSize, memory.DefaultConfig())
+	// Create allocator with default config. Ray tracing needs device-address
+	// memory for AS storage, scratch and build-input buffers.
+	config := memory.DefaultConfig()
+	config.BufferDeviceAddress = d.bufferDeviceAddress
+	allocator, err := memory.NewGpuAllocator(d.handle, d.cmds, props, maxAllocSize, config)
 	if err != nil {
 		return fmt.Errorf("failed to create memory allocator: %w", err)
 	}
@@ -383,10 +400,17 @@ func (d *Device) CreateBuffer(desc *hal.BufferDescriptor) (hal.Buffer, error) {
 		}
 	}
 
+	// There is no way to specify the scratch usage to Vulkan, so make sure the
+	// alignment is large enough. Matches Rust wgpu-hal device.rs create_buffer.
+	alignment := uint64(memReqs.Alignment)
+	if desc.Usage&gputypes.BufferUsageAccelerationStructureScratch != 0 {
+		alignment = max(alignment, uint64(d.scratchBufferAlignment))
+	}
+
 	// Allocate memory
 	memBlock, err := d.allocator.Alloc(memory.AllocationRequest{
 		Size:           uint64(memReqs.Size),
-		Alignment:      uint64(memReqs.Alignment),
+		Alignment:      alignment,
 		Usage:          memUsage,
 		MemoryTypeBits: memReqs.MemoryTypeBits,
 	})
@@ -1057,6 +1081,12 @@ func (d *Device) CreateBindGroupLayout(desc *hal.BindGroupLayoutDescriptor) (hal
 		case entry.StorageTexture != nil:
 			binding.DescriptorType = vk.DescriptorTypeStorageImage
 			counts.StorageImages++
+		case entry.AccelerationStructure != nil:
+			if !d.rayQuery {
+				return nil, fmt.Errorf("vulkan: acceleration structure binding %d requires FeatureRayQuery", entry.Binding)
+			}
+			binding.DescriptorType = vk.DescriptorTypeAccelerationStructureKhr
+			counts.AccelerationStructures++
 		}
 
 		bindingTypes[entry.Binding] = binding.DescriptorType
@@ -1149,30 +1179,41 @@ func (d *Device) updateDescriptorSet(set vk.DescriptorSet, entries []gputypes.Bi
 	if len(entries) == 0 {
 		return nil
 	}
-	writes, bufferInfos, imageInfos, err := descriptorWrites(set, entries, bindingTypes)
+	batch, err := descriptorWrites(set, entries, bindingTypes)
 	if err != nil {
 		return err
 	}
-	if len(writes) > 0 {
-		vkUpdateDescriptorSets(d.cmds, d.handle, uint32(len(writes)), &writes[0], 0, nil)
+	if len(batch.writes) > 0 {
+		vkUpdateDescriptorSets(d.cmds, d.handle, uint32(len(batch.writes)), &batch.writes[0], 0, nil)
 	}
-	// The writes point into bufferInfos and imageInfos; keep them reachable until
+	// The writes point into the batch's info arrays; keep them reachable until
 	// vkUpdateDescriptorSets has returned.
-	runtime.KeepAlive(bufferInfos)
-	runtime.KeepAlive(imageInfos)
+	runtime.KeepAlive(&batch)
 	return nil
 }
 
+// descriptorWriteBatch holds the VkWriteDescriptorSets for one bind group and
+// the arrays their pointers refer to.
+type descriptorWriteBatch struct {
+	writes      []vk.WriteDescriptorSet
+	bufferInfos []vk.DescriptorBufferInfo
+	imageInfos  []vk.DescriptorImageInfo
+	// asHandles and asWrites back acceleration structure bindings: each write
+	// chains a VkWriteDescriptorSetAccelerationStructureKHR through pNext.
+	asHandles []vk.AccelerationStructureKHR
+	asWrites  []vk.WriteDescriptorSetAccelerationStructureKHR
+}
+
 // descriptorWrites builds one VkWriteDescriptorSet per entry. Each write points
-// at its info struct inside the returned bufferInfos or imageInfos. Both slices
-// are allocated with room for every entry up front, so append never moves them
+// at its info struct inside the returned batch's arrays. Every array is
+// allocated with room for every entry up front, so append never moves them
 // and every pointer refers to the final array (#356).
-func descriptorWrites(set vk.DescriptorSet, entries []gputypes.BindGroupEntry, bindingTypes map[uint32]vk.DescriptorType) (
-	[]vk.WriteDescriptorSet, []vk.DescriptorBufferInfo, []vk.DescriptorImageInfo, error,
-) {
+func descriptorWrites(set vk.DescriptorSet, entries []gputypes.BindGroupEntry, bindingTypes map[uint32]vk.DescriptorType) (descriptorWriteBatch, error) {
 	writes := make([]vk.WriteDescriptorSet, 0, len(entries))
 	bufferInfos := make([]vk.DescriptorBufferInfo, 0, len(entries))
 	imageInfos := make([]vk.DescriptorImageInfo, 0, len(entries))
+	var asHandles []vk.AccelerationStructureKHR
+	var asWrites []vk.WriteDescriptorSetAccelerationStructureKHR
 
 	for _, entry := range entries {
 		write := vk.WriteDescriptorSet{
@@ -1228,13 +1269,39 @@ func descriptorWrites(set vk.DescriptorSet, entries []gputypes.BindGroupEntry, b
 			imageInfos = append(imageInfos, imageInfo)
 			write.PImageInfo = &imageInfos[len(imageInfos)-1]
 
+		case gputypes.AccelerationStructureBinding:
+			// The AS handle goes in a VkWriteDescriptorSetAccelerationStructureKHR
+			// chained through pNext; descriptorCount must still match.
+			// Reference: Rust wgpu-hal device.rs create_bind_group.
+			if bindingTypes[entry.Binding] != vk.DescriptorTypeAccelerationStructureKhr {
+				return descriptorWriteBatch{}, fmt.Errorf("binding %d: acceleration structure bound to a non-acceleration-structure layout entry", entry.Binding)
+			}
+			if asHandles == nil {
+				asHandles = make([]vk.AccelerationStructureKHR, 0, len(entries))
+				asWrites = make([]vk.WriteDescriptorSetAccelerationStructureKHR, 0, len(entries))
+			}
+			asHandles = append(asHandles, vk.AccelerationStructureKHR(res.AccelerationStructure))
+			asWrites = append(asWrites, vk.WriteDescriptorSetAccelerationStructureKHR{
+				SType:                      vk.StructureTypeWriteDescriptorSetAccelerationStructureKhr,
+				AccelerationStructureCount: 1,
+				PAccelerationStructures:    &asHandles[len(asHandles)-1],
+			})
+			write.DescriptorType = vk.DescriptorTypeAccelerationStructureKhr
+			write.PNext = (*uintptr)(unsafe.Pointer(&asWrites[len(asWrites)-1]))
+
 		default:
-			return nil, nil, nil, fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
+			return descriptorWriteBatch{}, fmt.Errorf("unsupported binding resource type: %T", entry.Resource)
 		}
 
 		writes = append(writes, write)
 	}
-	return writes, bufferInfos, imageInfos, nil
+	return descriptorWriteBatch{
+		writes:      writes,
+		bufferInfos: bufferInfos,
+		imageInfos:  imageInfos,
+		asHandles:   asHandles,
+		asWrites:    asWrites,
+	}, nil
 }
 
 // DestroyBindGroup destroys a bind group.

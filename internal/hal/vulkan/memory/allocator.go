@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unsafe"
 
 	"github.com/gogpu/wgpu/internal/hal/vulkan/vk"
 )
@@ -28,6 +29,14 @@ type AllocatorConfig struct {
 	// MaxBlocksPerHeap limits memory blocks per heap.
 	// Default: 8 (512MB per heap with 64MB blocks).
 	MaxBlocksPerHeap int
+
+	// BufferDeviceAddress allocates every VkDeviceMemory with
+	// VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT, so buffers created with
+	// SHADER_DEVICE_ADDRESS usage can be bound anywhere. Requires the
+	// bufferDeviceAddress device feature. Matches gpu-allocator's
+	// buffer_device_address option used by Rust wgpu-hal.
+	// Default: false.
+	BufferDeviceAddress bool
 }
 
 // DefaultConfig returns sensible default configuration.
@@ -451,6 +460,15 @@ func (a *GpuAllocator) vulkanAllocate(size uint64, memTypeIndex uint32) (vk.Devi
 		SType:           vk.StructureTypeMemoryAllocateInfo,
 		AllocationSize:  vk.DeviceSize(size),
 		MemoryTypeIndex: memTypeIndex,
+	}
+
+	var flagsInfo vk.MemoryAllocateFlagsInfo
+	if a.config.BufferDeviceAddress {
+		flagsInfo = vk.MemoryAllocateFlagsInfo{
+			SType: vk.StructureTypeMemoryAllocateFlagsInfo,
+			Flags: vk.MemoryAllocateFlags(vk.MemoryAllocateDeviceAddressBit),
+		}
+		allocInfo.PNext = (*uintptr)(unsafe.Pointer(&flagsInfo))
 	}
 
 	var memory vk.DeviceMemory

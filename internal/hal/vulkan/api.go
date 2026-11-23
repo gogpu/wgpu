@@ -245,6 +245,14 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			continue
 		}
 
+		limits := limitsFromProps(&props)
+		adapter.ext.applyRayQueryLimits(&limits)
+		alignments := hal.Alignments{
+			BufferCopyOffset: 4,
+			BufferCopyPitch:  256,
+		}
+		adapter.ext.applyRayQueryAlignments(&alignments)
+
 		adapterForExpose := hal.Adapter(adapter)
 		var queueFamily *uint32
 		if surfaceHint != nil {
@@ -285,12 +293,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 			Features: featuresFromPhysicalDevice(&features, props.ApiVersion) | adapter.extendedWebGPUFeatures(queueFamily),
 			Capabilities: hal.Capabilities{
 				// Vulkan records pipeline barriers in the command buffer.
-				RecordsTransitions: true,
-				Limits:             limitsFromProps(&props),
-				AlignmentsMask: hal.Alignments{
-					BufferCopyOffset: 4,
-					BufferCopyPitch:  256,
-				},
+				RecordsTransitions:    true,
+				Limits:                limits,
+				AlignmentsMask:        alignments,
 				DownlevelCapabilities: downlevelCapabilitiesFromFeatures(&features),
 			},
 		})
