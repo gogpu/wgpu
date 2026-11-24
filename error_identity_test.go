@@ -29,6 +29,7 @@ func TestRootSentinelsAreTheInternalValues(t *testing.T) {
 		{"ErrOutOfMemory", ErrOutOfMemory, hal.ErrDeviceOutOfMemory},
 		{"ErrSurfaceLost", ErrSurfaceLost, hal.ErrSurfaceLost},
 		{"ErrSurfaceOutdated", ErrSurfaceOutdated, hal.ErrSurfaceOutdated},
+		{"ErrSurfaceZeroArea", ErrSurfaceZeroArea, hal.ErrZeroArea},
 		{"ErrTimeout", ErrTimeout, hal.ErrTimeout},
 		{"ErrContextReleased", ErrContextReleased, hal.ErrContextReleased},
 		{"ErrWorkgroupBarrierUnsupported", ErrWorkgroupBarrierUnsupported, hal.ErrWorkgroupBarrierUnsupported},

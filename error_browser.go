@@ -56,6 +56,11 @@ var (
 	// ErrSurfaceOutdated is returned when the surface is outdated.
 	ErrSurfaceOutdated = errors.New("wgpu: surface outdated")
 
+	// ErrSurfaceZeroArea is declared for source compatibility with the native
+	// build, where Surface.Configure returns it for a surface of zero width or
+	// height. This build never returns it.
+	ErrSurfaceZeroArea = errors.New("wgpu: surface width and height must be non-zero")
+
 	// ErrTimeout is returned when an operation times out.
 	ErrTimeout = errors.New("wgpu: timeout")
 
