@@ -17,7 +17,8 @@ import (
 // colorTarget stores the fragment colors of one color attachment in the
 // texture the pass renders into, in the attachment view's format: the
 // color output of every draw (raster.Pipeline.SetColorOutput) and the
-// target of MRT locations 1 and up.
+// target of MRT locations 1 and up. A multisampled texture's fragment is
+// written into each sample it covers, blended with that sample alone.
 //
 // It follows the WebGPU color output rules ("Output Merging", "Blend State")
 // as Vulkan and D3D12 implement them:
@@ -39,6 +40,7 @@ type colorTarget struct {
 	codec         shader.ColorCodec
 	stride        int
 	width, height int
+	samples       int
 	blend         raster.BlendState
 	mask          gputypes.ColorWriteMask
 	integer       bool
@@ -110,14 +112,15 @@ func newColorTarget(tex *Texture, format gputypes.TextureFormat, state *gputypes
 		return nil
 	}
 	c := &colorTarget{
-		tex:    tex,
-		codec:  codec,
-		stride: codec.TexelSize(),
-		width:  int(tex.width),
-		height: int(tex.height),
-		mask:   gputypes.ColorWriteMaskAll,
+		tex:     tex,
+		codec:   codec,
+		stride:  codec.TexelSize(),
+		width:   int(tex.width),
+		height:  int(tex.height),
+		samples: int(tex.samples()),
+		mask:    gputypes.ColorWriteMaskAll,
 	}
-	if len(tex.data) < c.width*c.height*c.stride {
+	if len(tex.data) < c.width*c.height*c.samples*c.stride {
 		hal.Logger().Error("software: color attachment storage smaller than its view format",
 			"format", format, "bytes", len(tex.data), "width", c.width, "height", c.height)
 		return nil
@@ -138,21 +141,32 @@ func newColorTarget(tex *Texture, format gputypes.TextureFormat, state *gputypes
 	return c
 }
 
-// write stores the fragment color src at pixel (x, y). It is safe for
-// concurrent use (the parallel rasterizer).
-func (c *colorTarget) write(x, y int, src [4]float32) {
+// write stores the fragment color src into the samples of pixel (x, y)
+// that coverage names (raster.Fragment.Coverage). It is safe for concurrent
+// use (the parallel rasterizer).
+func (c *colorTarget) write(x, y int, coverage uint8, src [4]float32) {
 	if x < 0 || y < 0 || x >= c.width || y >= c.height {
 		return
 	}
-	off := (y*c.width + x) * c.stride
+	texel := (y*c.width + x) * c.samples
 	c.tex.mu.Lock()
-	b := c.tex.data[off : off+c.stride : off+c.stride]
+	for sample := range c.samples {
+		if coverage&(1<<sample) != 0 {
+			off := (texel + sample) * c.stride
+			c.writeSample(c.tex.data[off:off+c.stride:off+c.stride], src)
+		}
+	}
+	c.tex.mu.Unlock()
+}
+
+// writeSample stores the fragment color src into the sample b, blending it
+// with what b holds. The caller holds the texture's lock.
+func (c *colorTarget) writeSample(b []byte, src [4]float32) {
 	if c.integer {
 		c.codec.EncodeIntMasked(b, [4]uint32{
 			math.Float32bits(src[0]), math.Float32bits(src[1]),
 			math.Float32bits(src[2]), math.Float32bits(src[3]),
 		}, c.mask)
-		c.tex.mu.Unlock()
 		return
 	}
 	if c.blend.Enabled {
@@ -163,12 +177,11 @@ func (c *colorTarget) write(x, y int, src [4]float32) {
 		src = raster.BlendUnclamped(src, dst, c.blend)
 	}
 	c.codec.EncodeMasked(b, src, c.mask)
-	c.tex.mu.Unlock()
 }
 
 // discardColor is the color output of a draw whose location 0 has no
 // color target.
-func discardColor(int, int, [4]float32) {}
+func discardColor(int, int, uint8, [4]float32) {}
 
 func clampColor(v [4]float32, lo, hi float32) [4]float32 {
 	for i, f := range v {
@@ -223,10 +236,10 @@ func (r *RenderPassEncoder) routeColorOutput(pipe *raster.Pipeline) []*colorTarg
 // and up into their color targets (location 0 goes through the color
 // output).
 func writeMRTLocations(targets []*colorTarget) raster.MRTOutput {
-	return func(x, y int, colors [][4]float32) {
+	return func(x, y int, coverage uint8, colors [][4]float32) {
 		for loc := 1; loc < len(colors) && loc < len(targets); loc++ {
 			if targets[loc] != nil {
-				targets[loc].write(x, y, colors[loc])
+				targets[loc].write(x, y, coverage, colors[loc])
 			}
 		}
 	}

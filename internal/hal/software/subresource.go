@@ -31,9 +31,17 @@ import (
 // operations (bytesPerRow counts block rows), so uploads and readbacks round
 // trip byte for byte. The interpreter decodes BC and ETC2/EAC texels from
 // this layout (hal/software/internal/texcompress); ASTC is not offered.
+//
+// A multisampled texture, which WebGPU limits to one mip level and one
+// layer, stores each texel's samples back to back, sample 0 first, so a row
+// is width x samples texels. Only render passes write it and only resolves
+// read it: WebGPU copies no multisampled texture.
 
 // mipLevels returns the number of stored mip levels, at least 1.
 func (t *Texture) mipLevels() uint32 { return max(t.mipLevelCount, 1) }
+
+// samples returns the samples of each texel, at least 1.
+func (t *Texture) samples() uint32 { return max(t.sampleCount, 1) }
 
 // is3D reports whether the texture is three-dimensional: its depth is depth
 // slices, which shrink per mip level, rather than array layers.
@@ -76,11 +84,11 @@ func (t *Texture) blockSize() (bw, bh uint32, bytes uint64) {
 }
 
 // levelPitch returns the bytes of one row of texel blocks of mip level
-// level, and the bytes of one of its images.
+// level, each block's samples included, and the bytes of one of its images.
 func (t *Texture) levelPitch(level uint32) (rowPitch, imageSize uint64) {
 	w, h, _ := t.levelExtent(level)
 	bw, bh, bytes := t.blockSize()
-	rowPitch = uint64((w+bw-1)/bw) * bytes
+	rowPitch = uint64((w+bw-1)/bw) * bytes * uint64(t.samples())
 	return rowPitch, rowPitch * uint64((h+bh-1)/bh)
 }
 

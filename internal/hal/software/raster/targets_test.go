@@ -20,7 +20,7 @@ func TestColorBufferAllocatedOnlyWhenRead(t *testing.T) {
 	}
 
 	routed := 0
-	p.SetColorOutput(func(x, y int, c [4]float32) { routed++ })
+	p.SetColorOutput(func(x, y int, coverage uint8, c [4]float32) { routed++ })
 	p.DrawTriangles([]Triangle{CreateScreenTriangle(0, 0, 0, w-1, 0, 0, 0, h-1, 0)}, [4]float32{1, 0, 0, 1})
 	if routed == 0 {
 		t.Fatal("no fragment reached the color output")

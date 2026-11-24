@@ -8,6 +8,7 @@ package software
 import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/software/shader"
 )
 
 // attachmentSubresource returns the texture of an attachment view and the
@@ -126,13 +127,19 @@ func (r *RenderPassEncoder) resolveColorTargets() {
 	}
 }
 
-// resolveInto copies the pass's color target src into the subresource of
-// the resolve target view (End). The software backend has no multisampling,
-// so the resolve is a copy of an image of the same size.
-func resolveInto(src *Texture, resolveView hal.TextureView) {
+// resolveInto resolves the pass's color target src, seen in sourceFormat, into
+// the subresource of the resolve target view (End): each texel the average
+// of its samples, decoded to linear through sourceFormat (an sRGB view
+// averages in linear, as GPUs resolve) and encoded in the resolve view's
+// format. A target of one sample is copied as it is.
+func resolveInto(src *Texture, sourceFormat gputypes.TextureFormat, resolveView hal.TextureView) {
 	dst, level, z, ok := attachmentSubresource(resolveView, nil)
 	if src == nil || !ok || dst == src {
 		return
+	}
+	resolveFormat := dst.format
+	if view, isView := resolveView.(*TextureView); isView {
+		resolveFormat = view.viewFormat()
 	}
 	src.mu.RLock()
 	defer src.mu.RUnlock()
@@ -140,8 +147,37 @@ func resolveInto(src *Texture, resolveView hal.TextureView) {
 	defer dst.mu.Unlock()
 	srcImg, srcOK := src.image(0, 0)
 	dstImg, dstOK := dst.image(level, z)
-	if srcOK && dstOK && len(srcImg.data) == len(dstImg.data) {
-		copy(dstImg.data, srcImg.data)
+	if !srcOK || !dstOK || srcImg.width != dstImg.width || srcImg.height != dstImg.height {
+		return
+	}
+	samples := int(src.samples())
+	if samples == 1 {
+		if len(srcImg.data) == len(dstImg.data) {
+			copy(dstImg.data, srcImg.data)
+		}
+		return
+	}
+	sourceCodec, sourceCodecOK := shader.NewColorCodec(sourceFormat)
+	resolveCodec, resolveCodecOK := shader.NewColorCodec(resolveFormat)
+	sourceStride := sourceCodec.TexelSize()
+	resolveStride := resolveCodec.TexelSize()
+	texels := int(srcImg.width * srcImg.height)
+	if !sourceCodecOK || !resolveCodecOK || len(srcImg.data) < texels*samples*sourceStride || len(dstImg.data) < texels*resolveStride {
+		return
+	}
+	for texel := range texels {
+		var sum [4]float32
+		for sample := range samples {
+			off := (texel*samples + sample) * sourceStride
+			v := sourceCodec.Decode(srcImg.data[off : off+sourceStride])
+			for c := range sum {
+				sum[c] += v[c]
+			}
+		}
+		for c := range sum {
+			sum[c] /= float32(samples)
+		}
+		resolveCodec.Encode(dstImg.data[texel*resolveStride:(texel+1)*resolveStride], sum)
 	}
 }
 

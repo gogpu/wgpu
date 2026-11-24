@@ -56,6 +56,11 @@ type Fragment struct {
 
 	// Attributes are perspective-correct interpolated values.
 	Attributes []float32
+
+	// Coverage names the samples of the pixel the fragment writes, bit s for
+	// sample s: those the primitive covers and the multisample state's mask
+	// keeps (MultisampleState). A pixel of one sample has bit 0 alone.
+	Coverage uint8
 }
 
 // Triangle represents three screen-space vertices forming a triangle.
