@@ -24,6 +24,13 @@ fn corner(idx: u32) -> vec2<f32> {
 @vertex fn vs_near(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(corner(idx), 0.4, 1.0);
 }
+@vertex fn vs_behind(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
+    return vec4<f32>(corner(idx), 0.50003, 1.0);
+}
+@vertex fn vs_tilt(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
+    let c = corner(idx);
+    return vec4<f32>(c, 0.5 + 0.1 * c.x, 1.0);
+}
 @fragment fn fs_red() -> @location(0) vec4<f32> { return vec4<f32>(1.0, 0.0, 0.0, 1.0); }
 @fragment fn fs_green() -> @location(0) vec4<f32> { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
 `
@@ -31,22 +38,38 @@ fn corner(idx: u32) -> vec2<f32> {
 const (
 	depthBiasTargetSize  = 64
 	depthBiasBytesPerRow = 256 // depthBiasTargetSize*4 rounded up to the copy alignment.
-	// metalBiasUnits is large enough to be many depth steps on Depth32Float.
+	// metalBiasUnits is large enough to be many depth steps on Depth32Float:
+	// enough to bring vs_behind, 3e-5 behind, in front.
 	metalBiasUnits = -1000
+	// metalSlopeScale pulls vs_tilt, whose depth changes by about 0.003 a
+	// pixel, forward by about 0.0125, and a flat triangle not at all.
+	metalSlopeScale = -4
+	// metalBiasClamp holds a bias to 1e-5, short of the 3e-5 vs_behind
+	// stands behind.
+	metalBiasClamp = -1e-5
 )
 
+// metalDepthBiasCase draws a red triangle from first and then a green one
+// from second, with the bias given, and names the middle pixel it expects.
+// Each of the three arguments has a case that fails if that argument is
+// lost or swapped with another.
 type metalDepthBiasCase struct {
-	name     string
-	vertex   string
-	bias     int32
-	expected string
+	name          string
+	first, second string
+	bias          int32
+	slope, clamp  float32
+	expected      string
 }
 
 func TestMetalDepthBiasReadback(t *testing.T) {
 	cases := []metalDepthBiasCase{
-		{"equal depth without bias", "vs_far", 0, "red"},
-		{"equal depth with negative bias", "vs_far", metalBiasUnits, "green"},
-		{"nearer depth without bias", "vs_near", 0, "green"},
+		{"equal depth without bias", "vs_far", "vs_far", 0, 0, 0, "red"},
+		{"equal depth with negative bias", "vs_far", "vs_far", metalBiasUnits, 0, 0, "green"},
+		{"nearer depth without bias", "vs_far", "vs_near", 0, 0, 0, "green"},
+		{"sloped equal depth with slope scale", "vs_tilt", "vs_tilt", 0, metalSlopeScale, 0, "green"},
+		{"flat equal depth with slope scale only", "vs_far", "vs_far", 0, metalSlopeScale, 0, "red"},
+		{"behind with negative bias", "vs_far", "vs_behind", metalBiasUnits, 0, 0, "green"},
+		{"behind with negative bias clamped", "vs_far", "vs_behind", metalBiasUnits, 0, metalBiasClamp, "red"},
 	}
 	instance, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: wgpu.BackendsMetal})
 	requireDepthBiasOperation(t, err)
@@ -110,9 +133,10 @@ func readMetalDepthBias(t *testing.T, device *wgpu.Device, c metalDepthBiasCase)
 	requireDepthBiasOperation(t, err)
 	defer layout.Release()
 
-	first := depthBiasPipeline(t, device, module, layout, "vs_far", "fs_red", 0)
+	first := depthBiasPipeline(t, device, module, layout, c.first, "fs_red",
+		metalDepthBiasCase{})
 	defer first.Release()
-	second := depthBiasPipeline(t, device, module, layout, c.vertex, "fs_green", c.bias)
+	second := depthBiasPipeline(t, device, module, layout, c.second, "fs_green", c)
 	defer second.Release()
 
 	encoder, err := device.CreateCommandEncoder(&wgpu.CommandEncoderDescriptor{})
@@ -156,7 +180,7 @@ func readMetalDepthBias(t *testing.T, device *wgpu.Device, c metalDepthBiasCase)
 	return name
 }
 
-func depthBiasPipeline(t *testing.T, device *wgpu.Device, module *wgpu.ShaderModule, layout *wgpu.PipelineLayout, vertex, fragment string, bias int32) *wgpu.RenderPipeline {
+func depthBiasPipeline(t *testing.T, device *wgpu.Device, module *wgpu.ShaderModule, layout *wgpu.PipelineLayout, vertex, fragment string, bias metalDepthBiasCase) *wgpu.RenderPipeline {
 	t.Helper()
 	result, err := device.CreateRenderPipeline(&wgpu.RenderPipelineDescriptor{
 		Layout: layout,
@@ -169,7 +193,8 @@ func depthBiasPipeline(t *testing.T, device *wgpu.Device, module *wgpu.ShaderMod
 		},
 		DepthStencil: &wgpu.DepthStencilState{
 			Format: gputypes.TextureFormatDepth32Float, DepthWriteEnabled: true,
-			DepthCompare: gputypes.CompareFunctionLess, DepthBias: bias,
+			DepthCompare: gputypes.CompareFunctionLess, DepthBias: bias.bias,
+			DepthBiasSlopeScale: bias.slope, DepthBiasClamp: bias.clamp,
 		},
 	})
 	requireDepthBiasOperation(t, err)
