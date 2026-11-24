@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Metal applies render-pipeline depth bias** (#N, by @janearc). The constant bias, slope scale and clamp are
+- **Metal applies render-pipeline depth bias** (#455, by @janearc). The constant bias, slope scale and clamp are
   passed to the render command encoder as floating-point arguments; they were sent as integers and ignored.
 
 ## [0.35.5] - 2026-11-23
