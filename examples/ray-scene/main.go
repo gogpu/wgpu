@@ -3,14 +3,14 @@
 
 // Command ray-scene is a port of Rust wgpu's examples/features/src/ray_scene.
 //
-// It loads two OBJ models (Ferris and a cube + Suzanne scene), builds one
-// multi-geometry BLAS per model, and instances them in a TLAS that is rebuilt
-// every frame. A fullscreen fragment shader casts one ray query per pixel and
-// shades hits from per-geometry material data and interpolated normals. The
-// Rust example is windowed; this port renders one frame headlessly at
-// 1024x768 (like the Rust example's test mode), writes a PNG, and compares it
-// against the Rust reference screenshot. Since there is no window, the Rust
-// resize handler is not ported.
+// Where the Rust example loads two OBJ models (Ferris and a cube + Suzanne
+// scene), this port loads the Go gopher. It builds one multi-geometry BLAS
+// per model and instances it in a TLAS that is rebuilt every frame. A
+// fullscreen fragment shader casts one ray query per pixel and shades hits
+// from per-geometry material data. The Rust example is windowed; this port
+// renders one frame headlessly at 1024x768 (like the Rust example's test
+// mode), writes a PNG, and compares it against screenshot.png. Since there is
+// no window, the Rust resize handler is not ported.
 //
 // It needs an adapter with FeatureRayQuery (Vulkan only for now; see
 // docs/RAY-TRACING.md).
@@ -41,11 +41,13 @@ var (
 	shaderWGSL string
 	//go:embed models
 	modelsFS embed.FS
-	// The Rust test compares against screenshot.png on every backend;
-	// screenshot-vulkan.png is kept alongside for reference.
+	// Reference render of the gopher scene (Vulkan, RTX 5080).
 	//go:embed screenshot.png
 	goldenPNG []byte
 )
+
+// gopherYaw turns gopher.obj, which faces -X, towards the camera.
+const gopherYaw = math.Pi / 2
 
 // Same size as the Rust example test (ExampleTestParams width/height).
 const (
@@ -70,6 +72,9 @@ type SceneComponents struct {
 	geometries                        *wgpu.Buffer
 	instances                         *wgpu.Buffer
 	bottomLevelAccelerationStructures []*wgpu.Blas
+	// centers holds each model's bounding-box center in model space, so
+	// instances can be placed by their middle rather than their origin.
+	centers []rtexample.Vec3
 }
 
 // Release frees the scene's GPU resources.
@@ -239,7 +244,29 @@ func loadScene(device *wgpu.Device, queue *wgpu.Queue) (*SceneComponents, error)
 	if err != nil {
 		return nil, fmt.Errorf("load models: %w", err)
 	}
-	return uploadSceneComponents(device, queue, scene)
+	sc, err := uploadSceneComponents(device, queue, scene)
+	if err != nil {
+		return nil, err
+	}
+	for _, inst := range scene.instances {
+		sc.centers = append(sc.centers, boundsCenter(scene.vertices[inst.vertices.start:inst.vertices.end]))
+	}
+	return sc, nil
+}
+
+// boundsCenter returns the center of the axis-aligned bounding box of vs.
+func boundsCenter(vs []Vertex) rtexample.Vec3 {
+	if len(vs) == 0 {
+		return rtexample.Vec3{}
+	}
+	lo, hi := vs[0].Pos, vs[0].Pos
+	for _, v := range vs[1:] {
+		for i := range 3 {
+			lo[i] = min(lo[i], v.Pos[i])
+			hi[i] = max(hi[i], v.Pos[i])
+		}
+	}
+	return rtexample.Vec3{(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2}
 }
 
 // Example holds the state the Rust Example struct holds.
@@ -266,7 +293,7 @@ func requiredLimits() gputypes.Limits {
 
 func main() {
 	out := flag.String("o", "ray-scene.png", "output PNG path")
-	threshold := flag.Float64("threshold", rtexample.DefaultMeanThreshold, "max mean difference vs the Rust screenshot (negative disables)")
+	threshold := flag.Float64("threshold", rtexample.DefaultMeanThreshold, "max mean difference vs screenshot.png (negative disables)")
 	flag.Parse()
 	if err := run(*out, *threshold); err != nil {
 		log.Fatalf("FAIL: %v", err)
@@ -459,12 +486,17 @@ func (ex *Example) render(view *wgpu.TextureView, device *wgpu.Device, queue *wg
 				fx := float32(x)/float32(sideCount-1)*2.0 - 1.0
 				fy := float32(y)/float32(sideCount-1)*2.0 - 1.0
 
+				// Unlike the Rust example, the model is first moved so its
+				// bounding-box center sits at the origin, and turned a
+				// quarter turn about Y so the gopher (which faces -X in
+				// gopher.obj) faces the camera.
+				c := ex.sceneComponents.centers[blasIndex]
 				transform := rtexample.RotationTranslationEulerXYZ(
 					animTime*0.5*0.342,
-					animTime*0.5*0.254,
+					animTime*0.5*0.254+gopherYaw,
 					animTime*0.5*0.832+math.Pi,
 					rtexample.Vec3{fx * dist, fy * dist, -14.0},
-				)
+				).Mul(rtexample.Translation(rtexample.Vec3{-c[0], -c[1], -c[2]}))
 				ex.tlas.SetInstance(x+y*sideCount, wgpu.NewTlasInstance(
 					blases[blasIndex],
 					transform.Rows3x4(),

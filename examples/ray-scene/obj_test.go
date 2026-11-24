@@ -75,22 +75,19 @@ f -1//1 -2//1 -3//1
 	}
 }
 
-// TestExampleModels loads the real example models in the same order as the
-// Rust example and checks that every geometry is a whole number of triangles.
+// TestExampleModels loads the real example model and checks that every
+// geometry is a whole number of triangles.
 func TestExampleModels(t *testing.T) {
 	scene, err := loadRawScene(os.DirFS("models"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scene.instances) != 2 {
-		t.Fatalf("instances = %d, want 2", len(scene.instances))
+	if len(scene.instances) != 1 {
+		t.Fatalf("instances = %d, want 1", len(scene.instances))
 	}
-	// rustacean-3d.obj: one object, four usemtl groups. cube.obj: two objects.
-	if got := scene.instances[0].geometries; got != (indexRange{0, 4}) {
-		t.Errorf("ferris geometries = %+v, want {0 4}", got)
-	}
-	if got := scene.instances[1].geometries; got != (indexRange{4, 6}) {
-		t.Errorf("cube geometries = %+v, want {4 6}", got)
+	// gopher.obj: twelve objects; Nose has two usemtl groups and each eye three.
+	if got := scene.instances[0].geometries; got != (indexRange{0, 17}) {
+		t.Errorf("gopher geometries = %+v, want {0 17}", got)
 	}
 	for i, g := range scene.geometries {
 		n := g.indices.end - g.indices.start

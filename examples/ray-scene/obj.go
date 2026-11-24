@@ -373,14 +373,12 @@ func loadModel(scene *RawSceneComponents, fsys fs.FS, name string) error { //nol
 	return nil
 }
 
-// loadRawScene is the CPU half of the Rust example's load_scene: it loads the
-// two models, in the same order, from fsys (rooted at the models directory).
+// loadRawScene is the CPU half of the Rust example's load_scene. The Rust
+// example loads two models (Ferris and a cube + Suzanne scene); this port
+// loads the Go gopher from fsys (rooted at the models directory) instead.
 func loadRawScene(fsys fs.FS) (*RawSceneComponents, error) {
 	scene := &RawSceneComponents{}
-	if err := loadModel(scene, fsys, "rustacean-3d.obj"); err != nil {
-		return nil, err
-	}
-	if err := loadModel(scene, fsys, "cube.obj"); err != nil {
+	if err := loadModel(scene, fsys, "gopher.obj"); err != nil {
 		return nil, err
 	}
 	return scene, nil
