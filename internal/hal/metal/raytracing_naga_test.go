@@ -73,7 +73,10 @@ func rtNagaMSL(t *testing.T) (string, msl.TranslationInfo) {
 	return src, info
 }
 
-func TestNagaRayQueryMSLCompilesOnMetal(t *testing.T) {
+// rtShaderDevice is the system default device with just enough adapter state
+// to compile MSL. It is released when the test ends.
+func rtShaderDevice(t *testing.T) *Device {
+	t.Helper()
 	if err := Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -81,8 +84,12 @@ func TestNagaRayQueryMSLCompilesOnMetal(t *testing.T) {
 	if raw == 0 {
 		skipWithoutMetal(t, "no Metal device available")
 	}
-	defer Release(raw)
-	d := &Device{raw: raw, adapter: &Adapter{raw: raw, compileOptions: systemShaderCompileOptions()}}
+	t.Cleanup(func() { Release(raw) })
+	return &Device{raw: raw, adapter: &Adapter{raw: raw, compileOptions: systemShaderCompileOptions()}}
+}
+
+func TestNagaRayQueryMSLCompilesOnMetal(t *testing.T) {
+	d := rtShaderDevice(t)
 	src, _ := rtNagaMSL(t)
 	lib, nsErr := d.newLibraryWithSource(src)
 	if lib == 0 {
@@ -100,15 +107,7 @@ func TestNagaRayExamplesCompileOnMetal(t *testing.T) {
 	if root == "" {
 		t.Skip("RT_RAY_EXAMPLES not set")
 	}
-	if err := Init(); err != nil {
-		t.Fatalf("Init failed: %v", err)
-	}
-	raw := CreateSystemDefaultDevice()
-	if raw == 0 {
-		skipWithoutMetal(t, "no Metal device available")
-	}
-	defer Release(raw)
-	d := &Device{raw: raw, adapter: &Adapter{raw: raw, compileOptions: systemShaderCompileOptions()}}
+	d := rtShaderDevice(t)
 	dirs, err := filepath.Glob(filepath.Join(root, "ray_*"))
 	if err != nil || len(dirs) == 0 {
 		t.Fatalf("no ray_* examples in %s: %v", root, err)

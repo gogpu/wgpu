@@ -116,6 +116,24 @@ func rtOpenDevice(t *testing.T) (*Device, *Queue, func()) {
 	return od.Device.(*Device), od.Queue.(*Queue), func() { od.Device.Destroy() }
 }
 
+// TestMetalAdapterReportsTlasInstanceSize checks that the adapter reports the
+// instance size TlasInstanceToBytes packs, so a caller sizing an instance
+// buffer from the alignments does not fall back to the 64 bytes of Vulkan.
+func TestMetalAdapterReportsTlasInstanceSize(t *testing.T) {
+	inst, err := NewBackend().CreateInstance(nil)
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	adapters := inst.EnumerateAdapters(nil)
+	if len(adapters) == 0 {
+		skipWithoutMetal(t, "no Metal device available")
+	}
+	got := adapters[0].Capabilities.AlignmentsMask.RawTlasInstanceSize
+	if want := len(tlasInstanceToBytes(hal.TlasInstance{})); got != uint32(want) {
+		t.Fatalf("RawTlasInstanceSize = %d, want %d (the packed instance size)", got, want)
+	}
+}
+
 func rtBuffer(t *testing.T, d *Device, size uint64, usage gputypes.BufferUsage) *Buffer {
 	t.Helper()
 	b, err := d.CreateBuffer(&hal.BufferDescriptor{Label: "rt", Size: size, Usage: usage})
@@ -412,6 +430,7 @@ func rtRun(t *testing.T, d *Device, q *Queue, fn func(enc *CommandEncoder)) {
 func TestMetalRayTracingBLASVariants(t *testing.T) {
 	d, q, cleanup := rtOpenDevice(t)
 	defer cleanup()
+	defer runtime.KeepAlive(d)
 
 	rays, origins, dirs := rtRays()
 	one := []hal.TlasInstance{rtInstances[0]}

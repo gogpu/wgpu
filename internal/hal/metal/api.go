@@ -154,6 +154,9 @@ func (i *Instance) EnumerateAdapters(surfaceHint hal.Surface) []hal.ExposedAdapt
 				AlignmentsMask: hal.Alignments{
 					BufferCopyOffset: 4,
 					BufferCopyPitch:  256,
+					// Metal packs TLAS instances in the 72-byte indirect
+					// layout, not the 64 bytes of Vulkan and DX12.
+					RawTlasInstanceSize: mtlASInstanceDescriptorSize,
 				},
 				// DefaultDownlevelCapabilities (all 27 flags) is correct for Metal.
 				// Rust wgpu-hal Metal conditionally sets 8 flags from feature sets
