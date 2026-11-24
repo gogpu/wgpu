@@ -759,7 +759,8 @@ func (e *RenderPassEncoder) applyPipeline(p *RenderPipeline) {
 	_ = MsgSend(e.raw, Sel("setFrontFacingWinding:"), uintptr(p.frontFace))
 	if p.depthStencil != 0 {
 		_ = MsgSend(e.raw, Sel("setDepthStencilState:"), uintptr(p.depthStencil))
-		_ = MsgSend(e.raw, Sel("setDepthBias:slopeScale:clamp:"), uintptr(p.depthBias), uintptr(p.depthSlopeScale), uintptr(p.depthClamp))
+		msgSendVoid(e.raw, Sel("setDepthBias:slopeScale:clamp:"),
+			argFloat32(p.depthBias), argFloat32(p.depthSlopeScale), argFloat32(p.depthClamp))
 	}
 }
 
