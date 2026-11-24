@@ -1526,7 +1526,7 @@ func (d *Device) GetAccelerationStructureDeviceAddress(accelStruct hal.Accelerat
 	return uint64(MsgSend(mtlAS.raw, Sel("gpuResourceID")))
 }
 
-// TlasInstanceToBytes converts a TlasInstance to Metal's 64-byte packed format.
+// TlasInstanceToBytes converts a TlasInstance to Metal's 72-byte packed format.
 //
 // Reference: Rust wgpu-hal metal/device.rs:2123-2159.
 func (d *Device) TlasInstanceToBytes(instance hal.TlasInstance) []byte {

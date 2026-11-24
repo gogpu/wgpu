@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Metal top-level acceleration structures find their instances** (by @janearc). A TLAS built through the HAL used
+  Metal's default instance layout, which looks each BLAS up in an array the HAL never sets, so the build succeeded and
+  every ray missed. The HAL now uses the indirect layout with the BLAS resource ID. macOS only.
+
 ## [0.35.5] - 2026-11-23
 
 ### Added
