@@ -1804,6 +1804,11 @@ func (r *RenderPassEncoder) configureRasterPipeline(pipe *raster.Pipeline) {
 	pipe.SetCullMode(convertCullMode(r.pipeline.desc.Primitive.CullMode))
 	pipe.SetFrontFace(convertFrontFace(r.pipeline.desc.Primitive.FrontFace))
 
+	// Coverage is tested at the pipeline's samples, under its mask (only
+	// the low 32 bits are used, as in WebGPU).
+	multisample := r.pipeline.desc.Multisample
+	pipe.SetMultisampleState(raster.MultisampleState{Count: int(multisample.Count), Mask: uint32(multisample.Mask)})
+
 	// Blending happens in the color targets (routeColorOutput), in each
 	// attachment's format.
 

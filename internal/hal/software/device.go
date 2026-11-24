@@ -87,8 +87,8 @@ func (d *Device) CreateTexture(desc *hal.TextureDescriptor) (hal.Texture, error)
 	if desc == nil {
 		return nil, fmt.Errorf("BUG: texture descriptor is nil in Software.CreateTexture — core validation gap")
 	}
-	if desc.SampleCount > 1 {
-		return nil, fmt.Errorf("software backend does not support MSAA (SampleCount=%d)", desc.SampleCount)
+	if err := checkTextureSampleCount(desc); err != nil {
+		return nil, err
 	}
 	// Storage holds every mip level and layer (subresource.go), sized from
 	// the format's texel block: R8 = 1 byte, RGBA8 = 4, a BC1 4x4 block = 8.
@@ -251,6 +251,9 @@ func (d *Device) CreateBindGroup(desc *hal.BindGroupDescriptor) (hal.BindGroup, 
 			switch res := entry.Resource.(type) {
 			case gputypes.TextureViewBinding:
 				if view := d.lookupTextureView(res.TextureView); view != nil {
+					if view.texture != nil && view.texture.samples() > 1 {
+						return nil, fmt.Errorf("software: binding %d is a multisampled texture, which the software backend's shaders do not read", entry.Binding)
+					}
 					bg.textureViews[entry.Binding] = view
 				}
 			case gputypes.BufferBinding:
@@ -393,6 +396,9 @@ func (d *Device) CreateRenderPipeline(desc *hal.RenderPipelineDescriptor) (hal.R
 	p := &RenderPipeline{desc: desc}
 	if desc == nil {
 		return p, nil
+	}
+	if desc.Multisample.AlphaToCoverageEnabled {
+		return nil, fmt.Errorf("software backend does not multisample with alpha to coverage")
 	}
 	if sm, ok := desc.Vertex.Module.(*ShaderModule); ok && sm != nil {
 		vs, err := stageModule(sm, ir.StageVertex, desc.Vertex.EntryPoint, desc.Vertex.Constants)
@@ -649,4 +655,20 @@ func (d *Device) lookupBuffer(handle uintptr) *Buffer {
 		return nil
 	}
 	return d.buffers[handle]
+}
+
+// checkTextureSampleCount refuses a texture of more samples than the
+// software backend stores: it multisamples color textures of 4 samples, the
+// one count above 1 WebGPU allows, and no depth or stencil format, whose
+// tests run once per pixel.
+func checkTextureSampleCount(desc *hal.TextureDescriptor) error {
+	switch {
+	case desc.SampleCount <= 1:
+		return nil
+	case desc.SampleCount != 4:
+		return fmt.Errorf("software backend multisamples 4 samples, not %d", desc.SampleCount)
+	case desc.Format.IsDepthStencil():
+		return fmt.Errorf("software backend multisamples no depth or stencil texture (%v, SampleCount=%d)", desc.Format, desc.SampleCount)
+	}
+	return nil
 }

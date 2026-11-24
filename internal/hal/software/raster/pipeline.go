@@ -48,6 +48,9 @@ type Pipeline struct {
 	// Scissor test (nil = disabled)
 	scissorRect *Rect
 
+	// multisample is the samples coverage is tested at (SetMultisampleState).
+	multisample MultisampleState
+
 	// Clipping configuration
 	clippingEnabled bool
 
@@ -278,8 +281,9 @@ func (p *Pipeline) GetBlendState() BlendState {
 
 // ColorOutput receives the color of one fragment at pixel (x, y) that passed
 // the scissor, depth and stencil tests, as the shader produced it: not
-// blended, clamped or converted.
-type ColorOutput func(x, y int, color [4]float32)
+// blended, clamped or converted. coverage names the samples of the pixel it
+// writes (Fragment.Coverage).
+type ColorOutput func(x, y int, coverage uint8, color [4]float32)
 
 // SetColorOutput routes the fragment colors of later draws to out instead of
 // the RGBA8 color buffer, whose blend state then does not apply: the caller
@@ -291,11 +295,22 @@ func (p *Pipeline) SetColorOutput(out ColorOutput) {
 	p.colorOutput = out
 }
 
-// writeColor stores the color of the fragment at (x, y): through out when
-// set, otherwise blended into the color buffer.
-func (p *Pipeline) writeColor(x, y int, color [4]float32, blendState BlendState, out ColorOutput) {
+// SetMultisampleState sets the samples later draws test coverage at. The
+// pipeline's own color buffer holds one sample per pixel, which a fragment
+// covering any of its samples writes; a color output (SetColorOutput)
+// receives the samples it covers.
+func (p *Pipeline) SetMultisampleState(state MultisampleState) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.multisample = state
+}
+
+// writeColor stores the color of the fragment at (x, y) covering the samples
+// of coverage: through out when set, otherwise blended into the color
+// buffer.
+func (p *Pipeline) writeColor(x, y int, coverage uint8, color [4]float32, blendState BlendState, out ColorOutput) {
 	if out != nil {
-		out(x, y, color)
+		out(x, y, coverage, color)
 		return
 	}
 	idx := (y*p.width + x) * 4
@@ -548,6 +563,7 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilFront, stencilBack := p.stencilState, p.stencilBack
+	multisample := p.multisample
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -569,7 +585,7 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 		// Rasterize triangle
-		Rasterize(*tri, viewport, func(frag Fragment) {
+		rasterizeSamples(*tri, viewport, multisample, func(frag Fragment) {
 			// Bounds check
 			if frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height {
 				return
@@ -593,7 +609,7 @@ func (p *Pipeline) DrawTriangles(triangles []Triangle, color [4]float32) {
 				p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 			}
 
-			p.writeColor(frag.X, frag.Y, color, blendState, out)
+			p.writeColor(frag.X, frag.Y, frag.Coverage, color, blendState, out)
 		})
 	}
 }
@@ -612,6 +628,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilFront, stencilBack := p.stencilState, p.stencilBack
+	multisample := p.multisample
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -633,7 +650,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 		// Rasterize triangle
-		Rasterize(*tri, viewport, func(frag Fragment) {
+		rasterizeSamples(*tri, viewport, multisample, func(frag Fragment) {
 			// Bounds check
 			if frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height {
 				return
@@ -666,7 +683,7 @@ func (p *Pipeline) DrawTrianglesInterpolated(triangles []Triangle) {
 				srcColor[3] = frag.Attributes[3]
 			}
 
-			p.writeColor(frag.X, frag.Y, srcColor, blendState, out)
+			p.writeColor(frag.X, frag.Y, frag.Coverage, srcColor, blendState, out)
 		})
 	}
 }
@@ -694,6 +711,7 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilFront, stencilBack := p.stencilState, p.stencilBack
+	multisample := p.multisample
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -715,7 +733,7 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
 		// Rasterize triangle
-		Rasterize(*tri, viewport, func(frag Fragment) {
+		rasterizeSamples(*tri, viewport, multisample, func(frag Fragment) {
 			// Bounds check
 			if frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height {
 				return
@@ -751,7 +769,7 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 				srcColor, _ = fragFunc(&frag)
 			}
 
-			p.writeColor(frag.X, frag.Y, srcColor, blendState, out)
+			p.writeColor(frag.X, frag.Y, frag.Coverage, srcColor, blendState, out)
 		})
 	}
 }
@@ -764,10 +782,11 @@ func (p *Pipeline) DrawTrianglesWithFragmentShader(triangles []Triangle, fragFun
 type MRTFragmentShaderFunc func(frag *Fragment) (colors [][4]float32, discard bool)
 
 // MRTOutput is called by DrawTrianglesWithMRTShader for each fragment that
-// passes depth/stencil/scissor tests. It receives the pixel coordinates and
-// per-location output colors (index 0 = location 0, etc.). The caller uses
-// this to write colors beyond location 0 to their respective target textures.
-type MRTOutput func(x, y int, colors [][4]float32)
+// passes depth/stencil/scissor tests. It receives the pixel coordinates, the
+// samples the fragment covers (Fragment.Coverage) and per-location output
+// colors (index 0 = location 0, etc.). The caller uses this to write colors
+// beyond location 0 to their respective target textures.
+type MRTOutput func(x, y int, coverage uint8, colors [][4]float32)
 
 // DrawTrianglesWithMRTShader rasterizes triangles and invokes fragFunc per
 // pixel for Multiple Render Targets. Location 0 is written to the pipeline's
@@ -787,6 +806,7 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilFront, stencilBack := p.stencilState, p.stencilBack
+	multisample := p.multisample
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -806,7 +826,7 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 		}
 		stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
-		Rasterize(*tri, viewport, func(frag Fragment) {
+		rasterizeSamples(*tri, viewport, multisample, func(frag Fragment) {
 			if frag.X < 0 || frag.X >= p.width || frag.Y < 0 || frag.Y >= p.height {
 				return
 			}
@@ -841,12 +861,12 @@ func (p *Pipeline) DrawTrianglesWithMRTShader(triangles []Triangle, fragFunc MRT
 
 			// Write location 0 to the color buffer or the color output.
 			if len(colors) > 0 {
-				p.writeColor(frag.X, frag.Y, colors[0], blendState, out)
+				p.writeColor(frag.X, frag.Y, frag.Coverage, colors[0], blendState, out)
 			}
 
 			// Notify caller about all per-location outputs for targets 1+.
 			if mrtOut != nil && len(colors) > 1 {
-				mrtOut(frag.X, frag.Y, colors)
+				mrtOut(frag.X, frag.Y, frag.Coverage, colors)
 			}
 		})
 	}
@@ -884,6 +904,7 @@ func (p *Pipeline) DrawTrianglesWithQuadShader(triangles []Triangle, quadFunc Qu
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilFront, stencilBack := p.stencilState, p.stencilBack
+	multisample := p.multisample
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -933,15 +954,15 @@ func (p *Pipeline) DrawTrianglesWithQuadShader(triangles []Triangle, quadFunc Qu
 			}
 			c := colors[lane]
 			if len(c) > 0 {
-				p.writeColor(frag.X, frag.Y, c[0], blendState, out)
+				p.writeColor(frag.X, frag.Y, frag.Coverage, c[0], blendState, out)
 			}
 			if mrtOut != nil && len(c) > 1 {
-				mrtOut(frag.X, frag.Y, c)
+				mrtOut(frag.X, frag.Y, frag.Coverage, c)
 			}
 		}
 	}
 
-	var rast QuadRasterizer
+	rast := QuadRasterizer{Multisample: multisample}
 	for i := range triangles {
 		tri := &triangles[i]
 		if ShouldCull(*tri, cullMode, frontFace) {
@@ -972,6 +993,7 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 	out := p.colorOutput
 	stencilBuffer := p.stencilBuffer
 	stencilFront, stencilBack := p.stencilState, p.stencilBack
+	multisample := p.multisample
 	var scissor *Rect
 	if p.scissorRect != nil {
 		scissor = &Rect{
@@ -1009,7 +1031,7 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 			tri := &tileTriangles[i]
 			stencilState := faceStencilState(tri, frontFace, &stencilFront, &stencilBack)
 
-			RasterizeTile(*tri, tile, func(frag Fragment) {
+			rasterizeIncrementalCore(*tri, tile.MinX, tile.MinY, tile.MaxX, tile.MaxY, multisample, func(frag Fragment) {
 				// Bounds check (should always pass for properly clipped tiles)
 				if frag.X < viewport.X || frag.X >= viewport.X+viewport.Width ||
 					frag.Y < viewport.Y || frag.Y >= viewport.Y+viewport.Height {
@@ -1034,7 +1056,7 @@ func (p *Pipeline) DrawTrianglesParallel(triangles []Triangle, color [4]float32)
 					p.depthBuffer.Set(frag.X, frag.Y, frag.Depth)
 				}
 
-				p.writeColor(frag.X, frag.Y, color, blendState, out)
+				p.writeColor(frag.X, frag.Y, frag.Coverage, color, blendState, out)
 			})
 		}
 	})
