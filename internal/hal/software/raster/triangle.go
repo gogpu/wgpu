@@ -41,8 +41,14 @@ type RasterCallback func(frag Fragment)
 // triangle covers under the top-left fill rule (see IncrementalTriangle.IsInside).
 // The callback is invoked for each fragment with interpolated attributes.
 func Rasterize(tri Triangle, viewport Viewport, callback RasterCallback) {
+	rasterizeSamples(tri, viewport, MultisampleState{}, callback)
+}
+
+// rasterizeSamples is Rasterize at the samples of multisample: it generates a fragment
+// for every pixel of the viewport with a sample the triangle covers.
+func rasterizeSamples(tri Triangle, viewport Viewport, multisample MultisampleState, callback RasterCallback) {
 	rasterizeIncrementalCore(tri, viewport.X, viewport.Y,
-		viewport.X+viewport.Width, viewport.Y+viewport.Height, callback)
+		viewport.X+viewport.Width, viewport.Y+viewport.Height, multisample, callback)
 }
 
 // ComputeTriangleArea returns twice the signed area of a triangle as the cross
@@ -105,23 +111,26 @@ func RasterizeIncremental(tri Triangle, viewport Viewport, callback RasterCallba
 // is processed independently. The coverage is the same as Rasterize's, so
 // tiles never draw a shared edge twice or leave a crack at a tile boundary.
 func RasterizeTile(tri Triangle, tile Tile, callback RasterCallback) {
-	rasterizeIncrementalCore(tri, tile.MinX, tile.MinY, tile.MaxX, tile.MaxY, callback)
+	rasterizeIncrementalCore(tri, tile.MinX, tile.MinY, tile.MaxX, tile.MaxY, MultisampleState{}, callback)
 }
 
 // rasterizeIncrementalCore is the shared implementation for all rasterization
 // paths. It rasterizes the triangle within the pixel bounds
-// [startX, endX) x [startY, endY).
-func rasterizeIncrementalCore(tri Triangle, startX, startY, endX, endY int, callback RasterCallback) {
+// [startX, endX) x [startY, endY), at the samples of multisample; each fragment is
+// interpolated at its pixel center, which with several samples may lie
+// outside the triangle.
+func rasterizeIncrementalCore(tri Triangle, startX, startY, endX, endY int, multisample MultisampleState, callback RasterCallback) {
 	incTri := NewIncrementalTriangle(tri)
 	if incTri.IsDegenerate() {
 		return
 	}
 
-	// Only pixels whose center lies in the snapped bounding box can be covered.
-	startX = maxInt(startX, incTri.minX)
-	endX = minInt(endX, incTri.maxX)
-	startY = maxInt(startY, incTri.minY)
-	endY = minInt(endY, incTri.maxY)
+	// Only pixels with a sample in the snapped bounding box can be covered.
+	minX, minY, maxX, maxY := incTri.pixelBounds(multisample)
+	startX = maxInt(startX, minX)
+	endX = minInt(endX, maxX)
+	startY = maxInt(startY, minY)
+	endY = minInt(endY, maxY)
 	if startX >= endX || startY >= endY {
 		return
 	}
@@ -131,8 +140,10 @@ func rasterizeIncrementalCore(tri Triangle, startX, startY, endX, endY int, call
 	incTri.setRowPixel(startX, startY)
 	for y := startY; y < endY; y++ {
 		for x := startX; x < endX; x++ {
-			if incTri.IsInside() {
+			w0, w1, w2 := incTri.EdgeValues()
+			if coverage := incTri.coverage(w0, w1, w2, multisample); coverage != 0 {
 				frag := computeFragment(x, y, &tri, &incTri, attrCount)
+				frag.Coverage = coverage
 				callback(frag)
 			}
 			incTri.StepX()

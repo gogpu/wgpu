@@ -5,6 +5,7 @@ package wgpu
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -313,6 +314,25 @@ func TestHeadlessSurfaceTriangleReadback(t *testing.T) {
 	assertPixel(width-1, 0, []byte{0, 0, 0xff, 0xff})
 	assertPixel(0, height-1, []byte{0, 0, 0xff, 0xff})
 	assertPixel(width-1, height-1, []byte{0, 0, 0xff, 0xff})
+}
+
+func TestSurfaceConfigureRefusesZeroArea(t *testing.T) {
+	for _, size := range []struct{ width, height uint32 }{{0, 2}, {2, 0}, {0, 0}} {
+		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
+			fixture := newHeadlessSoftwareFixture(t, size.width, size.height, gputypes.TextureFormatRGBA8Unorm, false)
+			err := fixture.surface.Configure(fixture.device, &SurfaceConfiguration{
+				Width:       size.width,
+				Height:      size.height,
+				Format:      fixture.format,
+				Usage:       gputypes.TextureUsageRenderAttachment,
+				PresentMode: gputypes.PresentModeFifo,
+				AlphaMode:   gputypes.CompositeAlphaModeOpaque,
+			})
+			if !errors.Is(err, ErrSurfaceZeroArea) {
+				t.Fatalf("Configure error = %v, want ErrSurfaceZeroArea", err)
+			}
+		})
+	}
 }
 
 func TestHeadlessSurfaceReadPixelsStateErrors(t *testing.T) {

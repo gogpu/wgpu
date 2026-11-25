@@ -26,6 +26,10 @@
 //   - Color attachments written in their view's format (sRGB encode, blend
 //     in linear, write masks); depth-only passes; a stencil plane in the
 //     depth-stencil formats
+//   - Multisampled color: a pipeline of 4 samples tests coverage at the
+//     standard sample positions, shades a fragment once at its pixel center
+//     and blends it into each sample it covers, under the pipeline's sample
+//     mask; a resolve averages a texel's samples, in linear for an sRGB view
 //   - Texture sampling (nearest, bilinear, 3 wrap modes) through the view's
 //     format, with sRGB decoded before filtering, and mip selection
 //     from the sampler's mipmap filter, LOD clamps and bias; array, cube and
@@ -47,7 +51,10 @@
 //   - Implicit-LOD textureSample uses the view's base level: fragments are
 //     shaded one at a time, so there are no derivatives
 //   - Cube sampling is not seamless across faces
-//   - No multisampling (CreateTexture rejects SampleCount > 1)
+//   - Multisampling is of color alone: CreateTexture refuses a depth or
+//     stencil texture of more than one sample, CreateRenderPipeline alpha to
+//     coverage, and CreateBindGroup a multisampled texture, which shaders do
+//     not read
 //
 // Always compiled (no build tags required).
 //

@@ -18,6 +18,12 @@ var (
 	ErrSurfaceOutdated = hal.ErrSurfaceOutdated
 	ErrTimeout         = hal.ErrTimeout
 
+	// ErrSurfaceZeroArea is returned by Surface.Configure when the surface's
+	// width or height is zero, or when the backend sees the window at zero
+	// size, as Vulkan can while a window is minimized. Configure the surface
+	// again once the window has a non-zero size.
+	ErrSurfaceZeroArea = hal.ErrZeroArea
+
 	// ErrContextReleased is returned by Adapter.RequestDevice when the
 	// backend's native context is gone. On GLES on Linux that happens when a
 	// Wayland window's Surface is released before RequestDevice: the EGL

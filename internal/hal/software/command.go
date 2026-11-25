@@ -820,7 +820,8 @@ func (r *RenderPassEncoder) End() {
 
 // end finishes the render pass when it executes.
 // If no draw calls were issued and LoadOp is Clear, the clear is applied now.
-// MSAA resolve: copies color attachment pixels to resolve target (WebGPU spec).
+// MSAA resolve: averages each color attachment's samples into its resolve
+// target (WebGPU spec).
 func (r *RenderPassEncoder) end() {
 	hal.Logger().Debug("software: End",
 		"draws", r.drawCount,
@@ -833,14 +834,12 @@ func (r *RenderPassEncoder) end() {
 		r.applyClear()
 	}
 
-	// MSAA resolve: copy color attachment to resolve target.
-	// In WebGPU, if a color attachment has a ResolveTarget, the GPU resolves
-	// MSAA samples to the single-sample target at end of render pass.
-	// Software backend has no real MSAA — this is a direct pixel copy into
-	// the resolve view's mip level and array layer.
+	// MSAA resolve: a color attachment with a ResolveTarget is resolved
+	// into the resolve view's mip level and array layer at the end of the
+	// render pass, each texel the average of its samples.
 	for i, attachment := range r.desc.ColorAttachments {
 		if attachment.ResolveTarget != nil {
-			resolveInto(r.colorTargets[i], attachment.ResolveTarget)
+			resolveInto(r.colorTargets[i], r.colorFormat(i), attachment.ResolveTarget)
 		}
 	}
 

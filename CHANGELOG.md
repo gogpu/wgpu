@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Metal top-level acceleration structures find their instances** ([#456](https://github.com/gogpu/wgpu/pull/456) by @janearc). A TLAS built through the HAL used
-  Metal's default instance layout, which looks each BLAS up in an array the HAL never sets, so the build succeeded and
-  every ray missed. The HAL now uses the indirect layout with the BLAS resource ID. macOS only.
+- **Metal applies render-pipeline depth bias** (#455, by @janearc). The constant bias, slope scale and clamp are
+  passed to the render command encoder as floating-point arguments; they were sent as integers and ignored.
 
 ## [0.35.5] - 2026-11-23
 

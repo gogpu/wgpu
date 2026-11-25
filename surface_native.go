@@ -245,6 +245,10 @@ func (t SurfaceTargetUnsafe) halTarget() (hal.SurfaceTarget, error) {
 
 // Configure configures the surface for presentation.
 // Must be called before GetCurrentTexture().
+//
+// It returns ErrSurfaceZeroArea when the width or height is zero, or when the
+// backend sees the window at zero size, as Vulkan can while a window is
+// minimized. Configure it again once the window has a non-zero size.
 func (s *Surface) Configure(device *Device, config *SurfaceConfiguration) error {
 	// The device implementation is the surface seam value: the internal device
 	// satisfies surface.DeviceHost directly (the S1 to S10 adapter is gone). A

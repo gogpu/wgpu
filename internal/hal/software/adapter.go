@@ -5,6 +5,7 @@ package software
 import (
 	"github.com/gogpu/gputypes"
 	"github.com/gogpu/wgpu/internal/hal"
+	"github.com/gogpu/wgpu/internal/hal/software/shader"
 )
 
 // Adapter implements hal.Adapter for the software backend.
@@ -19,15 +20,23 @@ func (a *Adapter) Open(_ gputypes.Features, _ gputypes.Limits) (hal.OpenDevice, 
 	}, nil
 }
 
-// TextureFormatCapabilities returns default capabilities for all formats.
-func (a *Adapter) TextureFormatCapabilities(_ gputypes.TextureFormat) hal.TextureFormatCapabilities {
-	return hal.TextureFormatCapabilities{
-		Flags: hal.TextureFormatCapabilitySampled |
-			hal.TextureFormatCapabilityStorage |
-			hal.TextureFormatCapabilityStorageReadWrite |
-			hal.TextureFormatCapabilityRenderAttachment |
-			hal.TextureFormatCapabilityBlendable,
+// TextureFormatCapabilities returns default capabilities for all formats. A
+// format the backend draws color into (one with a color codec) multisamples
+// too, and one that is not an integer format also resolves; depth, stencil
+// and compressed formats do neither.
+func (a *Adapter) TextureFormatCapabilities(format gputypes.TextureFormat) hal.TextureFormatCapabilities {
+	flags := hal.TextureFormatCapabilitySampled |
+		hal.TextureFormatCapabilityStorage |
+		hal.TextureFormatCapabilityStorageReadWrite |
+		hal.TextureFormatCapabilityRenderAttachment |
+		hal.TextureFormatCapabilityBlendable
+	if codec, ok := shader.NewColorCodec(format); ok {
+		flags |= hal.TextureFormatCapabilityMultisample
+		if !codec.Integer() {
+			flags |= hal.TextureFormatCapabilityMultisampleResolve
+		}
 	}
+	return hal.TextureFormatCapabilities{Flags: flags}
 }
 
 // SurfaceCapabilities returns default surface capabilities.

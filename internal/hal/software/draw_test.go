@@ -2447,7 +2447,7 @@ func writeTestColor(t *testing.T, target *Texture, x, y int, c [4]float32) {
 	if ct == nil {
 		t.Fatalf("no color target for format %v", target.format)
 	}
-	ct.write(x, y, c)
+	ct.write(x, y, 1, c)
 }
 
 // TestIntegerColorTarget: a fragment output reaches an integer target as
@@ -2490,7 +2490,7 @@ func TestIntegerColorTarget(t *testing.T) {
 			if ct == nil || ct.blend.Enabled {
 				t.Fatalf("color target %v: nil or blending", ct)
 			}
-			ct.write(0, 0, fragmentColor(tt.out, colorKindOf(tt.format)))
+			ct.write(0, 0, 1, fragmentColor(tt.out, colorKindOf(tt.format)))
 			if got := target.GetData()[:len(tt.want)]; !bytes.Equal(got, tt.want) {
 				t.Errorf("stored %x, want %x", got, tt.want)
 			}

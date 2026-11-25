@@ -14,8 +14,9 @@ type Quad struct {
 	// X and Y are the top-left pixel of the quad, both even.
 	X, Y int
 
-	// Covered marks the lanes whose pixel center the triangle covers and
-	// that lie in the rasterized bounds: bit i for lane i.
+	// Covered marks the lanes with a sample the triangle covers that lie in
+	// the rasterized bounds, bit i for lane i: those whose fragment's
+	// Coverage is not 0.
 	Covered uint8
 
 	// Frags holds every lane's fragment, the uncovered lanes included: a
@@ -32,9 +33,12 @@ type QuadCallback func(q *Quad)
 
 // QuadRasterizer rasterizes triangles in quads. It keeps one quad and its
 // attribute storage, so a draw that reuses one QuadRasterizer for all its
-// triangles allocates nothing per fragment. The zero value is ready to use;
-// it is not safe for concurrent use.
+// triangles allocates nothing per fragment. The zero value is ready to use,
+// at one sample per pixel; it is not safe for concurrent use.
 type QuadRasterizer struct {
+	// Multisample is the samples coverage is tested at.
+	Multisample MultisampleState
+
 	quad  Quad
 	attrs []float32
 }
@@ -47,10 +51,11 @@ func (r *QuadRasterizer) Rasterize(tri *Triangle, viewport Viewport, callback Qu
 	if it.IsDegenerate() {
 		return
 	}
-	startX := maxInt(viewport.X, it.minX)
-	endX := minInt(viewport.X+viewport.Width, it.maxX)
-	startY := maxInt(viewport.Y, it.minY)
-	endY := minInt(viewport.Y+viewport.Height, it.maxY)
+	minX, minY, maxX, maxY := it.pixelBounds(r.Multisample)
+	startX := maxInt(viewport.X, minX)
+	endX := minInt(viewport.X+viewport.Width, maxX)
+	startY := maxInt(viewport.Y, minY)
+	endY := minInt(viewport.Y+viewport.Height, maxY)
 	if startX >= endX || startY >= endY {
 		return
 	}
@@ -68,7 +73,7 @@ func (r *QuadRasterizer) Rasterize(tri *Triangle, viewport Viewport, callback Qu
 	for qy := y0; qy < endY; qy += 2 {
 		it.setRowPixel(x0, qy)
 		for qx := x0; qx < endX; qx += 2 {
-			covered := it.quadCoverage() & laneBounds(qx, qy, startX, endX, startY, endY)
+			covered := it.quadCoverage(&q.Frags, r.Multisample, laneBounds(qx, qy, startX, endX, startY, endY))
 			if covered != 0 {
 				q.X, q.Y, q.Covered = qx, qy, covered
 				for lane := range QuadLanes {
@@ -110,13 +115,19 @@ func (it *IncrementalTriangle) laneEdges(lane int) (w0, w1, w2 int64) {
 	return w0, w1, w2
 }
 
-// quadCoverage marks the lanes of the quad whose top-left pixel the edges
-// are at that the triangle covers (see IsInside).
-func (it *IncrementalTriangle) quadCoverage() uint8 {
+// quadCoverage marks the lanes in bounds of the quad whose top-left pixel
+// the edges are at with a sample the triangle covers (see IsInside), at the
+// samples of multisample, and stores each lane's samples in its fragment's Coverage,
+// none for a lane outside bounds.
+func (it *IncrementalTriangle) quadCoverage(frags *[QuadLanes]Fragment, multisample MultisampleState, bounds uint8) uint8 {
 	var m uint8
 	for lane := range QuadLanes {
-		w0, w1, w2 := it.laneEdges(lane)
-		if it.E12.covers(w0) && it.E20.covers(w1) && it.E01.covers(w2) {
+		frags[lane].Coverage = 0
+		if bounds&(1<<lane) != 0 {
+			w0, w1, w2 := it.laneEdges(lane)
+			frags[lane].Coverage = it.coverage(w0, w1, w2, multisample)
+		}
+		if frags[lane].Coverage != 0 {
 			m |= 1 << lane
 		}
 	}

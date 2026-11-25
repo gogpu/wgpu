@@ -325,3 +325,38 @@ func (it *IncrementalTriangle) IsDegenerate() bool {
 func (it *IncrementalTriangle) Area() float32 {
 	return float32(float64(it.sign*it.area) / (subPixelOne * subPixelOne))
 }
+
+// coverage answers the samples of the pixel whose center has the edge values
+// w0 (E12), w1 (E20) and w2 (E01) that the triangle covers, masked by
+// multisample.
+// Exact: a sample's edge value is the center's plus the edge's coefficients
+// times the sample's fixed-point offset.
+func (it *IncrementalTriangle) coverage(w0, w1, w2 int64, multisample MultisampleState) uint8 {
+	mask := multisample.sampleMask()
+	if multisample.sampleCount() == 1 {
+		if it.E12.covers(w0) && it.E20.covers(w1) && it.E01.covers(w2) {
+			return mask
+		}
+		return 0
+	}
+	var covered uint8
+	for s, offset := range samplePositions4 {
+		if it.E12.covers(w0+it.E12.a*offset[0]+it.E12.b*offset[1]) &&
+			it.E20.covers(w1+it.E20.a*offset[0]+it.E20.b*offset[1]) &&
+			it.E01.covers(w2+it.E01.a*offset[0]+it.E01.b*offset[1]) {
+			covered |= 1 << s
+		}
+	}
+	return covered & mask
+}
+
+// pixelBounds answers the pixels [minX, maxX) x [minY, maxY) that can have a
+// sample inside the triangle's snapped bounding box: those whose center lies
+// in it, and with 4 samples, which lie less than half a pixel from the
+// center, one more pixel on each side.
+func (it *IncrementalTriangle) pixelBounds(multisample MultisampleState) (minX, minY, maxX, maxY int) {
+	if multisample.sampleCount() == 1 {
+		return it.minX, it.minY, it.maxX, it.maxY
+	}
+	return it.minX - 1, it.minY - 1, it.maxX + 1, it.maxY + 1
+}

@@ -46,6 +46,15 @@
 // and shared vertices are drawn once, with either winding, on every path
 // (Rasterize, RasterizeTile and the tile test used for binning).
 //
+// # Multisampling
+//
+// A pipeline of 4 samples (SetMultisampleState) tests each of a pixel's
+// standard sample positions, (0.375, 0.125), (0.875, 0.375), (0.125, 0.625)
+// and (0.625, 0.875), under the same top-left rule, and generates one
+// fragment for a pixel with any sample covered, interpolated at the pixel
+// center; Fragment.Coverage names the samples it writes. Depth and stencil
+// are tested once per pixel.
+//
 // # Depth Testing
 //
 // The depth buffer stores float32 values in the range [0, 1], where 0 is the near
