@@ -283,7 +283,7 @@ type PipelineExecutableStatisticValueKHR [8]byte         // Union: b32, i64, u64
 type PerformanceCounterResultKHR [8]byte                 // Union: int32, int64, uint32, uint64, float32, float64
 type DeviceOrHostAddressKHR uintptr                      // Union: deviceAddress or hostAddress
 type DeviceOrHostAddressConstKHR uintptr                 // Union: deviceAddress or hostAddress
-type AccelerationStructureGeometryDataKHR [64]byte       // Union: triangles, aabbs, instances
+type AccelerationStructureGeometryDataKHR [8]uint64      // Union: triangles, aabbs, instances (8-byte aligned)
 type AccelerationStructureMotionInstanceDataNV [144]byte // Union: static, matrix, srt instances
 type ClusterAccelerationStructureOpInputNV uintptr       // Union: various cluster inputs
 type DescriptorDataEXT uintptr                           // Union: descriptor data variants

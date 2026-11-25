@@ -115,6 +115,14 @@ type extendedFeatureSupport struct {
 	// subgroup is VkPhysicalDeviceSubgroupProperties, read through
 	// vkGetPhysicalDeviceProperties2 on Vulkan 1.1 and later.
 	subgroup *vk.PhysicalDeviceSubgroupProperties
+	// Ray query support (raytracing_caps.go): the feature structs, chained
+	// only on a Vulkan 1.2 device with the ray query extensions, and
+	// VkPhysicalDeviceAccelerationStructurePropertiesKHR, read only when
+	// rayQuery reports support.
+	bufferDeviceAddress   *vk.PhysicalDeviceBufferDeviceAddressFeatures
+	accelerationStructure *vk.PhysicalDeviceAccelerationStructureFeaturesKHR
+	rayQueryFeatures      *vk.PhysicalDeviceRayQueryFeaturesKHR
+	asProperties          *vk.PhysicalDeviceAccelerationStructurePropertiesKHR
 }
 
 // subgroupFeatures returns the subgroup features as Rust wgpu-hal decides
@@ -316,6 +324,7 @@ func (s *extendedFeatureSupport) shaderCapabilityFeatures() gputypes.Features {
 	set(gputypes.FeatureShaderBarycentrics, s.fragmentBarycentrics())
 	set(gputypes.FeatureShaderPerVertex, s.fragmentBarycentrics())
 	set(gputypes.FeatureShaderDrawIndex, s.drawParameters())
+	set(gputypes.FeatureRayQuery, s.rayQuery())
 	return result | s.subgroupFeatures()
 }
 
@@ -432,6 +441,7 @@ func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, props *vk.Phy
 		next = &demote.PNext
 		s.demote = &demote
 	}
+	next = s.chainRayQueryFeatures(next)
 	var sizeControl vk.PhysicalDeviceSubgroupSizeControlFeatures
 	if s.hasSubgroupSizeControl() {
 		sizeControl.SType = vk.StructureTypePhysicalDeviceSubgroupSizeControlFeatures
@@ -442,6 +452,7 @@ func (i *Instance) queryExtendedFeatures(device vk.PhysicalDevice, props *vk.Phy
 		i.cmds.GetPhysicalDeviceFeatures2(device, &features2)
 	}
 	s.subgroup = i.subgroupProperties(device, s)
+	s.asProperties = i.accelerationStructureProperties(device, s)
 	return s
 }
 
@@ -520,7 +531,8 @@ const enableableFeatures = gputypes.Features(gputypes.FeatureShaderF16) |
 	gputypes.Features(gputypes.FeatureShaderDrawIndex) |
 	gputypes.Features(gputypes.FeatureSubgroupOperations) |
 	gputypes.Features(gputypes.FeatureSubgroupBarrier) |
-	gputypes.Features(gputypes.FeatureSubgroupVertex)
+	gputypes.Features(gputypes.FeatureSubgroupVertex) |
+	gputypes.Features(gputypes.FeatureRayQuery)
 
 // unsupportedRequest returns the requested features Open enables that the
 // adapter does not offer.
@@ -550,6 +562,9 @@ type deviceFeatureChain struct {
 	sizeControl vk.PhysicalDeviceSubgroupSizeControlFeatures
 	integerDot  vk.PhysicalDeviceShaderIntegerDotProductFeatures
 	demote      vk.PhysicalDeviceShaderDemoteToHelperInvocationFeatures
+	// Ray query (deviceFeatureChain.enableRayQuery).
+	accelerationStructure vk.PhysicalDeviceAccelerationStructureFeaturesKHR
+	rayQuery              vk.PhysicalDeviceRayQueryFeaturesKHR
 }
 
 // enable fills c with the features to create the device with and returns
@@ -571,6 +586,9 @@ func (s *extendedFeatureSupport) enable(c *deviceFeatureChain, requested gputype
 		requested.Contains(gputypes.FeatureShaderPerVertex)
 	floatAtomics := requested.Contains(gputypes.FeatureShaderFloat32Atomic)
 	drawIndex := requested.Contains(gputypes.FeatureShaderDrawIndex)
+	// unsupportedRequest refuses ray query without rayQuery(), which needs
+	// Vulkan 1.2, so bufferDeviceAddress always goes in the Vulkan 1.2 struct.
+	rayQuery := requested.Contains(gputypes.FeatureRayQuery)
 	vulkan12 := s.apiVersion >= vkMakeVersion(1, 2, 0)
 
 	c.core = s.core
@@ -585,8 +603,9 @@ func (s *extendedFeatureSupport) enable(c *deviceFeatureChain, requested gputype
 		*tail = (*uintptr)(ptr)
 		tail = next
 	}
-	if timelineSemaphore || (vulkan12 && (f16 || int64Atomics)) {
+	if timelineSemaphore || (vulkan12 && (f16 || int64Atomics || rayQuery)) {
 		c.vulkan12.TimelineSemaphore = boolToVk(timelineSemaphore)
+		c.vulkan12.BufferDeviceAddress = boolToVk(vulkan12 && rayQuery)
 		c.vulkan12.ShaderFloat16 = boolToVk(vulkan12 && f16)
 		c.vulkan12.ShaderBufferInt64Atomics = boolToVk(vulkan12 && int64Atomics)
 		c.vulkan12.ShaderSharedInt64Atomics = boolToVk(vulkan12 && int64Atomics)
@@ -627,6 +646,9 @@ func (s *extendedFeatureSupport) enable(c *deviceFeatureChain, requested gputype
 		} else {
 			extensions = append(extensions, extShaderDrawParameters+"\x00")
 		}
+	}
+	if rayQuery {
+		extensions = append(extensions, c.enableRayQuery(link)...)
 	}
 	// Robustness is enabled wherever supported, whatever was requested, as
 	// Rust does: the SPIR-V bounds-check policies rely on it (spirvOptions).

@@ -29,6 +29,9 @@ type DescriptorCounts struct {
 	UniformTexelBuffer    uint32
 	StorageTexelBuffer    uint32
 	InputAttachments      uint32
+	// AccelerationStructures counts VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR
+	// descriptors. Only non-zero on devices with FeatureRayQuery enabled.
+	AccelerationStructures uint32
 }
 
 // Total returns the total number of descriptors.
@@ -36,7 +39,8 @@ func (c DescriptorCounts) Total() uint32 {
 	return c.Samplers + c.SampledImages + c.StorageImages +
 		c.UniformBuffers + c.StorageBuffers +
 		c.UniformBuffersDynamic + c.StorageBuffersDynamic +
-		c.UniformTexelBuffer + c.StorageTexelBuffer + c.InputAttachments
+		c.UniformTexelBuffer + c.StorageTexelBuffer + c.InputAttachments +
+		c.AccelerationStructures
 }
 
 // IsEmpty returns true if no descriptors are needed.
@@ -47,16 +51,17 @@ func (c DescriptorCounts) IsEmpty() bool {
 // Multiply multiplies all counts by a factor.
 func (c DescriptorCounts) Multiply(factor uint32) DescriptorCounts {
 	return DescriptorCounts{
-		Samplers:              c.Samplers * factor,
-		SampledImages:         c.SampledImages * factor,
-		StorageImages:         c.StorageImages * factor,
-		UniformBuffers:        c.UniformBuffers * factor,
-		StorageBuffers:        c.StorageBuffers * factor,
-		UniformBuffersDynamic: c.UniformBuffersDynamic * factor,
-		StorageBuffersDynamic: c.StorageBuffersDynamic * factor,
-		UniformTexelBuffer:    c.UniformTexelBuffer * factor,
-		StorageTexelBuffer:    c.StorageTexelBuffer * factor,
-		InputAttachments:      c.InputAttachments * factor,
+		Samplers:               c.Samplers * factor,
+		SampledImages:          c.SampledImages * factor,
+		StorageImages:          c.StorageImages * factor,
+		UniformBuffers:         c.UniformBuffers * factor,
+		StorageBuffers:         c.StorageBuffers * factor,
+		UniformBuffersDynamic:  c.UniformBuffersDynamic * factor,
+		StorageBuffersDynamic:  c.StorageBuffersDynamic * factor,
+		UniformTexelBuffer:     c.UniformTexelBuffer * factor,
+		StorageTexelBuffer:     c.StorageTexelBuffer * factor,
+		InputAttachments:       c.InputAttachments * factor,
+		AccelerationStructures: c.AccelerationStructures * factor,
 	}
 }
 
@@ -65,6 +70,20 @@ type DescriptorPool struct {
 	handle        vk.DescriptorPool
 	maxSets       uint32
 	allocatedSets uint32
+	// optional records which of the descriptor types that not every pool
+	// has (dynamic buffers, acceleration structures) this pool was created
+	// with; only non-zero means present.
+	optional DescriptorCounts
+}
+
+// supports reports whether the pool has pool sizes for every optional
+// descriptor type counts needs. Allocating a set with a type the pool lacks
+// must fail with VK_ERROR_OUT_OF_POOL_MEMORY, but with VK_KHR_maintenance1
+// some drivers (NVIDIA) succeed anyway, which the validation layers flag.
+func (p *DescriptorPool) supports(counts DescriptorCounts) bool {
+	return (counts.UniformBuffersDynamic == 0 || p.optional.UniformBuffersDynamic > 0) &&
+		(counts.StorageBuffersDynamic == 0 || p.optional.StorageBuffersDynamic > 0) &&
+		(counts.AccelerationStructures == 0 || p.optional.AccelerationStructures > 0)
 }
 
 // DescriptorAllocator manages descriptor pool allocation.
@@ -140,7 +159,7 @@ func (a *DescriptorAllocator) Allocate(layout vk.DescriptorSetLayout, counts Des
 
 	// Try to allocate from existing pools
 	for _, pool := range a.pools {
-		if pool.allocatedSets >= pool.maxSets {
+		if pool.allocatedSets >= pool.maxSets || !pool.supports(counts) {
 			continue
 		}
 
@@ -238,6 +257,15 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 		{Type: vk.DescriptorTypeUniformBufferDynamic, DescriptorCount: max(counts.UniformBuffersDynamic*poolSize, poolSize/4)},
 		{Type: vk.DescriptorTypeStorageBufferDynamic, DescriptorCount: max(counts.StorageBuffersDynamic*poolSize, poolSize/4)},
 	}
+	// Acceleration structure descriptors are only valid with
+	// VK_KHR_acceleration_structure enabled, so only pools created for an
+	// AS-using layout include them (like the dynamic buffer types above).
+	if counts.AccelerationStructures > 0 {
+		poolSizes = append(poolSizes, vk.DescriptorPoolSize{
+			Type:            vk.DescriptorTypeAccelerationStructureKhr,
+			DescriptorCount: counts.AccelerationStructures * poolSize,
+		})
+	}
 
 	createInfo := vk.DescriptorPoolCreateInfo{
 		SType: vk.StructureTypeDescriptorPoolCreateInfo,
@@ -258,6 +286,11 @@ func (a *DescriptorAllocator) createPool(counts DescriptorCounts) (*DescriptorPo
 		handle:        pool,
 		maxSets:       poolSize,
 		allocatedSets: 0,
+		optional: DescriptorCounts{
+			UniformBuffersDynamic:  counts.UniformBuffersDynamic,
+			StorageBuffersDynamic:  counts.StorageBuffersDynamic,
+			AccelerationStructures: counts.AccelerationStructures,
+		},
 	}
 	a.setObjectName(vk.ObjectTypeDescriptorPool, uint64(pool),
 		fmt.Sprintf("DescriptorPool(%d)", len(a.pools)))

@@ -242,7 +242,8 @@ var (
 	// Returns uint64 (device address), not VkResult.
 	SigU64HandlePtr types.CallInterface
 
-	// void(handle, handle, ptr, ptr, ptr) - vkGetAccelerationStructureBuildSizesKHR
+	// void(handle, u32, ptr, ptr, ptr) - vkGetAccelerationStructureBuildSizesKHR
+	// (the second argument is a VkAccelerationStructureBuildTypeKHR enum).
 	SigVoidHandleHandlePtrPtrPtr types.CallInterface
 
 	// void(handle, handle, ptr, ptr) - vkGetImageSubresourceLayout
@@ -776,9 +777,9 @@ func InitSignatures() error {
 		return err
 	}
 
-	// void(handle, handle, ptr, ptr, ptr) - vkGetAccelerationStructureBuildSizesKHR
+	// void(handle, u32, ptr, ptr, ptr) - vkGetAccelerationStructureBuildSizesKHR
 	err = ffi.PrepareCallInterface(&SigVoidHandleHandlePtrPtrPtr, types.DefaultCall, voidRet,
-		[]*types.TypeDescriptor{u64, u64, ptr, ptr, ptr})
+		[]*types.TypeDescriptor{u64, u32, ptr, ptr, ptr})
 	if err != nil {
 		return err
 	}

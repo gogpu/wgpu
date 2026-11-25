@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"runtime"
 	"unsafe"
 
 	"github.com/gogpu/gputypes"
@@ -125,8 +126,9 @@ func mapAccelerationStructureCopyMode(mode gputypes.AccelerationStructureCopyMod
 // mapAccelerationStructureUsageToBarrier converts HAL AS usage to Vulkan pipeline stage
 // and access flags for a memory barrier.
 // Reference: Rust conv::map_acceleration_structure_usage_to_barrier (conv.rs:1061-1103).
-// Simplified: we do not distinguish ray query vs RT pipeline features — we always emit
-// the shader stage flags if SHADER_INPUT is set.
+// Ray tracing pipelines aren't supported, so SHADER_INPUT maps to the ray query
+// shader stages only (RAY_TRACING_SHADER_BIT_KHR is invalid without
+// VK_KHR_ray_tracing_pipeline).
 func mapAccelerationStructureUsageToBarrier(usage hal.AccelerationStructureUses) (vk.PipelineStageFlags, vk.AccessFlags) {
 	var stages vk.PipelineStageFlags
 	var access vk.AccessFlags
@@ -144,12 +146,10 @@ func mapAccelerationStructureUsageToBarrier(usage hal.AccelerationStructureUses)
 		access |= vk.AccessFlags(vk.AccessAccelerationStructureWriteBitKhr)
 	}
 	if usage&hal.AccelerationStructureUsesShaderInput != 0 {
-		// Emit both compute/vertex/fragment stages and RT shader stage
-		// so the barrier is correct regardless of which shader types read the AS.
+		// Ray queries can run in any graphics or compute shader stage.
 		stages |= vk.PipelineStageFlags(vk.PipelineStageComputeShaderBit |
 			vk.PipelineStageVertexShaderBit |
 			vk.PipelineStageFragmentShaderBit)
-		stages |= vk.PipelineStageFlags(vk.PipelineStageRayTracingShaderBitKhr)
 		access |= vk.AccessFlags(vk.AccessAccelerationStructureReadBitKhr)
 	}
 	if usage&hal.AccelerationStructureUsesCopySrc != 0 {
@@ -344,6 +344,8 @@ func (d *Device) GetAccelerationStructureBuildSizes(desc *hal.GetAccelerationStr
 			&sizeInfo,
 		)
 	}
+	runtime.KeepAlive(geometries)
+	runtime.KeepAlive(primitiveCounts)
 
 	return hal.AccelerationStructureBuildSizes{
 		AccelerationStructureSize: uint64(sizeInfo.AccelerationStructureSize),
@@ -396,9 +398,14 @@ func (d *Device) buildGeometryInfosForSizeQuery(
 
 			// If USE_TRANSFORM flag is set AND a transform buffer is provided,
 			// set a non-zero address so the spec knows transforms are used for sizing.
+			// The size query ignores addresses except to check transformData
+			// for NULL, so core passes no buffer and any non-zero value works.
 			if desc.Flags.Contains(gputypes.ASFlagUseTransform) && tri.Transform != nil {
-				triangleData.TransformData = vk.DeviceOrHostAddressConstKHR(
-					d.getBufferDeviceAddress(tri.Transform.Buffer))
+				transformAddress := uint64(1)
+				if tri.Transform.Buffer != nil {
+					transformAddress = d.getBufferDeviceAddress(tri.Transform.Buffer)
+				}
+				triangleData.TransformData = vk.DeviceOrHostAddressConstKHR(transformAddress)
 			}
 
 			primCount := tri.VertexCount / 3
@@ -538,15 +545,17 @@ func (e *CommandEncoder) BuildAccelerationStructures(descriptors []hal.BuildAcce
 			continue
 		}
 
-		geometries, ranges := e.buildGeometryInfosForBuild(&desc)
-
-		geometriesStorage = append(geometriesStorage, geometries)
-		rangesStorage = append(rangesStorage, ranges)
-
+		// Skip before appending to the storage slices, so that index i in
+		// geometriesStorage/rangesStorage always matches geometryInfos[i].
 		dstAS, _ := desc.DestinationAccelerationStructure.(*AccelerationStructure)
 		if dstAS == nil {
 			continue
 		}
+
+		geometries, ranges := e.buildGeometryInfosForBuild(&desc)
+
+		geometriesStorage = append(geometriesStorage, geometries)
+		rangesStorage = append(rangesStorage, ranges)
 
 		scratchAddr := e.device.getBufferDeviceAddress(desc.ScratchBuffer)
 
@@ -605,6 +614,12 @@ func (e *CommandEncoder) BuildAccelerationStructures(descriptors []hal.BuildAcce
 		&geometryInfos[0],
 		&rangePtrs[0],
 	)
+
+	// The driver reads these through raw pointers during the call.
+	runtime.KeepAlive(geometryInfos)
+	runtime.KeepAlive(geometriesStorage)
+	runtime.KeepAlive(rangesStorage)
+	runtime.KeepAlive(rangePtrs)
 }
 
 // buildGeometryInfosForBuild converts a single BuildAccelerationStructureDescriptor's
