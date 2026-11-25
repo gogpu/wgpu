@@ -383,11 +383,14 @@ import "github.com/gogpu/wgpu"
 - Depth test (all 8 compare functions)
 - Stencil test (all 8 operations, front and back faces)
 - Blending (13 factors without dual-source, 5 operations)
+- 4-sample multisampled colour: coverage at the standard sample positions, one shade per pixel, per-sample
+  blending under the pipeline's sample mask, and a resolve that averages in linear (sRGB decoded and re-encoded)
 - BC1-BC7 and ETC2/EAC texture sampling (`texture-compression-bc`, `texture-compression-etc2`)
 - Encoded commands run at `Queue.Submit`
 - **SPIR-V interpreter** — executes vertex/fragment/compute shaders on CPU. Designed for shader debugging, CI/CD testing, and GPU-less environments — **not for production rendering** (interpreted, much slower than JIT software renderers such as SwiftShader).
 
-**Known gaps:** no ASTC; no `depth-clip-control` or `frag_depth`.
+**Known gaps:** no ASTC; no `depth-clip-control` or `frag_depth`; multisampling is colour-only — multisampled
+depth/stencil, alpha to coverage and sampling a multisampled texture are refused with an error.
 
 **Shader memory limits:** a shader's Private variables may total 64 KiB, the Function variables of one function
 64 KiB, its Workgroup variables 1 MiB, its composite and null constants 1 MiB, and any type at most `maxBufferSize`

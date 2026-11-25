@@ -89,7 +89,7 @@
 ✅ **Metal IOSurface leak fix** — retain/release balance, presentsWithTransaction, frameSemaphore, UMA StorageModeShared (v0.30.10, @lkmavi)
 ✅ **Software DrawIndexed** — index buffer resolution (uint16/uint32, baseVertex), vertex fetch integration (v0.30.5, @samyfodil)
 ✅ **Software R8/format-aware textures** — `formatBytesPerPixel` → `gputypes.BlockCopySize()` canonical (87 formats, Rust parity). Format-aware copy commands, Clear, readTexel (v0.30.5-v0.30.7)
-✅ **Software MSAA honest reporting** — removed false Multisample/MultisampleResolve capabilities, CreateTexture rejects SampleCount>1 (v0.30.8)
+✅ **Software MSAA honest reporting** — removed false Multisample/MultisampleResolve capabilities, CreateTexture rejects SampleCount>1 (v0.30.8) — **superseded in v0.35.6**: colour multisampling is implemented (4 samples, standard positions, per-sample blending, linear resolve); multisampled depth/stencil stays refused
 ✅ **Software BGRA swizzle on alpha blending** — framebuffer readback R↔B swap for Windows BGRA8 surfaces (v0.30.8)
 ✅ **Software buffer binding offsets** — CreateBindGroup stores Offset/Size, SetBindGroup accepts dynamicOffsets (v0.30.8)
 ✅ **GLES LockOSThread in integration tests** — EGL context thread affinity fix, eliminates CI flaky (v0.30.7)
@@ -138,7 +138,7 @@
 | Metal | macOS | ✅ Stable — community-tested on Apple Silicon; the v0.34.x changes have not been run on a Mac yet |
 | DX12 | Windows | ✅ Stable — TDR fixed, PendingWrites, deferred destruction |
 | GLES | Windows, Linux | ✅ Stable — hidden window (Win), instance-level EGL (Linux), FFI pointer fix (@lkmavi), GLSL version propagation (GL 4.1+ verified), runtime binding fallback (GL <4.2), Wayland EGL surfaceless/pbuffer, tiered config (WindowBit-only for Wayland), fence sync, compute barriers |
-| Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/Wayland SHM/CG+Metal), SPIR-V interpreter. Wayland: display wrapper pattern, roundtrip_queue, triple-buffer. |
+| Software | Windows, Linux, macOS | ✅ Stable — windowed presentation (GDI/X11/Wayland SHM/CG+Metal), SPIR-V interpreter, colour MSAA (4 samples, v0.35.6). Wayland: display wrapper pattern, roundtrip_queue, triple-buffer. |
 
 → **See [CHANGELOG.md](CHANGELOG.md) for detailed per-version notes**
 

@@ -22,6 +22,7 @@ and [core surface creation](https://github.com/gfx-rs/wgpu/blob/4cbe6232b2d7c289
 | Go symbol | Rust analogue or explicit Go adaptation | Ownership and error contract |
 |-----------|------------------------------------------|------------------------------|
 | `ErrInvalidSurfaceTarget` | `CreateSurfaceErrorKind::RawHandle`, represented as an `errors.Is` sentinel because Go has no raw-window-handle error type | Returned for an empty target, typed-nil provider, unknown kind, or missing required handle before a backend call |
+| `ErrSurfaceZeroArea` | Explicit Go adaptation: the HAL's `hal.ErrZeroArea`, which the backends already returned, made public after `hal` became internal in v0.35.5 | Returned by `(*Surface).Configure` when the configuration's width or height is zero, or when the backend sees the surface at zero size (Vulkan can while a window is minimized); match with `errors.Is` |
 | `ErrUnsupportedSurfaceTarget` | `CreateSurfaceError::FailedToCreateSurfaceForAnyBackend`, split from malformed-input errors so callers can distinguish platform support | Returned when an implementation or every enabled native backend rejects the target kind; backend detail remains wrapped |
 | `SurfaceTarget` | Safe `SurfaceTarget<'window>` | A provider is sampled exactly once; the provider, not merely its raw result, is retained through backend destruction |
 | `SurfaceTarget.SurfaceTarget` | `Into<SurfaceTarget>` followed by raw-handle extraction | May return an application error; its identity is preserved with wrapping; it is never called after instance release |
