@@ -68,27 +68,29 @@ const (
 )
 
 // --------------------------------------------------------------------------
-// MTLAccelerationStructureInstanceDescriptor (64 bytes)
+// MTLIndirectAccelerationStructureInstanceDescriptor (72 bytes)
 // --------------------------------------------------------------------------
 //
-// Metal defines this struct for indirect TLAS instances:
+// The TLAS is built with the indirect instance layout. Each instance names its
+// BLAS by GPU resource ID, so the TLAS descriptor needs no list of BLASes.
+// (The default 64-byte layout names a BLAS by index into the descriptor's
+// instancedAccelerationStructures array, which the HAL has no way to pass; a
+// TLAS built that way without the array is empty and every ray misses.)
 //
-//	struct MTLAccelerationStructureInstanceDescriptor {
-//	    MTLPackedFloat4x3 transformationMatrix;  // 48 bytes
-//	    uint32_t          options;               // 4 bytes (MTLAccelerationStructureInstanceOptions)
-//	    uint32_t          mask;                  // 4 bytes
-//	    uint32_t          intersectionFunctionTableOffset; // 4 bytes
-//	    uint32_t          accelerationStructureIndex;      // 4 bytes
+//	struct MTLIndirectAccelerationStructureInstanceDescriptor {
+//	    MTLPackedFloat4x3 transformationMatrix;          // 48 bytes
+//	    uint32_t          options;                       // offset 48
+//	    uint32_t          mask;                          // offset 52
+//	    uint32_t          intersectionFunctionTableOffset; // offset 56
+//	    uint32_t          userID;                        // offset 60
+//	    MTLResourceID     accelerationStructureID;       // offset 64, 8 bytes
 //	};
 //
-// Total = 64 bytes.
-//
-// Rust wgpu uses MTLIndirectAccelerationStructureInstanceDescriptor with
-// gpuResourceID and userID fields. The indirect variant is 112 bytes. We use
-// the standard 64-byte layout matching the non-indirect descriptor. The core
-// layer selects the appropriate layout via RawTlasInstanceSize.
+// Total = 72 bytes, 8-byte aligned (checked with sizeof and offsetof against
+// the SDK header). The BLAS must be resident when a shader traces the TLAS:
+// the encoder that dispatches it calls useResource: on each BLAS.
 
-const mtlASInstanceDescriptorSize = 64
+const mtlASInstanceDescriptorSize = 72
 
 // --------------------------------------------------------------------------
 // Build sizes query
@@ -191,9 +193,10 @@ func mapInstanceDescriptor(instances *hal.AccelerationStructureInstances) ID {
 	}
 	Retain(desc)
 
-	// Use indirect instance layout (matches Rust wgpu).
+	// Indirect layout: instances name their BLAS by GPU resource ID (matches
+	// Rust wgpu; see mtlASInstanceDescriptorSize).
 	_ = MsgSend(desc, Sel("setInstanceDescriptorType:"),
-		uintptr(MTLAccelerationStructureInstanceDescriptorTypeDefault))
+		uintptr(MTLAccelerationStructureInstanceDescriptorTypeIndirect))
 	_ = MsgSend(desc, Sel("setInstanceCount:"), uintptr(instances.Count))
 
 	if instances.Buffer != nil {
@@ -347,8 +350,8 @@ func mapAABBsDescriptor(aabbs []hal.AccelerationStructureAABBs) ID {
 // TlasInstance → backend-packed bytes (64 bytes)
 // --------------------------------------------------------------------------
 
-// tlasInstanceToBytes converts a HAL TlasInstance to Metal's 64-byte
-// MTLAccelerationStructureInstanceDescriptor layout.
+// tlasInstanceToBytes converts a HAL TlasInstance to Metal's 72-byte
+// MTLIndirectAccelerationStructureInstanceDescriptor layout.
 //
 // Layout (little-endian, tightly packed):
 //
@@ -356,7 +359,8 @@ func mapAABBsDescriptor(aabbs []hal.AccelerationStructureAABBs) ID {
 //	[48..52)  uint32 options  (MTLAccelerationStructureInstanceOptions, always 0 for now)
 //	[52..56)  uint32 mask
 //	[56..60)  uint32 intersectionFunctionTableOffset
-//	[60..64)  uint32 accelerationStructureIndex
+//	[60..64)  uint32 userID (TlasInstance.CustomData)
+//	[64..72)  MTLResourceID accelerationStructureID (TlasInstance.BlasAddress)
 //
 // The transform is a 3x4 matrix stored column-major in 4 packed float3 columns.
 // HAL TlasInstance.Transform is row-major [m00,m01,m02,m03, m10,m11,m12,m13, m20,m21,m22,m23].
@@ -392,10 +396,12 @@ func tlasInstanceToBytes(instance hal.TlasInstance) []byte {
 	// intersectionFunctionTableOffset = ShaderBindingTableRecordOffset
 	binary.LittleEndian.PutUint32(buf[56:60], instance.ShaderBindingTableRecordOffset)
 
-	// accelerationStructureIndex — derived from BlasAddress. Metal uses an index
-	// into the instance descriptor's acceleration structure list, not a raw GPU
-	// address. The core layer encodes the BLAS index in BlasAddress.
-	binary.LittleEndian.PutUint32(buf[60:64], uint32(instance.BlasAddress))
+	// userID
+	binary.LittleEndian.PutUint32(buf[60:64], instance.CustomData)
+
+	// accelerationStructureID: the BLAS's GPU resource ID, which is what
+	// Device.GetAccelerationStructureDeviceAddress returns.
+	binary.LittleEndian.PutUint64(buf[64:72], instance.BlasAddress)
 
 	return buf
 }
