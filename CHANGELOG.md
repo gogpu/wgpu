@@ -5,7 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.35.6] - 2026-11-25
+
+### Added
+
+- **Software backend: 4-sample multisampled color** (#453, by @dvoyni). Coverage is tested at the standard sample
+  positions, a pixel is shaded once at its center, the fragment is blended into each sample it covers under the
+  pipeline's sample mask, and the resolve averages a texel's samples in linear (sRGB decoded and re-encoded).
+  Multisampled depth/stencil, alpha to coverage and sampling a multisampled texture are refused with an error.
+- **`ErrSurfaceZeroArea`** (#454, by @dvoyni). `Surface.Configure` returns it when the surface's width or height is
+  zero, or when the backend sees the window at zero size, as Vulkan can while a window is minimized — so a caller
+  can tell it from a failed configure with `errors.Is`.
+
+### Changed
+
+- **Dependency: gpucontext v0.32.1** (#458). Carries gputypes v0.9.2; no public-surface change and no go-line change
+  (wgpu stays `go 1.25.0`, x/sys stays v0.47.0).
+- **Contributors no longer edit `CHANGELOG.md`** (#457). The maintainer writes the entry under `[Unreleased]` with the
+  author's credit at merge — the recurring conflict on the shared section is gone.
 
 ### Fixed
 
