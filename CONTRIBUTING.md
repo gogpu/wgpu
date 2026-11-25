@@ -128,7 +128,10 @@ Components: `core`, `hal`, `vulkan`, `metal`, `dx12`, `gles`, `software`, `noop`
 - Keep PRs focused on a single change
 - Reference the Rust wgpu equivalent for non-trivial HAL/core changes
 - Add tests for new functionality
-- Update documentation if needed (CHANGELOG, docs/, README)
+- Update the docs and README your change makes stale
+- **Don't edit `CHANGELOG.md`.** The maintainer writes the entry under `[Unreleased]` with your credit
+  (`(#123, by @you)`) when merging, so entries are written once and in one voice — and no two PRs conflict
+  on the same `[Unreleased]` section. Write the user-visible summary in your PR description instead.
 - Ensure all CI checks pass (build across three OSes and windows/386, cross-compile for browser and the Rust binding, tests with the race detector, GLES integration, lint on windows/amd64 and darwin/arm64 as well as linux, formatting, deps, Android preview)
 - Reference related issues
 
