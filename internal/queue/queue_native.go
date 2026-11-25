@@ -171,6 +171,10 @@ func (q *Queue) submitLocked(commandBuffers []*encoder.CommandBuffer) (uint64, e
 			return 0, err
 		}
 	}
+	if err := q.validateAccelerationStructureActions(commandBuffers); err != nil {
+		q.device.ReportSubmitValidationError(err.Error())
+		return 0, err
+	}
 
 	// Flush pending writes (the domain takes its own lock), then go on to
 	// HAL submit without it.
@@ -276,6 +280,17 @@ func (q *Queue) postSubmit(subIdx uint64, commandBuffers []*encoder.CommandBuffe
 	}
 	if len(allRefs) > 0 {
 		dq.TrackSubmission(subIdx, allRefs)
+	}
+
+	// Free acceleration structure scratch and staging buffers after the GPU
+	// completes this submission (Rust TempResource).
+	for _, cb := range commandBuffers {
+		if cb == nil {
+			continue
+		}
+		if destroy := cb.Core().TakeTempBufferDestroyer(); destroy != nil {
+			dq.Defer(subIdx, "ASTempBuffers", destroy)
+		}
 	}
 
 	// Schedule HAL encoder recycling after GPU completion (BUG-DX12-004).
@@ -1082,4 +1097,23 @@ func releaseSubmittedInternal(commandBuffers []*encoder.CommandBuffer) {
 			cb.ReleaseInternal()
 		}
 	}
+}
+
+// validateAccelerationStructureActions validates the acceleration structure
+// builds and uses of the command buffers of a Submit call, in submission
+// order, assigning build indices (Rust validate_acceleration_structure_actions).
+// Runs after every command buffer passed validateCommandBufferForSubmit, so a
+// rejected Submit assigns no build index.
+func (q *Queue) validateAccelerationStructureActions(commandBuffers []*encoder.CommandBuffer) error {
+	if q.device == nil || q.device.Core() == nil {
+		return nil
+	}
+	coreBuffers := make([]*core.CoreCommandBuffer, 0, len(commandBuffers))
+	for _, cb := range commandBuffers {
+		coreBuffers = append(coreBuffers, cb.Core())
+	}
+	if err := q.device.Core().ValidateAccelerationStructureActions(coreBuffers); err != nil {
+		return fmt.Errorf("wgpu: Submit: %w", err)
+	}
+	return nil
 }

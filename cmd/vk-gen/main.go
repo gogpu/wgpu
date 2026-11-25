@@ -579,7 +579,7 @@ func generateTypes(registry *Registry, outDir string) error {
 	fmt.Fprintln(f, "type PerformanceCounterResultKHR [8]byte // Union: int32, int64, uint32, uint64, float32, float64")
 	fmt.Fprintln(f, "type DeviceOrHostAddressKHR uintptr // Union: deviceAddress or hostAddress")
 	fmt.Fprintln(f, "type DeviceOrHostAddressConstKHR uintptr // Union: deviceAddress or hostAddress")
-	fmt.Fprintln(f, "type AccelerationStructureGeometryDataKHR [64]byte // Union: triangles, aabbs, instances")
+	fmt.Fprintln(f, "type AccelerationStructureGeometryDataKHR [8]uint64 // Union: triangles, aabbs, instances (8-byte aligned)")
 	fmt.Fprintln(f, "type AccelerationStructureMotionInstanceDataNV [144]byte // Union: static, matrix, srt instances")
 	fmt.Fprintln(f, "type ClusterAccelerationStructureOpInputNV uintptr // Union: various cluster inputs")
 	fmt.Fprintln(f, "type DescriptorDataEXT uintptr // Union: descriptor data variants")

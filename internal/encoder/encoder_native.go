@@ -226,6 +226,11 @@ func (e *CommandEncoder) TrackBindGroup(bg *resource.BindGroup) {
 		e.usedBindGroups = make(map[*resource.BindGroup]struct{})
 	}
 	e.usedBindGroups[bg] = struct{}{}
+	if e.core != nil {
+		for _, tlas := range bg.BoundTlases() {
+			e.core.RecordTlasUse(tlas)
+		}
+	}
 }
 
 // trackQuerySet records a query set reference for submit-time validation and,
@@ -914,6 +919,9 @@ func (e *CommandEncoder) DiscardEncoding() {
 // which runs before the trackers holding the resources drop.
 func (e *CommandEncoder) discard() {
 	e.returnEncoderToPool(e.core.DiscardHAL())
+	// No command buffer will use the acceleration structure scratch and
+	// staging buffers.
+	e.core.DestroyTempBuffers()
 	for _, ref := range e.trackedRefs {
 		ref.Drop()
 	}
@@ -1173,6 +1181,9 @@ func (cb *CommandBuffer) Release() {
 			cb.halEncoder = nil
 		}
 	}
+	// The command buffer will not run: free its acceleration structure
+	// scratch and staging buffers.
+	cb.core.DestroyTempBuffers()
 	// Drop tracked resource refs.
 	for _, ref := range cb.trackedRefs {
 		ref.Drop()

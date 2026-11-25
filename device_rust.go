@@ -176,6 +176,9 @@ func (d *Device) CreateBindGroup(desc *BindGroupDescriptor) (*BindGroup, error) 
 	if desc == nil {
 		return nil, fmt.Errorf("wgpu: bind group descriptor is nil")
 	}
+	if err := rejectAccelerationStructureEntries(desc.Entries); err != nil {
+		return nil, err
+	}
 	var rLayout *rwgpu.BindGroupLayout
 	if desc.Layout != nil {
 		rLayout = desc.Layout.impl.Rust()

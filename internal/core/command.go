@@ -124,6 +124,18 @@ type CommandBufferMutable struct {
 	// activePass is the current pass encoder (if any).
 	// This is either *CoreRenderPassEncoder or *CoreComputePassEncoder.
 	activePass any
+
+	// asActions are the acceleration structure builds and TLAS uses recorded
+	// by this command buffer, in order, for submit-time validation.
+	//
+	// Reference: wgpu-core command/mod.rs CommandBufferMutable.as_actions
+	asActions []asAction
+
+	// tempBuffers are internal HAL buffers (AS build scratch and instance
+	// staging) that must outlive the GPU execution of this command buffer.
+	//
+	// Reference: wgpu-core command/mod.rs CommandBufferMutable.temp_resources
+	tempBuffers []hal.Buffer
 }
 
 // BufferUses tracks how a buffer is used within a command buffer.

@@ -40,6 +40,19 @@ func bufferUsageToVk(usage gputypes.BufferUsage) vk.BufferUsageFlags {
 		flags |= vk.BufferUsageFlags(vk.BufferUsageIndirectBufferBit)
 	}
 
+	// Ray tracing usages. Reference: Rust wgpu-hal conv.rs map_buffer_usage.
+	if usage&gputypes.BufferUsageAccelerationStructureScratch != 0 {
+		flags |= vk.BufferUsageFlags(vk.BufferUsageStorageBufferBit) |
+			vk.BufferUsageFlags(vk.BufferUsageShaderDeviceAddressBit)
+	}
+	if usage&(gputypes.BufferUsageBlasInput|gputypes.BufferUsageTlasInput) != 0 {
+		flags |= vk.BufferUsageFlags(vk.BufferUsageAccelerationStructureBuildInputReadOnlyBitKhr) |
+			vk.BufferUsageFlags(vk.BufferUsageShaderDeviceAddressBit)
+	}
+	if usage&gputypes.BufferUsageAccelerationStructureQuery != 0 {
+		flags |= vk.BufferUsageFlags(vk.BufferUsageTransferDstBit)
+	}
+
 	return flags
 }
 

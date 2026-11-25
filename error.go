@@ -63,6 +63,10 @@ var (
 	// ForceFallbackAdapter set when no CPU adapter is available, the software
 	// backend included.
 	ErrNoFallbackAdapter = core.ErrNoFallbackAdapter
+
+	// ErrUnsupported is returned for operations the active backend does not
+	// support, such as ray tracing on the Rust FFI and browser backends.
+	ErrUnsupported = errors.New("wgpu: operation not supported by this backend")
 )
 
 // Draw-time validation sentinel errors.

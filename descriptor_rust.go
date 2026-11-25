@@ -215,6 +215,8 @@ type BindGroupEntry struct {
 	Size        uint64
 	Sampler     *Sampler
 	TextureView *TextureView
+	// AccelerationStructure is not supported by this backend.
+	AccelerationStructure *Tlas
 }
 
 // RenderPipelineDescriptor describes a render pipeline.

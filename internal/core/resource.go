@@ -188,6 +188,10 @@ type Device struct {
 	// on the first stencil upload that needs them (StencilBlitResources).
 	// A pointer, so Device stays copyable for the ID-based API.
 	stencilBlit *stencilBlitSlot
+
+	// rayTracing holds the acceleration structure build counter used for
+	// submit-time validation. nil for devices without HAL integration.
+	rayTracing *deviceRayTracingState
 }
 
 // Backend returns the backend type of the device's adapter.
@@ -232,6 +236,7 @@ func NewDevice(
 		destroyQueue:   NewDestroyQueue(),
 		tracker:        NewDeviceTracker(),
 		stencilBlit:    &stencilBlitSlot{},
+		rayTracing:     newDeviceRayTracingState(),
 		Label:          label,
 		Features:       features,
 		Limits:         limits,

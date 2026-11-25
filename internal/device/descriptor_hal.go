@@ -35,14 +35,16 @@ type BindGroupDescriptor struct {
 }
 
 // BindGroupEntry is one binding of an internal bind group descriptor. Exactly
-// one of Buffer, Sampler or TextureView is set, as in the public entry.
+// one of Buffer, Sampler, TextureView or AccelerationStructure is set, as in
+// the public entry.
 type BindGroupEntry struct {
-	Binding     uint32
-	Buffer      *resource.Buffer
-	Offset      uint64
-	Size        uint64
-	Sampler     *resource.Sampler
-	TextureView *resource.TextureView
+	Binding               uint32
+	Buffer                *resource.Buffer
+	Offset                uint64
+	Size                  uint64
+	Sampler               *resource.Sampler
+	TextureView           *resource.TextureView
+	AccelerationStructure *resource.Tlas
 }
 
 // RenderPipelineExtras carries what the HAL render pipeline descriptor cannot:

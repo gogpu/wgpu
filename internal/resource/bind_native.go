@@ -97,6 +97,10 @@ func bindGroupLayoutEntriesEqual(a, b *gputypes.BindGroupLayoutEntry) bool {
 	if !optionalEqual(a.StorageTexture, b.StorageTexture) {
 		return false
 	}
+	// Compare AccelerationStructure pointer fields by value.
+	if !optionalEqual(a.AccelerationStructure, b.AccelerationStructure) {
+		return false
+	}
 	return true
 }
 
@@ -277,6 +281,11 @@ type BindGroup struct {
 	// boundTextures holds references to textures bound in this bind group (VAL-A6).
 	// Used at Submit time to verify that referenced textures are still alive.
 	boundTextures []*Texture
+	// boundTlases holds the acceleration structures bound in this bind group.
+	// The bind group holds a reference on each (dropped when its HAL bind
+	// group is destroyed). Setting the bind group records a TLAS use on the
+	// encoder for submit-time validation (Rust AsAction::UseTlas).
+	boundTlases []*core.Tlas
 	// usages are the buffer and texture usages of the bound resources.
 	// Setting the bind group merges them into the render pass's usage scope,
 	// or into the usage scope of each dispatch whose pipeline uses the group,
@@ -307,6 +316,7 @@ type BindGroupInit struct {
 	Ref                    *core.ResourceRef
 	BoundBuffers           []*Buffer
 	BoundTextures          []*Texture
+	BoundTlases            []*core.Tlas
 	Usages                 *core.BindGroupUsages
 }
 
@@ -324,6 +334,7 @@ func NewBindGroup(init *BindGroupInit) *BindGroup {
 		ref:                    init.Ref,
 		boundBuffers:           init.BoundBuffers,
 		boundTextures:          init.BoundTextures,
+		boundTlases:            init.BoundTlases,
 		usages:                 init.Usages,
 	}
 	g.armCleanup(init.Label)
@@ -423,6 +434,14 @@ func (g *BindGroup) BoundTextures() []*Texture {
 		return nil
 	}
 	return g.boundTextures
+}
+
+// BoundTlases returns the acceleration structures bound in the group, or nil.
+func (g *BindGroup) BoundTlases() []*core.Tlas {
+	if g == nil {
+		return nil
+	}
+	return g.boundTlases
 }
 
 // Usages returns the buffer and texture usages of the bound resources.

@@ -120,6 +120,8 @@ type BindGroupEntry struct {
 	Size        uint64
 	Sampler     *Sampler
 	TextureView *TextureView
+	// AccelerationStructure is not supported in the browser (not part of WebGPU).
+	AccelerationStructure *Tlas
 }
 
 // PipelineLayoutDescriptor describes a pipeline layout.
